@@ -1,0 +1,1 @@
+[{"id":"F-05","stage":"s4","title":"点击劫持可行（Chromium 实测嵌入成功）","severity":"中","confidence":"确证","detail":"t06b_dom.txt 显示目标页已加载","claims":[{"file":"evidence/t06b_dom.txt","must_contain":"目标页已加载"}]}]

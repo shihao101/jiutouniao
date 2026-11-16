@@ -1,0 +1,2 @@
+[{"id":"F-12A","stage":"s2","title":"招生报考系统全站 HTTP 明文传输，登录凭据与考生 PII 可被嗅探","severity":"高","confidence":"确证","detail":"a"},
+ {"id":"F-12B","stage":"s2","title":"招生报考系统全站 HTTP 明文传输，登录凭据与考生 PII 可被嗅探","severity":"高","confidence":"确证","detail":"b"}]

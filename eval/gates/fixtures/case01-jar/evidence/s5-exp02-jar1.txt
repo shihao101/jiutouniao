@@ -1,0 +1,2 @@
+# Netscape HTTP Cookie File
+www.example.edu.tw	FALSE	/	FALSE	0	PHPSESSID	0123456789abcdef0123456789abcdef

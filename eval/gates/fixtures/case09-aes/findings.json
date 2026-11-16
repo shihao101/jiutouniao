@@ -1,0 +1,1 @@
+[{"id":"F-09","stage":"s4","title":"硬编码 AES 密钥可解密系统全部 API 加密响应","severity":"中","confidence":"确证","detail":"本地闭环 PoC 确证（自加密自解密），真实加密响应未捕获"}]

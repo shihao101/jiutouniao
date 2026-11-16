@@ -1,0 +1,39 @@
+{
+ "version": "5.3.0",
+ "description": "覆盖矩阵状态单一事实源（方案 §8.3/§11）：引擎 dispatch 白名单与映射规则、UI 标签来源",
+ "status_enum": [
+  "vulnerable",
+  "no_issue_found",
+  "ruled_out",
+  "waf_blocked",
+  "skipped",
+  "needs_follow_up"
+ ],
+ "observed_result_enum": [
+  "negative_valid",
+  "undetermined_timeout",
+  "blocked_ratelimit",
+  "blocked_waf",
+  "not_tested"
+ ],
+ "legacy_mapping": {
+  "premise_failed": {
+   "to": "needs_follow_up",
+   "reason": "precondition_missing"
+  },
+  "inconclusive": {
+   "to": "needs_follow_up",
+   "reason": "inconclusive"
+  },
+  "patched": {
+   "to": "needs_follow_up",
+   "reason": "patch_pending_retest",
+   "exception": "notes 含「复测通过/复测有效」→ no_issue_found（复测证据有效性仍受 E3 约束）"
+  }
+ },
+ "rules": [
+  "ruled_out/no_issue_found 必须 observed_result=negative_valid（E3）",
+  "precondition 理由码写 notes（reason=xxx），不塞 status",
+  "UI（labels.js）只展示规范六态"
+ ]
+}

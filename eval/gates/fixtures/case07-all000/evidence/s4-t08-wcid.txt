@@ -1,0 +1,3 @@
+[quote-single] payload=<1'> HTTP 000
+[quote-double] payload=<1"> HTTP 500
+[follow-up] HTTP 000

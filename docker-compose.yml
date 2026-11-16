@@ -1,0 +1,79 @@
+services:
+  jiutouniao:
+    # v2.5：基础系统 Kali Linux（默认全量底座 vxcontrol/kali-linux，可换 kalilinux/kali-rolling 最小底座）；
+    # 构建期代理按需注入：测试/本地环境经 docker-compose.override.yml 提供，默认直连（国内源已内置）
+    build:
+      context: .
+      # 构建期代理（npm/go/apt）按需注入：本地/测试环境在 docker-compose.override.yml 提供，
+      # 公开分发默认直连（国内源 goproxy.cn/npmmirror/多镜像 apt 已内置，实测直连更快）
+      args:
+        RUNTIME_BASE: ${RUNTIME_BASE:-vxcontrol/kali-linux:latest}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    image: jiutouniao:latest
+    container_name: jiutouniao
+    init: true # tini 作为 PID1 回收孤儿进程（扫描器子进程超时被杀后曾以僵尸态累积）
+    ports:
+      # v5.1.2a：可配置绑定——默认全网卡（远程访问场景，恢复 5.1.1 前行为）；
+      # 加固方式：.env 里设 JT_WEB_BIND=127.0.0.1（仅本机）并必改 ADMIN_PASSWORD；
+      # 公网暴露务必前置反代+TLS+强口令（tunnel profile 仅测试用）
+      - "${JT_WEB_BIND:-0.0.0.0}:8787:8787"
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      - ADMIN_USER=${ADMIN_USER:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - LLM_MOCK=${LLM_MOCK:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - HEXSTRIKE_URL=${HEXSTRIKE_URL:-}
+      - MAX_PROJECT_TOKENS=${MAX_PROJECT_TOKENS:-}
+      - PRICE_IN=${PRICE_IN:-}
+      - PRICE_OUT=${PRICE_OUT:-}
+      # v2.6 LLM 出口路径：默认直连（运行方针：代理仅限工具下载与容器构建）。
+      # 靶机测试流量由执行器剥离代理环境变量强制直连（引擎级保证）。
+      # 如需 LLM 走代理：LLM_PROXY=http://… docker compose up -d
+      - HTTP_PROXY=${LLM_PROXY-}
+      - HTTPS_PROXY=${LLM_PROXY-}
+      - http_proxy=${LLM_PROXY-}
+      - https_proxy=${LLM_PROXY-}
+      - NO_PROXY=localhost,127.0.0.1,::1,hexstrike
+      - no_proxy=localhost,127.0.0.1,::1,hexstrike
+      # v2.5 工具安装代理：仅 install_tool（apt/pip/git）与智能体外网下载类命令使用；
+      # 未设置时直连（Kali 源/国内 pip 源均可直连），测试环境经 docker-compose.override.yml 注入
+      - TOOL_PROXY=${TOOL_PROXY-}
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./projects:/app/projects          # 项目工作区 + bbolt 数据库（持久化）
+      - ./heads:/app/heads:ro             # 头提示词（宿主机可热编辑）
+      - ./skills:/app/skills:ro           # 技能库
+      - ./prompts:/app/prompts:ro         # 执行循环宪法
+    restart: unless-stopped
+
+  # 外网访问（可选）：docker compose --profile tunnel up -d
+  # 无需域名/账号，自动获得 trycloudflare.com 公网地址（docker compose logs tunnel 查看）
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: jiutouniao-tunnel
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://jiutouniao:8787
+    depends_on:
+      - jiutouniao
+    restart: unless-stopped
+
+  # hexstrike-ai 工具网关（可选）：docker compose --profile hexstrike up -d
+  # 启用后在 .env 设 HEXSTRIKE_URL=http://hexstrike:9023，九头鸟即可调用其 150+ 安全工具
+  hexstrike:
+    image: python:3.11-slim
+    container_name: jiutouniao-hexstrike
+    profiles: ["hexstrike"]
+    working_dir: /opt/hexstrike
+    command: bash -lc "pip install -q -r requirements.txt && python hexstrike_server.py --port 9023"
+    volumes:
+      - ../Agent/hexstrike-ai:/opt/hexstrike:ro
+    ports:
+      - "9023:9023"
+    restart: unless-stopped

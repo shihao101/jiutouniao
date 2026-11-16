@@ -1,0 +1,42 @@
+# 九头鸟 · 版本库排除清单（开源安全边界）
+# 原则：客户数据、部署密钥、运行时产物绝不入库。发布前先跑 scripts/sweep-sensitive.py 复核。
+
+# —— 客户/任务数据（最高敏感级）——
+projects/
+
+# —— 部署密钥与环境专属配置（分发用 config.example.json / pack.py 生成）——
+config.json
+.env
+docker-compose.override.yml
+
+# —— 密钥与运行时数据 ——
+*.db
+secret.key
+*.log
+
+# —— 构建产物与备份 ——
+# 注意：web/ 必须根目录锚定——server/internal/web/ 是 Go 源码，不能被忽略（v5.1.4 pack.py 同类教训）
+/dist/
+/web/
+/backup*
+*.zip
+
+# —— 历史构建二进制 ——
+/jiutouniao
+/jiutouniao-v*
+
+# —— 依赖目录（构建走 Dockerfile npm-install 回退路径或 pack.py zip 分发）——
+web-app/node_modules/
+
+# —— 运行时输出（评测报告/证据归档含内部任务标识，不入库）——
+eval/results/
+docs/evidence/
+
+# —— Python 缓存与系统文件 ——
+__pycache__/
+*.pyc
+.DS_Store
+
+# —— 本地工作区 ——
+.zcode/
+.jiutouniao/

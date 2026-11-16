@@ -1,0 +1,16 @@
+projects/
+jiutouniao.db
+server.log
+tunnel.log
+*.log
+.git/
+.jiutouniao/
+docs/
+README.md
+Makefile
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+.env
+backup*
+dist/

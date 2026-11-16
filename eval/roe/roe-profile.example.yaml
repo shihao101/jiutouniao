@@ -1,0 +1,22 @@
+# 九头鸟 ROE Profile（v4.6 §3 治理参数化）：机器可读，引擎/校验器消费。
+# 三档示例：靶场全开 / 生产口径 / 最小只读。校验：python3 eval/roe/roe_validate.py <file>
+profile: eval-fullrange            # 名字
+scope:
+  assets: ["127.0.0.1", "localhost"]
+  expansion: auto                  # auto-with-approval / deny
+windows: none                      # none=无限制；或 {start: "09:00", end: "18:00", tz: "+08:00"}
+write_policy: full                 # full=靶场口径；existence-proof=生产口径
+waf_policy:
+  offline_challenge: allow
+  rotation: unlimited
+ratelimit:
+  max_conn_per_s: 50
+  cooldown_protocol: full-silence  # full-silence / canary-exp
+identity:
+  auto_register: deny              # v5.1 默认 deny：注册面只评估不执行（身份改向客户索取，identity-bootstrapping 一a节）；allow=客户书面授权后可自建测试账号（S7 清理）
+  cred_attack:
+    dict_size: 20
+    lockout_aware: true
+outbound:
+  residential_proxy: allow
+  oob_callback: allow

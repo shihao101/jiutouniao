@@ -1,0 +1,1 @@
+[{"id":"F-03","stage":"s4","title":"TLSv1.0 被拒（alert protocol version 70）","severity":"低","confidence":"确证","detail":"复验 evidence/s8-tls-verify.log","claims":[{"file":"evidence/s8-tls-verify.log","must_contain":"alert"}]}]

@@ -1,0 +1,1 @@
+[{"id":"F-06","stage":"s5","title":"身份证号注册状态预言机判别有效","severity":"中","confidence":"确证","detail":"阴性对照验证有效","claims":[{"file":"evidence/oracle.txt","must_contain":"校验码合法对照"}]}]

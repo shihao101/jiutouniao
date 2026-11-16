@@ -1,0 +1,1 @@
+[{"id":"F-08","stage":"s2","title":"sendSMS 未授权可达（短信轰炸面）","severity":"中","confidence":"确证","detail":"接口可达性确证；服务端是否校验待 S4 单请求验证"}]

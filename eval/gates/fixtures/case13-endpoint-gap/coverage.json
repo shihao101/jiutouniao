@@ -1,0 +1,3 @@
+[
+  {"endpoint": "https://ehall.example.edu.cn/jsonp/userInfo.json", "param": "", "vuln_class": "鉴权差分", "status": "no_issue_found", "notes": "hasLogin:false 门控 evidence/m1.txt", "observed_result": "negative_valid"}
+]

@@ -1,0 +1,4 @@
+/jsonp/userInfo.json
+/jsonp/serviceCenterApp.json
+/jsonp/getTaskCount.do
+/jsonp/favoriteApp

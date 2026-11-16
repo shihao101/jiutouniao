@@ -1,0 +1,3 @@
+A123456789 -> true
+ZZ9 -> false
+B987654321 -> false

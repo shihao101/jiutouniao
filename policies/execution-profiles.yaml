@@ -1,0 +1,30 @@
+# v5.3.0 方案 §9：双运行模式与动作边界（单一事实源）
+# 引擎/审批默认 production_safe；isolated_lab 须项目/ROE 显式声明且具备快照回滚。
+execution_profiles:
+  production_safe:
+    applies_to: 客户生产/真实业务目标（默认）
+    allowed:
+      - 被动情报与低速只读探测
+      - 匿名门控判定（GET/OPTIONS）
+      - 无害 canary 与受控 OOB 存在性证明
+      - RCE 可达性以无害回显/随机标记证明
+    forbidden:
+      - 植入 webshell/内存马/持久化/隧道/新增账号
+      - 上传可执行文件
+      - 批量导出业务数据/凭据
+      - 修改/删除/覆盖目标数据（含自建行——登记移交）
+      - 真实订单/支付/短信状态变更（仅测试租户/合成对象）
+    cleanup: 自建工件只登记移交（快照回滚不适用于生产）
+    evidence: 存在性证明（count/哈希/截断/掩码）
+  isolated_lab:
+    applies_to: 客户专用隔离靶场/可快照回滚环境（须显式声明）
+    allowed:
+      - production_safe 全部允许项
+      - 完整 PoC 链与受控写操作（预批准清单内）
+      - 合成低权/高权账号与测试租户
+    forbidden:
+      - 向公网分发测试产物
+      - 接触生产数据
+    cleanup: 快照恢复/环境重置（恢复成功须只读验证）
+    evidence: 可记录真实能力与权限边界
+gate: 引擎按 execution_profile+scope+risk+approval 每工具动作校验；缺省 production_safe

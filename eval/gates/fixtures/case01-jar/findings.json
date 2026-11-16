@@ -1,0 +1,1 @@
+[{"id":"F-01","stage":"s5","title":"Admin 验证码绕过不依赖会话 Cookie","severity":"高","confidence":"确证","detail":"evidence/s5-exp02-jar1.txt 为空 jar，客户端未获得任何会话 Cookie，单请求直达"}]

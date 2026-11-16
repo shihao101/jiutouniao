@@ -1,0 +1,1 @@
+[{"id":"F-C1","stage":"s4","title":"PostAll.php ofid 参数 SQL 注入（布尔盲注确证）","severity":"高","confidence":"确证","detail":"TRUE/FALSE 对照 evidence/s8-sqli-true.txt 与 evidence/s8-sqli-false.txt，database()=NANHUA","claims":[{"file":"evidence/s8-sqli-true.txt","must_contain":"94068B"}]}]

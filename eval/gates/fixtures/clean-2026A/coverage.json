@@ -1,0 +1,1 @@
+[{"endpoint":"https://www.example.com/postall.php","param":"ofid","vuln_class":"注入","status":"ruled_out","notes":"ofid=0/9/-1 实测无差异 evidence/neg.txt","observed_result":"negative_valid"}]

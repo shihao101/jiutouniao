@@ -1,0 +1,1 @@
+[{"id":"F-11","stage":"s6","title":"/console/ ShellInABox 未认证可分配会话","severity":"高","confidence":"确证","detail":"EV-001 分配原语确证；续接路径待验证（官方客户端 400 Session closed），影响上限为资源消耗"}]

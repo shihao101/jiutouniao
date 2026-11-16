@@ -1,0 +1,1 @@
+[{"id":"F-07","stage":"s4","title":"wcId 探针触发连接级阻断","severity":"中","confidence":"确证","detail":"第 3 个请求后 12 个探针全部 HTTP 000（阈值≈3 个异常请求），证据 evidence/s4-t08-wcid.txt"}]

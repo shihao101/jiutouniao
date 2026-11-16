@@ -1,0 +1,2294 @@
+{
+ "version": "5.3.2",
+ "generated": "2026-11-14",
+ "description": "机器可读技能清单（v5.3.2：gen_skill_manifest.py 单源生成——aliases/depends_on/handoff_to/stage_fit/lab_only 全量结构化，引擎 SkillRegistry 消费；重新生成请跑 scripts/gen_skill_manifest.py）",
+ "route_file": "skills/00-router.md",
+ "count": 107,
+ "skills": [
+  {
+   "id": "00-router",
+   "file": "skills/00-router.md",
+   "title": "技能路由器（资产类型/症状 → 技能映射总索引）",
+   "tags": [
+    "路由",
+    "索引",
+    "总览",
+    "s2",
+    "s3",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "路由",
+    "技能索引",
+    "总索引"
+   ],
+   "handoff_to": [
+    "project-warmup",
+    "scan-tiering"
+   ],
+   "stage_fit": [
+    "s2",
+    "s3",
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "ad-attack",
+   "file": "skills/ad-attack.md",
+   "title": "AD 域渗透手册（枚举/Kerberoast/ACL/Relay/委派/ADCS/GPP/LAPS/域信任）",
+   "tags": [
+    "ad",
+    "域",
+    "kerberos",
+    "kerberoast",
+    "dcsync",
+    "adcs",
+    "relay",
+    "委派",
+    "s6"
+   ],
+   "depends_on": [
+    "intranet-lateral",
+    "tool-channels"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "anon-attack-surface",
+   "file": "skills/anon-attack-surface.md",
+   "title": "匿名可达高危面总表（未授权面板/接口/泄露 一页速查）",
+   "tags": [
+    "未授权",
+    "actuator",
+    "druid",
+    "swagger",
+    "nacos",
+    "暴露面",
+    "s2",
+    "s4"
+   ],
+   "depends_on": [
+    "devops-exposed",
+    "middleware-web"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "api-doc-leak",
+   "file": "skills/api-doc-leak.md",
+   "title": "API 文档泄露手册（Swagger/OpenAPI/Knife4j/Dubbo/Actuator 文档面）",
+   "tags": [
+    "swagger",
+    "openapi",
+    "api文档",
+    "knife4j",
+    "dubbo",
+    "枚举",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "api-idor",
+   "file": "skills/api-idor.md",
+   "title": "API 测试与越权（IDOR/BOLA）手册",
+   "tags": [
+    "api",
+    "idor",
+    "bola",
+    "越权",
+    "接口"
+   ],
+   "aliases": [
+    "idor",
+    "越权对象"
+   ],
+   "depends_on": [
+    "authz-diff"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-dynamic-audit",
+   "file": "skills/app-dynamic-audit.md",
+   "title": "APP 动态审计实操手册（设备通道/抓包/插桩）",
+   "tags": [
+    "app",
+    "android",
+    "frida",
+    "mitmproxy",
+    "动态",
+    "specB1"
+   ],
+   "depends_on": [
+    "app-static-audit"
+   ],
+   "stage_fit": [
+    "specB1"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-hardening-bypass",
+   "file": "skills/app-hardening-bypass.md",
+   "title": "APP 加固识别与脱壳手册（梆梆/爱加密/乐固/360/腾讯）",
+   "tags": [
+    "app",
+    "加固",
+    "脱壳",
+    "frida",
+    "packer",
+    "s4",
+    "b1"
+   ],
+   "depends_on": [
+    "app-static-audit"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-ios-audit",
+   "file": "skills/app-ios-audit.md",
+   "title": "iOS APP 审计手册（IPA/class-dump/keychain/ATS）",
+   "tags": [
+    "ios",
+    "ipa",
+    "ipad",
+    "app",
+    "越狱检测",
+    "s4",
+    "b1"
+   ],
+   "depends_on": [
+    "app-static-audit"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-privacy-compliance",
+   "file": "skills/app-privacy-compliance.md",
+   "title": "APP/小程序个人信息合规检测手册（PIPL/个保法视角）",
+   "tags": [
+    "app",
+    "隐私",
+    "合规",
+    "pipl",
+    "个人信息",
+    "s4",
+    "b1",
+    "b2"
+   ],
+   "depends_on": [
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-static-audit",
+   "file": "skills/app-static-audit.md",
+   "title": "APP 静态审计手册（jadx/frida）",
+   "tags": [
+    "app",
+    "android",
+    "静态",
+    "frida",
+    "specB1"
+   ],
+   "stage_fit": [
+    "specB1"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "appliance-mgmt-playbook",
+   "file": "skills/appliance-mgmt-playbook.md",
+   "title": "\"安全设备/管理面剧本（WASM 协议还原/反脚本绕过/降档扫描）\"",
+   "tags": [
+    "对抗",
+    "设备",
+    "管理面",
+    "WASM",
+    "加密",
+    "behavior"
+   ],
+   "depends_on": [
+    "browser-auth"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "auth-bypass",
+   "file": "skills/auth-bypass.md",
+   "title": "认证与会话攻击手册",
+   "tags": [
+    "认证",
+    "会话",
+    "jwt",
+    "oauth",
+    "爆破"
+   ],
+   "aliases": [
+    "认证绕过",
+    "登录绕过"
+   ],
+   "depends_on": [
+    "browser-auth"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "auth-flow-deep",
+   "file": "skills/auth-flow-deep.md",
+   "title": "OAuth/OIDC/SAML 认证流程深度手册",
+   "tags": [
+    "oauth",
+    "oidc",
+    "saml",
+    "redirect_uri",
+    "state",
+    "pkce",
+    "s4"
+   ],
+   "depends_on": [
+    "jwt-crypto"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "authz-diff",
+   "file": "skills/authz-diff.md",
+   "title": "\"鉴权差分扫描器（阳性对照法/500 可达判据/家族复查）\"",
+   "tags": [
+    "对抗",
+    "鉴权",
+    "差分",
+    "白名单遗漏",
+    "未授权",
+    "s4"
+   ],
+   "aliases": [
+    "越权",
+    "未授权",
+    "水平越权",
+    "idor"
+   ],
+   "depends_on": [
+    "api-idor"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "browser-auth",
+   "file": "skills/browser-auth.md",
+   "title": "浏览器认证实战手册（真实浏览器登录 + CLI 接管混合流水线）",
+   "tags": [
+    "认证",
+    "浏览器",
+    "加密协议",
+    "挑战值",
+    "验证码",
+    "wasm",
+    "browser-kit",
+    "s5",
+    "s6"
+   ],
+   "depends_on": [
+    "auth-bypass"
+   ],
+   "stage_fit": [
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cache-poisoning",
+   "file": "skills/cache-poisoning.md",
+   "title": "Web 缓存投毒/缓存欺骗手册（unkeyed header 发现）",
+   "tags": [
+    "缓存",
+    "投毒",
+    "deception",
+    "vary",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "capability-primitive-search",
+   "file": "skills/capability-primitive-search.md",
+   "title": "能力原语与状态空间搜索（低危凑链成 RCE/接管）",
+   "tags": [
+    "方法论",
+    "凑链",
+    "能力原语",
+    "RCE",
+    "攻击链",
+    "s4",
+    "s5",
+    "s6"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "channel-snapshot",
+   "file": "skills/channel-snapshot.md",
+   "title": "\"通道资产固化标准动作（cookie/UA/挑战态快照与重放）\"",
+   "tags": [
+    "对抗",
+    "通道",
+    "cookie",
+    "快照",
+    "瑞数",
+    "WAF",
+    "s2",
+    "s5",
+    "s6"
+   ],
+   "depends_on": [
+    "browser-auth"
+   ],
+   "stage_fit": [
+    "s2",
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "clickjacking",
+   "file": "skills/clickjacking.md",
+   "title": "点击劫持（透明 iframe/多步劫持/frame-busting 绕过）",
+   "tags": [
+    "clickjacking",
+    "点击劫持",
+    "前端",
+    "s4"
+   ],
+   "depends_on": [
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "closed-site-playbook",
+   "file": "skills/closed-site-playbook.md",
+   "title": "\"全封闭站点剧本（403 白名单穷尽矩阵/负结果入账）\"",
+   "tags": [
+    "对抗",
+    "403",
+    "白名单",
+    "封闭站",
+    "绕过",
+    "behavior"
+   ],
+   "depends_on": [
+    "payload-mutation-algebra"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cloud-security",
+   "file": "skills/cloud-security.md",
+   "title": "云安全测试手册（元数据/IAM/对象存储）",
+   "tags": [
+    "云",
+    "iam",
+    "oss",
+    "元数据",
+    "s4",
+    "s6"
+   ],
+   "depends_on": [
+    "privesc-checklist"
+   ],
+   "stage_fit": [
+    "s4",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cmdi-deep",
+   "file": "skills/cmdi-deep.md",
+   "title": "命令注入深度手册（管道/分隔符/盲注/带外）",
+   "tags": [
+    "cmdi",
+    "命令注入",
+    "rce",
+    "回连",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "命令注入",
+    "rce"
+   ],
+   "depends_on": [
+    "oob-interactsh"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cms-playbook",
+   "file": "skills/cms-playbook.md",
+   "title": "CMS/框架武器化手册（ThinkPHP/WordPress/PHP 通用）",
+   "tags": [
+    "cms",
+    "thinkphp",
+    "wordpress",
+    "php",
+    "s4"
+   ],
+   "depends_on": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cors-redirect-hostheader",
+   "file": "skills/cors-redirect-hostheader.md",
+   "title": "CORS / 开放重定向 / Host 头注入三合一手册",
+   "tags": [
+    "cors",
+    "redirect",
+    "host-header",
+    "低垂果实",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "crlf-injection",
+   "file": "skills/crlf-injection.md",
+   "title": "CRLF 注入（头拆分/会话固定/缓存投毒/Unicode 绕过）",
+   "tags": [
+    "CRLF",
+    "头注入",
+    "会话固定",
+    "s4"
+   ],
+   "depends_on": [
+    "cors-redirect-hostheader"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "crypto-offensive",
+   "file": "skills/crypto-offensive.md",
+   "title": "\"前端加密/签名协议还原与请求伪造（v4.6 W3：破解→投递→取证一体化）\"",
+   "tags": [
+    "对抗",
+    "加密",
+    "签名",
+    "SM4",
+    "WASM",
+    "投递",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "authz-diff"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "csv-injection",
+   "file": "skills/csv-injection.md",
+   "title": "公式注入手册（CSV/Excel 导出场景）",
+   "tags": [
+    "csv",
+    "公式注入",
+    "excel",
+    "导出",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cve-weaponization",
+   "file": "skills/cve-weaponization.md",
+   "title": "版本→已知漏洞武器化手册（searchsploit/NVD/验证分级）",
+   "tags": [
+    "cve",
+    "searchsploit",
+    "exploit-db",
+    "版本",
+    "nvd",
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "aliases": [
+    "cve",
+    "漏洞武器化",
+    "poc"
+   ],
+   "depends_on": [
+    "nuclei-usage"
+   ],
+   "stage_fit": [
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "database-postex",
+   "file": "skills/database-postex.md",
+   "title": "数据库后渗透手册（redis/mysql/mssql/pgsql/mongo）",
+   "tags": [
+    "database",
+    "redis",
+    "mysql",
+    "mssql",
+    "pgsql",
+    "后渗透",
+    "s6"
+   ],
+   "depends_on": [
+    "privesc-checklist"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "dependency-confusion",
+   "file": "skills/dependency-confusion.md",
+   "title": "依赖混淆（内部包名侦察/无害 PoC/多生态解析差异）",
+   "tags": [
+    "供应链",
+    "依赖混淆",
+    "CI",
+    "侦察",
+    "s2",
+    "s4"
+   ],
+   "depends_on": [
+    "devops-exposed"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "devops-exposed",
+   "file": "skills/devops-exposed.md",
+   "title": "DevOps 暴露面手册（GitLab/Jenkins/ArgoCD/K8s 面板/Nexus/SonarQube）",
+   "tags": [
+    "devops",
+    "gitlab",
+    "jenkins",
+    "argocd",
+    "k8s",
+    "ci-cd",
+    "s4"
+   ],
+   "depends_on": [
+    "middleware-web"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "dotnet-family",
+   "file": "skills/dotnet-family.md",
+   "title": ".NET 生态武器化手册（ViewState/反序列化/IIS 面）",
+   "tags": [
+    "dotnet",
+    "aspnet",
+    "viewstate",
+    "machinekey",
+    "iis",
+    "s4"
+   ],
+   "depends_on": [
+    "path-traversal"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "edge-vpn-bastion",
+   "file": "skills/edge-vpn-bastion.md",
+   "title": "边界设备 / SSL VPN / 堡垒机打点（国内授权测试第一入口）",
+   "tags": [
+    "边界设备",
+    "VPN",
+    "堡垒机",
+    "JumpServer",
+    "指纹",
+    "CVE",
+    "s2",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "cve-weaponization",
+    "weak-cred-bruteforce"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "edu-family",
+   "file": "skills/edu-family.md",
+   "title": "\"教育信息化族剧本（金智 ehall/正方/青果教务 + VSB/博达网站群 + 超星）\"",
+   "tags": [
+    "教育",
+    "ehall",
+    "金智",
+    "正方",
+    "vsb",
+    "网站群",
+    "未授权",
+    "s3",
+    "s4"
+   ],
+   "aliases": [
+    "教育",
+    "高校"
+   ],
+   "depends_on": [
+    "anon-attack-surface"
+   ],
+   "stage_fit": [
+    "s3",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "edu-src-playbook",
+   "file": "skills/edu-src-playbook.md",
+   "title": "教育/高校行业攻击面 SOP（fofa 收缩链+四件套+厂商默认密码）",
+   "tags": [
+    "教育",
+    "高校",
+    "行业",
+    "SOP",
+    "信息收集",
+    "弱口令",
+    "s1",
+    "s2",
+    "s4"
+   ],
+   "depends_on": [
+    "edge-vpn-bastion"
+   ],
+   "stage_fit": [
+    "s1",
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "evidence-standard",
+   "file": "skills/evidence-standard.md",
+   "title": "高危漏洞确证判据表（per-class 证据标准 + 误报反例清单）",
+   "tags": [
+    "证据",
+    "确证",
+    "防误报",
+    "判据",
+    "s4",
+    "s5",
+    "s8"
+   ],
+   "aliases": [
+    "证据",
+    "取证标准"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5",
+    "s8"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "extra-injection-types",
+   "file": "skills/extra-injection-types.md",
+   "title": "扩展注入面（SSI/LDAP/XPath/LaTeX/变量覆盖/编码变换）",
+   "tags": [
+    "注入",
+    "SSI",
+    "LDAP",
+    "XPath",
+    "LaTeX",
+    "编码变换",
+    "s4"
+   ],
+   "depends_on": [
+    "injection-points"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "framework-priors",
+   "file": "skills/framework-priors.md",
+   "title": "\"K2 框架先验卡（首批四件：指纹→先验假设→首查清单）\"",
+   "tags": [
+    "框架先验",
+    "K2",
+    "指纹",
+    "先验假设",
+    "s2",
+    "s3",
+    "首查"
+   ],
+   "aliases": [
+    "框架指纹",
+    "先验"
+   ],
+   "depends_on": [
+    "gateway-filter-playbook"
+   ],
+   "stage_fit": [
+    "s2",
+    "s3"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "frontend-sca",
+   "file": "skills/frontend-sca.md",
+   "title": "前端与依赖漏洞手册（JS 依赖 SCA · source map · bundle 情报）",
+   "tags": [
+    "前端",
+    "依赖",
+    "retire.js",
+    "sourcemap",
+    "s2",
+    "s4"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "gateway-filter-playbook",
+   "file": "skills/gateway-filter-playbook.md",
+   "title": "\"网关过滤器架构目标剧本（阳性对照差分法/500 可达判据）\"",
+   "tags": [
+    "对抗",
+    "网关",
+    "鉴权",
+    "差分",
+    "白名单遗漏",
+    "renren",
+    "behavior"
+   ],
+   "aliases": [
+    "网关",
+    "waf绕过",
+    "边界"
+   ],
+   "depends_on": [
+    "api-idor"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "go-backend",
+   "file": "skills/go-backend.md",
+   "title": "Go 生态后端武器化手册（pprof/etcd/consul/Prometheus/Grafana/Harbor）",
+   "tags": [
+    "go",
+    "golang",
+    "pprof",
+    "etcd",
+    "consul",
+    "prometheus",
+    "grafana",
+    "harbor",
+    "grpc",
+    "s4"
+   ],
+   "depends_on": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "graphql-websocket",
+   "file": "skills/graphql-websocket.md",
+   "title": "GraphQL 与 WebSocket 手册（内省/批查询/CSWSH）",
+   "tags": [
+    "graphql",
+    "websocket",
+    "introspection",
+    "cswsh",
+    "s4"
+   ],
+   "depends_on": [
+    "api-idor"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "hpp-http-parameter-pollution",
+   "file": "skills/hpp-http-parameter-pollution.md",
+   "title": "HTTP 参数污染 HPP（框架行为矩阵+组合拳）",
+   "tags": [
+    "HPP",
+    "参数污染",
+    "WAF绕过",
+    "s4"
+   ],
+   "depends_on": [
+    "injection-points"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "hypothesis-0day",
+   "file": "skills/hypothesis-0day.md",
+   "title": "0day 假设驱动测试工作流（异常→假设→差异→定性）",
+   "tags": [
+    "0day",
+    "方法论",
+    "差异测试",
+    "假设",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "0day",
+    "nday假设"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "hypothesis-matrix",
+   "file": "skills/hypothesis-matrix.md",
+   "title": "\"K3 假设模式库（v4.8 筛查矩阵 27 类×三态判定）\"",
+   "tags": [
+    "假设模式",
+    "筛查矩阵",
+    "威胁建模",
+    "s3",
+    "三态判定",
+    "K3"
+   ],
+   "aliases": [
+    "筛查矩阵",
+    "k3"
+   ],
+   "depends_on": [
+    "framework-priors",
+    "industry-templates"
+   ],
+   "stage_fit": [
+    "s3"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "identity-bootstrapping",
+   "file": "skills/identity-bootstrapping.md",
+   "title": "无凭证身份获取路线图（从匿名到第一身份的决策树）",
+   "tags": [
+    "无凭证",
+    "身份",
+    "注册",
+    "验证码",
+    "默认凭据",
+    "jwt",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "身份获取",
+    "账号获取"
+   ],
+   "depends_on": [
+    "browser-auth",
+    "injection-points",
+    "session-state-chain",
+    "weak-cred-bruteforce"
+   ],
+   "handoff_to": [
+    "session-state-chain"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "idp-family",
+   "file": "skills/idp-family.md",
+   "title": "\"统一身份认证族剧本（CAS/Shibboleth IdP/深澜 srun/企业 SSO）\"",
+   "tags": [
+    "cas",
+    "shibboleth",
+    "sso",
+    "idp",
+    "统一身份认证",
+    "未授权",
+    "s3",
+    "s4"
+   ],
+   "aliases": [
+    "统一身份",
+    "cas",
+    "shibboleth"
+   ],
+   "depends_on": [
+    "auth-flow-deep"
+   ],
+   "stage_fit": [
+    "s3",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "industry-templates",
+   "file": "skills/industry-templates.md",
+   "title": "\"K1 行业优先级模板（六行业：升格优先级+数据类具象）\"",
+   "tags": [
+    "行业模板",
+    "K1",
+    "优先级",
+    "数据类",
+    "医疗",
+    "金融",
+    "教育",
+    "政务",
+    "s3"
+   ],
+   "depends_on": [
+    "hypothesis-matrix"
+   ],
+   "stage_fit": [
+    "s3"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "injection-points",
+   "file": "skills/injection-points.md",
+   "title": "注入点完整性手册（宪法「深度测试纪律」第 3 条依赖）",
+   "tags": [
+    "注入点",
+    "arjun",
+    "header",
+    "path",
+    "cookie",
+    "隐藏参数",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "intel-factory",
+   "file": "skills/intel-factory.md",
+   "title": "\"JS 情报工厂标准管线（v4.6 W2：chunk 全量/配置必取/sourcemap 还原/四件套产出）\"",
+   "tags": [
+    "侦察",
+    "bundle",
+    "sourcemap",
+    "情报",
+    "s2",
+    "s3"
+   ],
+   "depends_on": [
+    "frontend-sca"
+   ],
+   "stage_fit": [
+    "s2",
+    "s3"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "intranet-lateral",
+   "file": "skills/intranet-lateral.md",
+   "title": "内网信息收集与横向移动手册",
+   "tags": [
+    "内网",
+    "横向",
+    "后渗透",
+    "s6"
+   ],
+   "depends_on": [
+    "privesc-checklist",
+    "tool-channels"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "java-deser-playbook",
+   "file": "skills/java-deser-playbook.md",
+   "title": "Java 反序列化武器化手册（Shiro/Fastjson/Log4j2/原生/WebLogic）",
+   "tags": [
+    "java",
+    "反序列化",
+    "shiro",
+    "fastjson",
+    "log4j",
+    "weblogic",
+    "s4"
+   ],
+   "depends_on": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "js-challenge-waf-playbook",
+   "file": "skills/js-challenge-waf-playbook.md",
+   "title": "\"JS 挑战型 WAF 对抗剧本（瑞数类：行为预算/通道矩阵/对策阶梯）\"",
+   "tags": [
+    "对抗",
+    "WAF",
+    "瑞数",
+    "js-challenge",
+    "浏览器",
+    "限速",
+    "behavior"
+   ],
+   "aliases": [
+    "js挑战",
+    "瑞数",
+    "waf挑战"
+   ],
+   "depends_on": [
+    "channel-snapshot"
+   ],
+   "handoff_to": [
+    "channel-snapshot"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "jwt-crypto",
+   "file": "skills/jwt-crypto.md",
+   "title": "JWT 与密码学实现审计手册",
+   "tags": [
+    "jwt",
+    "密码学",
+    "加密",
+    "认证"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "k8s-attack",
+   "file": "skills/k8s-attack.md",
+   "title": "Kubernetes/容器编排攻击（kubelet/SA token/RBAC/逃逸）",
+   "tags": [
+    "k8s",
+    "容器",
+    "云原生",
+    "逃逸",
+    "s4",
+    "s6"
+   ],
+   "depends_on": [
+    "cloud-security"
+   ],
+   "stage_fit": [
+    "s4",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "llm-agent-toolchain",
+   "file": "skills/llm-agent-toolchain.md",
+   "title": "LLM Agent 工具链滥用手册（Function Calling/MCP/插件越权实操）",
+   "tags": [
+    "llm",
+    "agent",
+    "function-calling",
+    "mcp",
+    "工具滥用",
+    "s4",
+    "a"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "llm-multimodal",
+   "file": "skills/llm-multimodal.md",
+   "title": "多模态注入手册（图片/PDF/OCR/音频/视频）",
+   "tags": [
+    "llm",
+    "多模态",
+    "注入",
+    "ocr",
+    "vision",
+    "s4",
+    "a"
+   ],
+   "depends_on": [
+    "rag-attack"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "llm-payloads",
+   "file": "skills/llm-payloads.md",
+   "title": "提示注入与越狱载荷库",
+   "tags": [
+    "llm",
+    "payload",
+    "越狱",
+    "提示注入"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "llm-top10",
+   "file": "skills/llm-top10.md",
+   "title": "OWASP LLM Top 10 测试矩阵（2025）",
+   "tags": [
+    "llm",
+    "ai",
+    "提示注入",
+    "越狱",
+    "rag",
+    "specA"
+   ],
+   "stage_fit": [
+    "specA"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "logic-csrf-deser",
+   "file": "skills/logic-csrf-deser.md",
+   "title": "业务逻辑滥用 · CSRF · 反序列化 检测与安全验证手册",
+   "tags": [
+    "csrf",
+    "逻辑",
+    "业务逻辑",
+    "反序列化",
+    "越权",
+    "竞态",
+    "支付",
+    "重置",
+    "s4"
+   ],
+   "aliases": [
+    "反序列化",
+    "csrf"
+   ],
+   "depends_on": [
+    "race-condition"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "logic-purchase-limit",
+   "file": "skills/logic-purchase-limit.md",
+   "title": "购买限制与订阅权益绕过（限购/首单/签约续费/订单复用）",
+   "tags": [
+    "逻辑",
+    "支付",
+    "限购",
+    "首单",
+    "订阅",
+    "权益",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "logic-csrf-deser",
+    "race-condition"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "logic-sms-otp-matrix",
+   "file": "skills/logic-sms-otp-matrix.md",
+   "title": "短信/邮箱验证码攻击矩阵（六路径互备+轰炸绕过变体）",
+   "tags": [
+    "短信",
+    "验证码",
+    "OTP",
+    "轰炸",
+    "逻辑",
+    "注册",
+    "改绑",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "auth-flow-deep",
+    "weak-cred-bruteforce"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "mail-postex",
+   "file": "skills/mail-postex.md",
+   "title": "邮件系统后渗透手册（OWA/EWS/Exchange/Mail Relay）",
+   "tags": [
+    "mail",
+    "owa",
+    "ews",
+    "exchange",
+    "smtp",
+    "relay",
+    "s6"
+   ],
+   "depends_on": [
+    "intranet-lateral"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "middleware-web",
+   "file": "skills/middleware-web.md",
+   "title": "中间件武器化速查手册（Tomcat/Nacos/Jenkins/Confluence/MinIO/Redis）",
+   "tags": [
+    "tomcat",
+    "nacos",
+    "jenkins",
+    "中间件",
+    "redis",
+    "s4"
+   ],
+   "depends_on": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "miniapp-audit",
+   "file": "skills/miniapp-audit.md",
+   "title": "小程序测试手册（wxapkg/云开发）",
+   "tags": [
+    "小程序",
+    "wxapkg",
+    "云开发",
+    "specB2"
+   ],
+   "depends_on": [
+    "miniapp-server"
+   ],
+   "stage_fit": [
+    "specB2"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "miniapp-server",
+   "file": "skills/miniapp-server.md",
+   "title": "小程序服务端攻击链手册（解包 API → 鉴权/签名/越权）",
+   "tags": [
+    "miniapp",
+    "小程序",
+    "api",
+    "签名",
+    "wxapkg",
+    "s4",
+    "b2"
+   ],
+   "depends_on": [
+    "api-idor"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "nuclei-usage",
+   "file": "skills/nuclei-usage.md",
+   "title": "nuclei 工程化使用手册",
+   "tags": [
+    "nuclei",
+    "扫描",
+    "模板",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "oa-family",
+   "file": "skills/oa-family.md",
+   "title": "国内 OA 家族武器化手册（致远/泛微/用友/通达/蓝凌）",
+   "tags": [
+    "oa",
+    "致远",
+    "seeyon",
+    "泛微",
+    "weaver",
+    "用友",
+    "通达",
+    "蓝凌",
+    "s4"
+   ],
+   "aliases": [
+    "oa",
+    "办公系统"
+   ],
+   "depends_on": [
+    "weak-cred-bruteforce"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "oob-interactsh",
+   "file": "skills/oob-interactsh.md",
+   "title": "OOB 回连双通道手册（盲注/SSRF/XXE 无回显验证）",
+   "tags": [
+    "oob",
+    "回连",
+    "interactsh",
+    "dnslog",
+    "盲注",
+    "s4",
+    "s5"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "parallel-execution",
+   "file": "skills/parallel-execution.md",
+   "title": "并行与后台执行手册（长任务后台化 · 单命令并行 · 超时预算）",
+   "tags": [
+    "并行",
+    "后台",
+    "异步",
+    "超时",
+    "速度",
+    "s2",
+    "s4",
+    "s5"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "password-offline",
+   "file": "skills/password-offline.md",
+   "title": "离线密码攻击与字典工程（hashcat/口令生成/撞库口径）",
+   "tags": [
+    "密码",
+    "hashcat",
+    "字典",
+    "离线破解",
+    "kerberoast",
+    "s5",
+    "s6"
+   ],
+   "depends_on": [
+    "weak-cred-bruteforce"
+   ],
+   "stage_fit": [
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "path-traversal",
+   "file": "skills/path-traversal.md",
+   "title": "路径穿越/任意文件读取手册（编码绕过/filter 流/归档）",
+   "tags": [
+    "lfi",
+    "穿越",
+    "文件读取",
+    "phpfilter",
+    "归档",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "payload-mutation-algebra",
+   "file": "skills/payload-mutation-algebra.md",
+   "title": "通用变异代数与绕过路径（过滤器指纹→系统化变体→fallback 链）",
+   "tags": [
+    "绕过",
+    "waf",
+    "编码",
+    "变异",
+    "fuzz",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "persistence",
+   "file": "skills/persistence.md",
+   "title": "权限维持与持久化演示（per-OS 清单 + 清理映射）",
+   "tags": [
+    "持久化",
+    "权限维持",
+    "清理",
+    "s6",
+    "s7"
+   ],
+   "aliases": [
+    "权限维持",
+    "后门驻留"
+   ],
+   "depends_on": [
+    "webshell-memshell"
+   ],
+   "stage_fit": [
+    "s6",
+    "s7"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "phishing-infra",
+   "file": "skills/phishing-infra.md",
+   "title": "钓鱼基础设施与邮件攻击面（合规评估口径）",
+   "tags": [
+    "钓鱼",
+    "邮件",
+    "SPF",
+    "DMARC",
+    "MFA",
+    "s2",
+    "s6"
+   ],
+   "depends_on": [
+    "mail-postex"
+   ],
+   "stage_fit": [
+    "s2",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "php-family",
+   "file": "skills/php-family.md",
+   "title": "PHP 生态武器化手册（反序列化/phar/session/upload_progress）",
+   "tags": [
+    "php",
+    "反序列化",
+    "phar",
+    "session",
+    "filter-chain",
+    "s4"
+   ],
+   "depends_on": [
+    "path-traversal"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "poc-template",
+   "file": "skills/poc-template.md",
+   "title": "PoC 脚本编写规范与模板",
+   "tags": [
+    "poc",
+    "脚本",
+    "python",
+    "s5"
+   ],
+   "depends_on": [
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "privesc-checklist",
+   "file": "skills/privesc-checklist.md",
+   "title": "Linux/Windows 提权清单",
+   "tags": [
+    "提权",
+    "s6",
+    "privesc"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "project-warmup",
+   "file": "skills/project-warmup.md",
+   "title": "项目开工预热清单（工具预检 · 模板/词表 · OOB 回连自检）",
+   "tags": [
+    "预热",
+    "开工",
+    "工具预检",
+    "oob",
+    "回连",
+    "词表",
+    "s1",
+    "s2"
+   ],
+   "depends_on": [
+    "payload-mutation-algebra"
+   ],
+   "stage_fit": [
+    "s1",
+    "s2"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "prototype-pollution",
+   "file": "skills/prototype-pollution.md",
+   "title": "原型链污染手册（客户端/服务端 + gadget 链）",
+   "tags": [
+    "prototype",
+    "原型链",
+    "pollution",
+    "nodejs",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "proxy-channels",
+   "file": "skills/proxy-channels.md",
+   "title": "\"代理通道使用手册（Web 配置的三类流量 + 工具旗标映射）\"",
+   "tags": [
+    "代理",
+    "proxy",
+    "出口池",
+    "工具旗标",
+    "下载",
+    "抓包",
+    "v50"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "race-condition",
+   "file": "skills/race-condition.md",
+   "title": "并发竞态手册（双花/重放/限次绕过）",
+   "tags": [
+    "race",
+    "竞态",
+    "并发",
+    "双花",
+    "单包",
+    "s4",
+    "s5"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "rag-attack",
+   "file": "skills/rag-attack.md",
+   "title": "RAG/知识库攻击手册（检索注入/投毒/向量库越权）",
+   "tags": [
+    "llm",
+    "rag",
+    "向量",
+    "知识库",
+    "投毒",
+    "s4",
+    "a"
+   ],
+   "depends_on": [
+    "llm-top10"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "rate-limit-playbook",
+   "file": "skills/rate-limit-playbook.md",
+   "title": "\"限速/连接级阻断目标剧本（有效速率核算/完全静默冷却/窗口化执行）\"",
+   "tags": [
+    "对抗",
+    "限速",
+    "冷却",
+    "扫描governor",
+    "风控",
+    "behavior"
+   ],
+   "aliases": [
+    "限速",
+    "频控"
+   ],
+   "depends_on": [
+    "scan-tiering"
+   ],
+   "handoff_to": [
+    "channel-snapshot"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "rce-hunting-map",
+   "file": "skills/rce-hunting-map.md",
+   "title": "RCE 挖掘系统化方法论（信号判据+组合拳决策树+白盒清单）",
+   "tags": [
+    "RCE",
+    "方法论",
+    "组合拳",
+    "白盒",
+    "决策树",
+    "s4",
+    "s5"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "recon-playbook",
+   "file": "skills/recon-playbook.md",
+   "title": "侦察与资产测绘手册",
+   "tags": [
+    "侦察",
+    "子域",
+    "端口",
+    "指纹",
+    "s2"
+   ],
+   "depends_on": [
+    "intel-factory"
+   ],
+   "stage_fit": [
+    "s2"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "report-writing",
+   "file": "skills/report-writing.md",
+   "title": "报告撰写与漏洞定级手册（CVSS）",
+   "tags": [
+    "报告",
+    "cvss",
+    "定级",
+    "s8"
+   ],
+   "aliases": [
+    "报告",
+    "报告编写"
+   ],
+   "stage_fit": [
+    "s8"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "request-smuggling",
+   "file": "skills/request-smuggling.md",
+   "title": "HTTP 请求走私手册（CL-TE/TE-CL 变体探测）",
+   "tags": [
+    "smuggling",
+    "走私",
+    "cl",
+    "te",
+    "代理",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "scan-tiering",
+   "file": "skills/scan-tiering.md",
+   "title": "分级扫描与重试纪律（T1 快扫先行 · T2 深扫后台 · 退避重试）",
+   "tags": [
+    "分级",
+    "快扫",
+    "深扫",
+    "重试",
+    "退避",
+    "ffuf",
+    "速度",
+    "s2",
+    "s4"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "session-state-chain",
+   "file": "skills/session-state-chain.md",
+   "title": "会话态测试链（注册→登录→会话保持→带态测试→清理）",
+   "tags": [
+    "会话",
+    "登录",
+    "session",
+    "cookie",
+    "越权",
+    "存储型",
+    "注入",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "会话链",
+    "会话构造"
+   ],
+   "depends_on": [
+    "auth-bypass",
+    "browser-auth"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "spring-family",
+   "file": "skills/spring-family.md",
+   "title": "Spring 全家桶武器化手册（Actuator/SpEL/H2/Spring4Shell）",
+   "tags": [
+    "spring",
+    "actuator",
+    "rce",
+    "s4"
+   ],
+   "depends_on": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "sqli-deep",
+   "file": "skills/sqli-deep.md",
+   "title": "SQL 注入深度手册（联合/布尔/时间/报错/堆叠/NoSQL）",
+   "tags": [
+    "sqli",
+    "sqlmap",
+    "注入",
+    "布尔",
+    "时间",
+    "waf",
+    "s4"
+   ],
+   "aliases": [
+    "sql注入",
+    "盲注",
+    "堆叠注入"
+   ],
+   "depends_on": [
+    "injection-points"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "ssrf-deep",
+   "file": "skills/ssrf-deep.md",
+   "title": "SSRF 手册（协议/云元数据/绕过/内网探活）",
+   "tags": [
+    "ssrf",
+    "gopher",
+    "元数据",
+    "rebinding",
+    "s4"
+   ],
+   "aliases": [
+    "ssrf",
+    "服务端请求伪造"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "ssti-engine-map",
+   "file": "skills/ssti-engine-map.md",
+   "title": "SSTI 模板引擎识别与求值探针表",
+   "tags": [
+    "ssti",
+    "模板注入",
+    "jinja",
+    "twig",
+    "freemarker",
+    "velocity",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "subdomain-takeover",
+   "file": "skills/subdomain-takeover.md",
+   "title": "\"子域接管指纹库与判定流程（CNAME 悬挂）\"",
+   "tags": [
+    "子域接管",
+    "takeover",
+    "cname",
+    "悬挂",
+    "s1",
+    "s2"
+   ],
+   "aliases": [
+    "子域接管",
+    "接管"
+   ],
+   "depends_on": [
+    "anon-attack-surface"
+   ],
+   "stage_fit": [
+    "s1",
+    "s2"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "tool-channels",
+   "file": "skills/tool-channels.md",
+   "title": "\"工具通道兼容性单源（M6 判据单一事实源，各技能按需引用）\"",
+   "tags": [
+    "工具",
+    "M6",
+    "通道",
+    "挑战型waf",
+    "封闭站",
+    "先probe后batch",
+    "s2",
+    "s4"
+   ],
+   "depends_on": [
+    "channel-snapshot"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "tunnel-pivot",
+   "file": "skills/tunnel-pivot.md",
+   "title": "隧道与流量中转手册（frp/chisel/SSH/ICMP/DNS）",
+   "tags": [
+    "tunnel",
+    "隧道",
+    "frp",
+    "chisel",
+    "pivot",
+    "s6"
+   ],
+   "depends_on": [
+    "intranet-lateral",
+    "tool-channels"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "type-juggling",
+   "file": "skills/type-juggling.md",
+   "title": "PHP 类型混淆（==真值表/0e 魔法哈希/比较函数变体）",
+   "tags": [
+    "php",
+    "类型混淆",
+    "弱比较",
+    "逻辑",
+    "s4"
+   ],
+   "depends_on": [
+    "php-family"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "upload-bypass",
+   "file": "skills/upload-bypass.md",
+   "title": "文件上传绕过手册（校验链/解析形态/条件竞争）",
+   "tags": [
+    "upload",
+    "上传",
+    "解析漏洞",
+    "竞争",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "文件上传",
+    "上传绕过"
+   ],
+   "handoff_to": [
+    "webshell-memshell"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "waf-fingerprint",
+   "file": "skills/waf-fingerprint.md",
+   "title": "WAF/CDN 指纹识别与绕过策略库",
+   "tags": [
+    "waf",
+    "指纹",
+    "绕过",
+    "cdn",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "payload-mutation-algebra"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "weak-cred-bruteforce",
+   "file": "skills/weak-cred-bruteforce.md",
+   "title": "弱口令与默认凭据手册（默认凭据矩阵 · hydra 爆破 · 锁定规避）",
+   "tags": [
+    "弱口令",
+    "爆破",
+    "hydra",
+    "默认凭据",
+    "s4",
+    "s5"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "web-top10",
+   "file": "skills/web-top10.md",
+   "title": "OWASP Top 10 Web 测试清单",
+   "tags": [
+    "web",
+    "top10",
+    "注入",
+    "xss",
+    "越权",
+    "ssrf",
+    "s4"
+   ],
+   "depends_on": [
+    "injection-points"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "webshell-memshell",
+   "file": "skills/webshell-memshell.md",
+   "title": "WebShell / 内存马与落点管理（S5 拿到 RCE 之后）",
+   "tags": [
+    "webshell",
+    "内存马",
+    "驻留",
+    "落点",
+    "清理",
+    "s5",
+    "s7"
+   ],
+   "aliases": [
+    "webshell",
+    "内存马",
+    "后门"
+   ],
+   "depends_on": [
+    "capability-primitive-search"
+   ],
+   "stage_fit": [
+    "s5",
+    "s7"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "windows-lateral",
+   "file": "skills/windows-lateral.md",
+   "title": "Windows 内网横向与凭据攻击（打点→转储→横向矩阵）",
+   "tags": [
+    "内网",
+    "横向",
+    "Windows",
+    "凭据",
+    "netexec",
+    "PTH",
+    "s5",
+    "s6"
+   ],
+   "depends_on": [
+    "ad-attack",
+    "tool-channels"
+   ],
+   "stage_fit": [
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "xslt-injection",
+   "file": "skills/xslt-injection.md",
+   "title": "XSLT 注入（厂商指纹/document 文件读/三平台 RCE）",
+   "tags": [
+    "xslt",
+    "注入",
+    "rce",
+    "xml",
+    "s4"
+   ],
+   "depends_on": [
+    "ssti-engine-map"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "xss-context",
+   "file": "skills/xss-context.md",
+   "title": "XSS 上下文手册（反射/存储/DOM sink/CSP 分析）",
+   "tags": [
+    "xss",
+    "dom",
+    "csp",
+    "上下文",
+    "s4"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "xxe-full",
+   "file": "skills/xxe-full.md",
+   "title": "XXE 手册（file 读/OOB/参数实体/文档内嵌）",
+   "tags": [
+    "xxe",
+    "xml",
+    "实体",
+    "ooxml",
+    "svg",
+    "s4"
+   ],
+   "depends_on": [
+    "oob-interactsh"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+[{"id":"F-04","stage":"s4","title":"忘记密码流程无用户存在性枚举信号","severity":"中","confidence":"确证","detail":"EV-301 [C/D]：假用户名+错码同文案（evidence/s4r_t302_forgetpwd.log [D] HTTP：000 SIZE：0）"}]

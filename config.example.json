@@ -1,0 +1,33 @@
+{
+  "listen": ":8787",
+  "data_dir": "./projects",
+  "web_dir": "./web",
+  "llm": {
+    "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "api_key": "sk-你的模型API密钥",
+    "model": "glm-5.3-flash",
+    "mock": false,
+    "temperature": 0.2,
+    "max_tokens": 8192
+  },
+  "engine": {
+    "max_stage_iterations": 60,
+    "per_target_rounds": 10,
+    "max_concurrent_exec": 4,
+    "command_timeout_sec": 300,
+    "max_output_bytes": 204800,
+    "async_timeout_sec": 3600,
+    "spill_bytes": 16384,
+    "context_budget_tokens": 100000,
+    "context_keep_recent": 10,
+    "barrier_timeout_sec": 1800
+  },
+  "auth_token": "",
+  "admin_user": "admin",
+  "admin_password": "部署后必改",
+  "debug_captcha": false,
+  "hexstrike_url": "",
+  "max_project_tokens": 0,
+  "price_per_1m_input": 0,
+  "price_per_1m_output": 0
+}

