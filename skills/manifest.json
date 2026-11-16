@@ -3,7 +3,7 @@
  "generated": "2026-11-14",
  "description": "机器可读技能清单（v5.3.2：gen_skill_manifest.py 单源生成——aliases/depends_on/handoff_to/stage_fit/lab_only 全量结构化，引擎 SkillRegistry 消费；重新生成请跑 scripts/gen_skill_manifest.py）",
  "route_file": "skills/00-router.md",
- "count": 107,
+ "count": 109,
  "skills": [
   {
    "id": "00-router",
@@ -1095,6 +1095,29 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "instance-diff",
+   "file": "skills/instance-diff.md",
+   "title": "\"同构多实例/多节点行为差分手册（灰度/双活/同构靶场通用）\"",
+   "tags": [
+    "实例差分",
+    "多节点",
+    "灰度",
+    "行为差分",
+    "s2",
+    "s4",
+    "s6"
+   ],
+   "depends_on": [
+    "authz-diff"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "intel-factory",
    "file": "skills/intel-factory.md",
    "title": "\"JS 情报工厂标准管线（v4.6 W2：chunk 全量/配置必取/sourcemap 还原/四件套产出）\"",
@@ -1190,6 +1213,9 @@
     "密码学",
     "加密",
     "认证"
+   ],
+   "depends_on": [
+    "auth-flow-deep"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1479,6 +1505,28 @@
    ],
    "stage_fit": [
     "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "observable-degradation",
+   "file": "skills/observable-degradation.md",
+   "title": "\"无账号观测降级轨（身份索取闭环走完仍无登录态时的标准替代观测）\"",
+   "tags": [
+    "无账号",
+    "观测降级",
+    "侧信道",
+    "时延差分",
+    "缓存差分",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "session-state-chain"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1865,6 +1913,9 @@
     "代理",
     "s4"
    ],
+   "depends_on": [
+    "intranet-lateral"
+   ],
    "stage_fit": [
     "s4"
    ],
@@ -2154,6 +2205,9 @@
     "默认凭据",
     "s4",
     "s5"
+   ],
+   "depends_on": [
+    "instance-diff"
    ],
    "stage_fit": [
     "s4",

@@ -2,7 +2,7 @@
 
 > **Jiutouniao** — an open-source, full-lifecycle AI agent platform for **authorized** penetration testing: multi-head orchestration, human-in-the-loop approvals, deterministic governance gates, and evidence-chain reporting. For written-authorization engagements only.
 >
-> 当前版本 **v5.3.8**（单一事实源：`server/internal/version/version.go`；Web 顶栏与 `/api/public/info` 同源展示）。
+> 当前版本 **v5.3.9**（单一事实源：`server/internal/version/version.go`；Web 顶栏与 `/api/public/info` 同源展示）。
 > 八个阶段专家头 + 三个专项头 + 一个真头（主控），断一头、生一头——阶段间自动回环，直到拿下业务影响证明。（v1.4 起阶段 0 授权并入项目创建页、阶段 9 复测并入人工流程）
 >
 > 架构源自对 46 个开源安全 Agent（strix / pentagi / BreachWeave / VulnBot / hexstrike-ai 等）的共性提炼，流程严格映射《AI 渗透测试全流程图》（10 阶段 + 专项 A/B1/B2/C + 执行循环引擎）。
@@ -46,7 +46,7 @@
 | 模块 | 来源 | 用法 |
 |---|---|---|
 | **覆盖度账本** | strix（outcome 枚举/唯一键/证据强制）+ PentesterFlow（endpoint×param×vulnClass 三元组原地更新） | 头工具 `update_coverage`；UI「覆盖度」Tab 看矩阵；报告含「安全向量/盲区」两章 |
-| **技能库** | strix（运行时 load_skill 双通道）+ PentesterFlow（SKILL.md 约定+关键词路由） | `skills/` 目录 107 个中文攻击剧本（v3.2.0 能力原语凑链、v3.3.0 内网横向/边界设备/AD 扩容/WebShell 落点）；头按需 `load_skill` 注入，不撑爆上下文 |
+| **技能库** | strix（运行时 load_skill 双通道）+ PentesterFlow（SKILL.md 约定+关键词路由） | `skills/` 目录 109 个中文攻击剧本（v3.2.0 能力原语凑链、v3.3.0 内网横向/边界设备/AD 扩容/WebShell 落点）；头按需 `load_skill` 注入，不撑爆上下文 |
 | **hexstrike 工具桥** | hexstrike-ai（`/health`、`/api/command` 原样兼容） | 配置 `hexstrike_url` 后头工具 `hexstrike_command` 直调远端 150+ 安全工具（同样过审批矩阵） |
 | **Token/成本账本** | deadend-cli（按 agent 分账）+ strix（双账）+ BoxPwnr（stats） | 按阶段分账；UI 实时显示 token 与估算成本；`max_project_tokens` 超限自动熔断 |
 | **记忆检索** | pentagi/VulnBot RAG 的轻量版 | 头工具 `search_memory` 关键词扫描发现/资产/时间线 |

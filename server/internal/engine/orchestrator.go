@@ -1285,15 +1285,31 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 			sprintMsg := "⏳ 迭代预算预警（提前触发）：本阶段剩余约 1/3 预算。**v4.6 V2 就绪投递优先**：先清点本阶段「脚本/PoC/参数字典已就绪而未投递」的待验证项（含子任务与待利用队列），立即批量投递消耗就绪资产——不要把预算留给泛化收口。随后：多目标项目把未覆盖目标补到最小覆盖（每目标每类 1 探针）；再进入收口流程：1) 已确证未入库的结论补录 record_finding / update_coverage；2) 规划并撰写本阶段交付物（write_file），无法覆盖的目标列入「待续清单」；3) 调用 complete_stage 收口——s4/s5 必须在调用参数中携带顶层字段 ready_but_unexecuted 与 l2_approved_unused（JSON 数组，无内容传空数组 []；不要只写进 summary 文本，也不要写进交付物文件）。"
 			if vts, verr := o.store.ListVTs(p.ID); verr == nil && len(vts) > 0 {
 				lines := []string{}
-				for _, t := range vts {
+				// v5.3.9 批次④：P1 保底——冲刺枚举按 Priority 升序（1=最高）排序，
+				// 高优先级 VT 不再受 store 返回序影响被泛化收口挤掉。
+				sortedVTs := append([]*store.VerificationTask(nil), vts...)
+				sort.Slice(sortedVTs, func(i, j int) bool {
+					if sortedVTs[i].Priority != sortedVTs[j].Priority {
+						return sortedVTs[i].Priority < sortedVTs[j].Priority
+					}
+					return sortedVTs[i].ID < sortedVTs[j].ID
+				})
+				p1Count := 0
+				for _, t := range sortedVTs {
 					if t.Status != "ready" && t.Status != "pending" {
 						continue
+					}
+					if t.Priority <= 1 {
+						p1Count++
 					}
 					tag := "P" + strconv.Itoa(t.Priority)
 					lines = append(lines, fmt.Sprintf("- %s[%s/%s] %s（就绪资产: %s）", t.ID, t.Status, tag, truncateText(t.Title, 50), truncateText(t.ReadyAssets, 60)))
 				}
 				if len(lines) > 0 {
-					sprintMsg += "\n\n🧾 验证队列待消耗（引擎枚举，按此顺序投递）：\n" + strings.Join(lines, "\n")
+					sprintMsg += "\n\n🧾 验证队列待消耗（引擎枚举，按 Priority 升序投递）：\n" + strings.Join(lines, "\n")
+					if p1Count > 0 {
+						sprintMsg += fmt.Sprintf("\n\n🛡️ P1 保底：检测到 %d 个 P1 级 VT——剩余 1/3 轮次内 P1 优先消费，禁止被泛化收口挤掉；确实无法投递的 P1 必须进 ready_but_unexecuted 由后续阶段承接。", p1Count)
+					}
 				}
 			}
 			msgs = append(msgs, llm.Message{Role: "user", Content: sprintMsg})
@@ -3069,25 +3085,69 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 		}
 	}
 	if lessons, lerr := o.store.ListLessons(8); lerr == nil && len(lessons) > 0 {
-		b.WriteString("### 组织级教训（跨项目脱敏经验，record_lesson 登记）\n")
-		if behaviorClass != "" {
-			hits := 0
-			for _, l := range lessons {
-				if l.BehaviorClass == behaviorClass {
-					b.WriteString(fmt.Sprintf("- 【行为类命中 %s】%s\n", behaviorClass, l.Text))
-					hits++
+		// v5.3.9 批次④：栈指纹加权——confirmed facts 值 + behaviorClass 构成目标指纹，
+		// 教训按 Stack/Tags 命中得分排序（命中前置），零命中仍全量注入（保底不丢教训）。
+		fpParts := []string{}
+		if fpFacts, ferr := o.store.ListFacts(p.ID, 50); ferr == nil {
+			for _, fct := range fpFacts {
+				if fct.Confidence == "confirmed" && strings.TrimSpace(fct.Value) != "" {
+					fpParts = append(fpParts, strings.ToLower(fct.Value))
 				}
 			}
-			if hits == 0 {
-				b.WriteString(fmt.Sprintf("- 本目标 behavior_class=%s：无命中教训，按对应 playbook 谨慎推进\n", behaviorClass))
-			}
+		}
+		if behaviorClass != "" {
+			fpParts = append(fpParts, strings.ToLower(behaviorClass))
+		}
+		fpJoined := strings.Join(fpParts, "\x00")
+		type fingerprintScored struct {
+			lesson *store.LessonRecord
+			score  int
+		}
+		scoredLessons := make([]fingerprintScored, 0, len(lessons))
+		splitAny := func(s, seps string) []string {
+			return strings.FieldsFunc(s, func(r rune) bool { return strings.ContainsRune(seps, r) })
 		}
 		for _, l := range lessons {
-			text := l.Text
-			if strings.Contains(l.SampleSize, "单次") || l.SampleSize == "" {
+			score := 0
+			if behaviorClass != "" && l.BehaviorClass == behaviorClass {
+				score += 2
+			}
+			for _, tok := range splitAny(l.Stack, "/,，； ") {
+				if tok != "" && strings.Contains(fpJoined, strings.ToLower(tok)) {
+					score += 1
+				}
+			}
+			for _, tok := range splitAny(l.Tags, ",， ") {
+				if len([]rune(tok)) >= 2 && strings.Contains(fpJoined, strings.ToLower(tok)) {
+					score += 1
+				}
+			}
+			scoredLessons = append(scoredLessons, fingerprintScored{lesson: l, score: score})
+		}
+		sort.Slice(scoredLessons, func(i, j int) bool {
+			if scoredLessons[i].score != scoredLessons[j].score {
+				return scoredLessons[i].score > scoredLessons[j].score
+			}
+			return scoredLessons[i].lesson.ID < scoredLessons[j].lesson.ID
+		})
+		b.WriteString("### 组织级教训（跨项目脱敏经验，record_lesson 登记；栈指纹命中前置）\n")
+		fingerprintHits := 0
+		for _, sl := range scoredLessons {
+			text := sl.lesson.Text
+			if behaviorClass != "" && sl.lesson.BehaviorClass == behaviorClass {
+				text = fmt.Sprintf("【行为类命中 %s】", behaviorClass) + text
+			}
+			if sl.score > 0 && sl.lesson.Stack != "" {
+				fingerprintHits++
+				text = fmt.Sprintf("【栈指纹命中 %s】", sl.lesson.Stack) + text
+			}
+			if strings.Contains(sl.lesson.SampleSize, "单次") || sl.lesson.SampleSize == "" {
 				text += "【provisional：样本强度未标注/单次实验——跨目标使用前须 ≥3 样本复验（E5）】"
 			}
 			b.WriteString("- " + text + "\n")
+		}
+		if fingerprintHits == 0 && behaviorClass != "" {
+			b.WriteString("- 本目标 fingerprint 无栈命中教训，按对应 playbook 谨慎推进\n")
 		}
 		b.WriteString("\n")
 	}

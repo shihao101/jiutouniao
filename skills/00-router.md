@@ -95,6 +95,11 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 无凭证开工 / 认证后功能待测（没有任何账号） | identity-bootstrapping | weak-cred-bruteforce / browser-auth |
 | 多目标项目暴露面普查（S2→S4 首轮） | anon-attack-surface | middleware-web / devops-exposed |
 | WAF/过滤器特征识别 | waf-fingerprint | payload-mutation-algebra |
+| 网关统一路由/多异构后端确证（前置代理+多栈指纹） | request-smuggling | intranet-lateral |
+| JWT/会话令牌机制确证或密钥材料泄露（预览/部分密钥） | jwt-crypto | auth-flow-deep |
+| SSO/票据/扫码登录机制确证（ticket/QR/回调） | auth-flow-deep | jwt-crypto |
+| 同应用多实例/多节点（灰度/双活/同构换实例） | instance-diff | authz-diff |
+| 登录态不可得（身份索取闭环走完仍无账号） | observable-degradation | session-state-chain |
 
 ## 二、按症状
 

@@ -6,6 +6,24 @@
 >
 > 注：v3.5 之前的版本为本项目内部迭代史（能力以 v3.5+ 描述为准）；开源首发版本为 **v5.3.8**。
 
+## v5.3.9 · 2026-11-16
+
+- 新增（架构信号→技能强制路由）：00-router 资产表新增 5 行确定性映射——网关统一路由/多异构后端→request-smuggling+intranet-lateral；JWT/令牌机制确证或密钥材料泄露→jwt-crypto；SSO/票据/扫码机制→auth-flow-deep+jwt-crypto；同应用多实例/多节点→instance-diff；登录态不可得→observable-degradation——架构确证即触发，不再依赖模型自主联想
+- 新增（instance-diff 技能）：同构多实例/多节点行为差分手册——同构性判定四件套+共享态验证+行为差分矩阵五维（状态码/响应头/body 结构/行为语义/密钥配置值），差异=配置漂移/版本滞后/门控不一致信号
+- 新增（observable-degradation 技能）：无账号观测降级轨——身份索取闭环走完仍无登录态时，认证后项禁止直接 premise_failed 全量移交，先过四条替代观测（时延侧信道/缓存行为差分/错误文案差分/自建数据回流）
+- 配套：skills/manifest.json 单源重生成（107→109 技能），--check 一致性通过
+- 新增（批次②·S1 OOB 通道预热）：interactsh 注册前移到 S1 工具自检，回连域/自检日志落盘 evidence/oob/，盲打窗口不再被中途安装消耗
+- 新增（批次②·S2-10/S2-11）：四类架构信号确证即 record_vt(Priority=1) 强制登记；拓扑重建活交付物 V1→VN，S6/S8 强制引用最新版
+- 新增（批次②·S4 三强制）：架构信号 VT 保底；带态越权矩阵第二遍（api-idor+idor-baseline 三轴）；密钥泄露→jwt-crypto 全算法族、SSO 机制→滥用矩阵
+- 新增（批次③·S5/S6/S8 三头增补）：无账号观测降级轨强制前置；凭据复用矩阵（weak-cred-bruteforce 新节）；实例差分前置+拓扑引用强制；S8 影响评估引用拓扑版本号+盲区章对账
+- 新增（批次④·引擎 P1 保底）：预算冲刺消息 VT 枚举按 Priority 升序排序+P1 保底文案，与 S2-10 架构信号 VT 联动
+- 新增（批次④·lessons 栈指纹加权）：教训注入按目标指纹对 Stack/Tags 评分排序（命中前置+标注），零命中保底全量注入
+- 新增（批次④·health-window.sh 健康窗口包裹器）：目标抖动不烧探测轮次，窗口恢复自动执行，证据带窗口健康标注；版本 5.3.8→5.3.9，go 全测全绿
+- 新增（批次⑤·评测 hidden 维度）：预期清单新增 4 类 hidden 项（内网拓扑/带态越权矩阵/SSO 票据滥用/请求走私检查）——盲挖能力度量扩展到方法论执行率维度
+- 部署口径：提示层即时生效于新项目/后续阶段；引擎改动镜像预构建待命，运行中任务结项后零中断切换
+- 核查口径：五批次各 3× 连续核查 + 终局全量 3× 核查全通过；全部新增内容经敏感信息扫描零命中
+- 部署完成（v5.3.9）：回滚点 rollback-5.3.8 留存，容器 recreate 后 /api/public/info version=5.3.9，项目数据完整无损
+
 ## v5.3.8 · 2026-11-15
 
 - 修复（收口死锁 P0·实证）：反思门不可用期间多个阶段被打 quality-pending 复核标记（v4.8 设计），但 s8 收口门把该标记当硬拦截项且清除标记无任何工具/API 通道——构成死锁：模型穷尽 8 条排查路径仍被永久拦截，s8 无法收口（实证某医院任务 s1-s7 全 done 后 s8 空转 35 分钟+，msgs=210、单请求 106k tokens 零产出）。A+B 组合修复：①deterministicGate 移除 quality-pending 硬拒（旧拦截文案「确认无缺口后忽略本条说明」无实现通道）；②complete_stage 入口软提示 + confirm_quality_review 显式确认参数——确认后清除标记（改写 quality-reviewed 留痕）并正常收口；s8 头补复核操作指引；v46b 旧测试更新为新契约（新增 TestV538QualityReviewConfirm/TestV538DeterministicGateNoDeadlock 回归）
