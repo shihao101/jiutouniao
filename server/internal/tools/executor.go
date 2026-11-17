@@ -230,6 +230,10 @@ func (e *Executor) readOnlySafe(command string) bool {
 
 // splitShellSegments 引号感知切段：返回（段列表, 是否存在未加引号的重定向元字符）。
 // 单引号内一切字面；双引号内 > < | ; & 均为字面量（$() 与反引号例外，已在调用方整体否决）。
+// ReadOnlySafe v5.4.3 导出只读判定：治理门"状态变更合取"规则豁免用——只读命令在语义上
+// 不可能造成状态变更，不应因关键词文本巧合被连坐拦截。
+func (e *Executor) ReadOnlySafe(command string) bool { return e.readOnlySafe(command) }
+
 func splitShellSegments(s string) (segs []string, unquotedRedirect bool) {
 	var cur strings.Builder
 	inSingle, inDouble := false, false

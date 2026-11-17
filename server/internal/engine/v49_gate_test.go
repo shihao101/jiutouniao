@@ -114,7 +114,7 @@ func TestV49HarvestV3Lists(t *testing.T) {
 	mk("VT-2", "s4", "pending")
 	mk("VT-3", "s4", "executed")
 	mk("VT-4", "s5", "ready")
-	ready, l2 := o.harvestV3Lists(p, "s4")
+	ready, l2 := o.harvestV3Lists(p, "s4", nil)
 	if len(ready) != 2 || l2 != nil {
 		t.Fatalf("s4 应收割 ready+pending 两项且 l2 空: ready=%v l2=%v", ready, l2)
 	}
@@ -128,12 +128,12 @@ func TestV49HarvestV3Lists(t *testing.T) {
 	if !hasReady {
 		t.Fatalf("收割条目应含 ready 状态与就绪资产: %v", ready)
 	}
-	ready5, _ := o.harvestV3Lists(p, "s5")
+	ready5, _ := o.harvestV3Lists(p, "s5", nil)
 	if len(ready5) != 1 {
 		t.Fatalf("s5 应收割 VT-4 一项: %v", ready5)
 	}
 	// 非 s4/s5 不代填
-	ready1, l21 := o.harvestV3Lists(p, "s2")
+	ready1, l21 := o.harvestV3Lists(p, "s2", nil)
 	if ready1 != nil || l21 != nil {
 		t.Fatalf("s2 不应代填: %v %v", ready1, l21)
 	}

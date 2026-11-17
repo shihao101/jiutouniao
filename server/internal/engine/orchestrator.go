@@ -508,7 +508,8 @@ func (o *Orchestrator) registrationGate(command string) (bool, string) {
 	}
 	if registrationPostRe.MatchString(command) && registrationPathRe.MatchString(command) {
 		return true, "ROE identity.auto_register=deny：禁止注册端点写提交（注册面评估仅限 GET 页面/协议还原）。" +
-			"如客户书面授权注册测试，请在项目 ROE Profile 配置 identity.auto_register=allow 后重试。"
+			"如客户书面授权注册测试，请在项目 ROE Profile 配置 identity.auto_register=allow 后重试。" +
+			"若本命令混合了被禁的注册写与合法动作（如其他端点重试），请拆分命令、单独重试合法部分（v5.4.3）。"
 	}
 	return false, ""
 }
@@ -1447,7 +1448,8 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 		_ = o.store.SaveProject(p)
 		return ctx.Err()
 	}
-	readyItems, l2Items := o.harvestV3Lists(p, stageID)
+	harvestedJobs := o.harvestAsyncOutputs(p, stageID) // v5.4.3 A：先收割后台作业结论（落证据链）
+	readyItems, l2Items := o.harvestV3Lists(p, stageID, harvestedJobs)
 	for _, pair := range []struct {
 		field string
 		items []string
@@ -1483,11 +1485,117 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 
 // ---------- v4.9 F1/F2：V3 清单解析与护栏代收口 ----------
 
+// ---------- v5.4.3 A：收口执行闭环（通用机制，与漏洞类型/作业内容无关） ----------
+// 失效模式：run_async 作业若执行主体未主动 poll，其结论在收口后即从结构化状态消失——
+// 「启动→完成→消费」闭环缺最后一环（实证：某判别作业 finished 落盘，收口台账误标 ready_but_unexecuted）。
+// 机制：收口前扫描 .async/ 状态侧车，已完成且结论未进证据链的作业 → 输出尾部自动落证据+时间线；
+// V3 台账/清单生成时按作业实际状态校正"就绪未投递"标记。不读作业内容做语义判断。
+
+// asyncJobRec 后台作业收割档案（来自 .async/ 状态侧车，字段与 tools.asyncSidecar 对齐）。
+type asyncJobRec struct {
+	ID      string
+	Command string
+	State   string
+	Log     string
+}
+
+// harvestAsyncOutputs 收口前收割后台作业结论：state ∈ {finished, failed} 且证据链中无该
+// job ID 引用（未被 poll_async 消费）的作业 → 输出尾部落证据+时间线。返回本轮收割清单。
+func (o *Orchestrator) harvestAsyncOutputs(p *store.Project, stageID string) []asyncJobRec {
+	dir := filepath.Join(o.workspaceRoot(p.ID), ".async")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	evs, _ := o.store.ListEvidence(p.ID)
+	consumed := func(jobID string) bool {
+		for _, e := range evs {
+			if strings.Contains(e.Input, jobID) || strings.Contains(e.Output, jobID) {
+				return true // 已被 poll_async 消费（结论已进执行流）
+			}
+		}
+		return false
+	}
+	var out []asyncJobRec
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasPrefix(ent.Name(), "job-") || !strings.HasSuffix(ent.Name(), ".json") {
+			continue
+		}
+		raw, rerr := os.ReadFile(filepath.Join(dir, ent.Name()))
+		if rerr != nil {
+			continue
+		}
+		var sc struct {
+			ID      string `json:"id"`
+			Command string `json:"command"`
+			State   string `json:"state"`
+			Log     string `json:"log"`
+		}
+		if json.Unmarshal(raw, &sc) != nil || sc.ID == "" {
+			continue
+		}
+		if sc.State != "finished" && sc.State != "failed" {
+			continue // 在途作业不收割（s7 E2 终态标记门另有兜底）
+		}
+		if consumed(sc.ID) {
+			continue
+		}
+		tail := ""
+		if sc.Log != "" {
+			rawLog, lerr := os.ReadFile(filepath.Join(o.workspaceRoot(p.ID), sc.Log))
+			if lerr == nil {
+				tail = tailRawBytes(rawLog, 1200)
+			}
+		}
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID,
+			Type: "async", Input: "[async-harvest] " + truncateText(sc.Command, 200),
+			Output: "[收口收割 v5.4.3] job=" + sc.ID + " state=" + sc.State + " log=" + sc.Log + "\n" + tail, ApprovedBy: "auto"})
+		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+			Event: "后台作业结论收割", Detail: fmt.Sprintf("job=%s state=%s cmd=%s", sc.ID, sc.State, truncateText(sc.Command, 80))})
+		o.log(p, stageID, fmt.Sprintf("🧹 收口收割：后台作业 %s（%s）结论已落证据链（此前仅存 .async/ 侧车）", sc.ID, sc.State))
+		out = append(out, asyncJobRec{ID: sc.ID, Command: sc.Command, State: sc.State, Log: sc.Log})
+	}
+	return out
+}
+
+// tailRawBytes 取原始日志尾部 n 字节（行边界对齐，engine 侧通用实现）。
+func tailRawBytes(raw []byte, n int) string {
+	if len(raw) <= n {
+		return string(raw)
+	}
+	s := string(raw[len(raw)-n:])
+	if i := strings.IndexByte(s, '\n'); i >= 0 && i < len(s)-1 {
+		s = s[i+1:]
+	}
+	return s
+}
+
+// v3AssetRe V3 条目中脚本类资产路径 token（扩展名锚定，不假设用途）。
+var v3AssetRe = regexp.MustCompile(`[\w./-]+\.(?:sh|py|js|rb|pl|ps1)`)
+
+// v3ItemExecutedCheck V3 条目引用的资产是否出现在收割作业的命令中（basename 包含判定）。
+// 匹配即说明该"就绪未投递"项实际已通过后台作业执行——台账与事实的偏差在此校正。
+func v3ItemExecutedCheck(item string, jobs []asyncJobRec) (asyncJobRec, bool) {
+	for _, tok := range v3AssetRe.FindAllString(item, -1) {
+		base := filepath.Base(tok)
+		if len(base) < 8 {
+			continue // 过短 token 误配防护
+		}
+		for _, j := range jobs {
+			if strings.Contains(j.Command, base) {
+				return j, true
+			}
+		}
+	}
+	return asyncJobRec{}, false
+}
+
 // harvestV3Lists 预算护栏代收口时按台账代填 V3 两清单：
 // ready_but_unexecuted = 本阶段 VT 验证队列中 pending/ready（尚未投递执行）条目；
 // l2_approved_unused 不代填（审批请求与执行在调用路径上配对发生，引擎无法机械判定「未使用」），
 // 留空并在阶段摘要/quality-pending 中交给 S8 复核。
-func (o *Orchestrator) harvestV3Lists(p *store.Project, stageID string) (ready []string, l2 []string) {
+// v5.4.3 A：jobs 非空时逐条核对——VT 就绪资产已被后台作业实际执行的，不再计入"就绪未投递"。
+func (o *Orchestrator) harvestV3Lists(p *store.Project, stageID string, jobs []asyncJobRec) (ready []string, l2 []string) {
 	if stageID != "s4" && stageID != "s5" {
 		return nil, nil
 	}
@@ -1500,6 +1608,10 @@ func (o *Orchestrator) harvestV3Lists(p *store.Project, stageID string) (ready [
 			continue
 		}
 		if t.Status != "ready" && t.Status != "pending" {
+			continue
+		}
+		if _, ok := v3ItemExecutedCheck(t.Title+" "+t.ReadyAssets, jobs); ok {
+			o.log(p, stageID, fmt.Sprintf("↳ v5.4.3 校正：VT %s 的就绪资产已由后台作业实际执行，不入「就绪未投递」清单", t.ID))
 			continue
 		}
 		line := fmt.Sprintf("%s[%s] %s", t.ID, t.Status, truncateText(t.Title, 60))
@@ -1999,6 +2111,13 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if statusReason != "" {
 			entryNotes = strings.TrimSpace("reason=" + statusReason + " | " + entryNotes)
 		}
+		// v5.4.3 B：台账自描述契约——结论态条目必须附一句话依据（有状态必有依据）。
+		// vulnerable/ruled_out/no_issue_found/needs_follow_up 四个结论态强制；waf_blocked/skipped 过渡态豁免。
+		// 与 deterministicGate 的存量空 note 检查构成"入口拒收+收口兜底"双保险。
+		if (status == "vulnerable" || status == "ruled_out" || status == "no_issue_found" || status == "needs_follow_up") &&
+			strings.TrimSpace(entryNotes) == "" {
+			return fmt.Sprintf("错误: %s 终态必须附 notes（一句话依据：证据摘要/命令/观察结果）——台账自描述契约（v5.4.3 B）：有状态必有依据，s8 报告与跨阶段承接直接消费结构化台账。请补充 notes 后重新提交本次 update_coverage。", status)
+		}
 		entry, err := o.store.UpsertCoverage(&store.CoverageEntry{
 			ProjectID: p.ID, Stage: stageID,
 			Endpoint: s("endpoint"), Param: s("param"), VulnClass: s("vuln_class"),
@@ -2137,6 +2256,11 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 					"确认后引擎将清除标记并继续正常收口（本提示只出现一次，确认后不再拦截）。"
 			}
 		}
+		// v5.4.3 A：收口前先收割后台作业结论（落证据链+时间线）——执行闭环核对，与作业内容无关
+		harvestedJobs := o.harvestAsyncOutputs(p, stageID)
+		if len(harvestedJobs) > 0 {
+			o.log(p, stageID, fmt.Sprintf("🧹 收口执行闭环：收割 %d 个已完成未消费的后台作业，结论已进证据链", len(harvestedJobs)))
+		}
 		// v4.6 V3 收口强制清单：s4/s5 必须显式提交「就绪未执行」与「已批未用」两份清单
 		//（可为空数组但不可缺失）——审计实证：nbut 对 7+5 条"脚本就绪"验证线因预算收口静默蒸发，
 		// L2 已批工单从未使用也无留痕。缺失即拦截，清单登记时间线供 S7 强制清点。
@@ -2163,8 +2287,19 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			}
 			for _, field := range []string{"ready_but_unexecuted", "l2_approved_unused"} {
 				if items := v3Lists[field]; len(items) > 0 {
+					corrected := make([]string, 0, len(items))
+					for _, it := range items {
+						// v5.4.3 A：清单条目引用的资产若已被后台作业实际执行，附加校正标记
+						//（叙事交付物结论与结构化台账在此对齐，防 s8 以台账为准时漏掉结论）
+						if field == "ready_but_unexecuted" {
+							if j, ok := v3ItemExecutedCheck(it, harvestedJobs); ok {
+								it += fmt.Sprintf(" 〖v5.4.3 校正：该资产已由后台作业 %s 执行（state=%s），结论已落证据链〗", j.ID, j.State)
+							}
+						}
+						corrected = append(corrected, it)
+					}
 					_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
-						Event: "v4.6 V3 清单", Detail: field + ": " + strings.Join(items, " | ")})
+						Event: "v4.6 V3 清单", Detail: field + ": " + strings.Join(corrected, " | ")})
 				}
 			}
 		}
@@ -3851,6 +3986,23 @@ func (o *Orchestrator) evidenceCriteriaIssues(p *store.Project, stageID string) 
 				o.log(p, stageID, "⚖ 判据抽查降级："+truncateText(f.Title, 40)+"（确证→疑似，未引 evidence-standard 判据）")
 			}
 			issues = append(issues, fmt.Sprintf("高危确证发现「%s」未引用 evidence-standard 判据，已自动降级为疑似——补证（detail 引用判据项）后重新登记确证", truncateText(f.Title, 40)))
+		}
+	}
+	// v5.4.3 B：本阶段覆盖台账自描述核对——名下结论态条目 notes 为空 → 拦截（入口拒收的收口兜底）。
+	// 只核对本收口阶段名下的条目：跨阶段历史条目不在本门范围（避免旧数据连坐阻断）。
+	if cov, cerr := o.store.ListCoverage(p.ID); cerr == nil {
+		emptyNote := 0
+		for _, c := range cov {
+			if c.Stage != stageID {
+				continue
+			}
+			if (c.Status == "vulnerable" || c.Status == "ruled_out" || c.Status == "no_issue_found" || c.Status == "needs_follow_up") &&
+				strings.TrimSpace(c.Notes) == "" {
+				emptyNote++
+			}
+		}
+		if emptyNote > 0 {
+			issues = append(issues, fmt.Sprintf("本阶段覆盖台账 %d 个结论态条目 notes 为空（台账自描述契约 v5.4.3）——用 update_coverage 逐条补一句话依据（证据摘要/命令/观察结果）后重新收口", emptyNote))
 		}
 	}
 	return issues

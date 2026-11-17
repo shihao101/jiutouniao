@@ -131,6 +131,10 @@ type profileRule struct {
 	name string // 对应 execution-profiles.yaml forbidden 语义行（注释引原文）
 	re   *regexp.Regexp
 	and  *regexp.Regexp // 可选第二条件
+	// v5.4.3 C：skipIfReadOnly=true 的规则为「状态关键词 + 泛用 flag」合取类——只读命令在语义上
+	// 不可能造成状态变更，文本巧合命中（引号内独立词、payload 目录名子串等）应豁免。
+	// 仅标注确属该类的规则；SQL 写/HTTP DELETE/导出类规则不豁免（拦截能力零放松）。
+	skipIfReadOnly bool
 }
 
 // productionSafeForbidden 对应 execution-profiles.yaml production_safe.forbidden 五行：
@@ -157,9 +161,11 @@ var productionSafeForbidden = []profileRule{
 	// SQL 动词后要求「标识符+分隔符」避免包管理器误伤（apt update && / dnf update vim 等不含 SQL 语义）。
 	{name: "修改/删除目标数据（SQL 写）", re: regexp.MustCompile(`(?i)\b(update|insert\s+into|delete\s+from|drop\s+(table|database)|truncate\s+table|alter\s+table|merge\s+into)\s+[a-z_]\w*\s*(\s|\(|=|;|,)`)},
 	{name: "修改/删除目标数据（HTTP DELETE）", re: regexp.MustCompile(`(?i)curl\s[^|]*(-X\s*DELETE|-XDELETE|--request\s+DELETE)`)},
-	// ⑤真实订单/支付/短信状态变更（状态关键词 + 提交动作合取）
-	{name: "真实订单/支付/短信状态变更", re: regexp.MustCompile(`(?i)(pay|payment|order|checkout|refund|sms|otp|verify_code|sendmsg|下单|支付|退款|发货|改价)`),
-		and: regexp.MustCompile(`(?i)(--data|-d\s|-F\s|-X\s*POST|--request\s+POST)`)},
+	// ⑤真实订单/支付/短信状态变更（状态关键词 + 提交动作合取）。
+	// v5.4.3 C：关键词全部词边界锚定——原 `pay` 无边界子串曾命中 "payloads" 导致纯只读
+	// 工具预检命令连坐被拦（实证）；CJK 词无子串歧义不变。skipIfReadOnly：只读命令豁免。
+	{name: "真实订单/支付/短信状态变更", re: regexp.MustCompile(`(?i)(\bpay\b|\bpayment\b|\border\b|\bcheckout\b|\brefund\b|\bsms\b|\botp\b|verify_code|sendmsg|下单|支付|退款|发货|改价)`),
+		and: regexp.MustCompile(`(?i)(--data|-d\s|-F\s|-X\s*POST|--request\s+POST)`), skipIfReadOnly: true},
 }
 
 // isolatedLabForbidden 对应 execution-profiles.yaml isolated_lab.forbidden 两行：
@@ -196,8 +202,15 @@ func (o *Orchestrator) profileOf(p *store.Project) string {
 	return prof
 }
 
-// profileViolations 命中的违禁规则名列表（声明层↔执行层对照输出，供阻断文案引用）。
-func profileViolations(profile, command string) []string {
+// profileHit 单条命中档案（v5.4.3 C：拦截消息可解释性——执行主体需要知道命中了什么才能自纠）。
+type profileHit struct {
+	Rule  string // 规则名
+	Match string // 命中的命令文本片段（re 侧匹配，截断展示）
+}
+
+// profileViolations 命中的违禁规则档案列表（声明层↔执行层对照输出，供阻断文案引用）。
+// readOnly=true（命令经只读判定）时跳过 skipIfReadOnly 类「状态变更合取」规则。
+func profileViolations(profile, command string, readOnly bool) []profileHit {
 	var rules []profileRule
 	switch profile {
 	case ProfileIsolatedLab:
@@ -205,30 +218,59 @@ func profileViolations(profile, command string) []string {
 	default:
 		rules = productionSafeForbidden
 	}
-	var hits []string
+	var hits []profileHit
 	for _, r := range rules {
-		if r.re.MatchString(command) && (r.and == nil || r.and.MatchString(command)) {
-			hits = append(hits, r.name)
+		if r.skipIfReadOnly && readOnly {
+			continue // 只读命令不可能造成状态变更——文本巧合命中豁免（v5.4.3 C）
 		}
+		m := r.re.FindString(command)
+		if m == "" {
+			continue // RE2 合取：re 侧命中才有意义（and 侧由合取语义另行保证）
+		}
+		if r.and != nil && !r.and.MatchString(command) {
+			continue
+		}
+		hits = append(hits, profileHit{Rule: r.name, Match: truncateRunesText(m, 60)})
 	}
 	return hits
 }
 
+// truncateRunesText rune 安全截断（profile 包内复用）。
+func truncateRunesText(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // profileGate 逐动作强制校验：返回阻断文案（空串放行）。isolated_lab 不在档内拦截受控写，
 // 其风险分级与审批照常生效（生产与实验室共用同一门入口——P0-4 统一高影响限制）。
+// v5.4.3 C：只读命令豁免状态变更合取类规则；拦截消息附命中细节（可解释拒绝）。
 func (o *Orchestrator) profileGate(p *store.Project, command string) (bool, string) {
 	prof := o.profileOf(p)
-	hits := profileViolations(prof, command)
+	readOnly := false
+	if o.exec != nil {
+		readOnly = o.exec.ReadOnlySafe(command)
+	}
+	hits := profileViolations(prof, command, readOnly)
 	if len(hits) == 0 {
 		return false, ""
 	}
-	if prof == ProfileProductionSafe {
-		return true, fmt.Sprintf("Execution Profile=production_safe：违禁动作[%s]已被逐动作强制拦截（v5.3.1）。"+
-			"生产口径只允许存在性证明（无害回显/随机标记/受控 OOB）；如确属可快照回滚的隔离靶场，"+
-			"请在项目设置将执行档显式切换为 isolated_lab 后重试。", strings.Join(hits, "、"))
+	names := make([]string, 0, len(hits))
+	matches := make([]string, 0, len(hits))
+	for _, h := range hits {
+		names = append(names, h.Rule)
+		matches = append(matches, "\""+h.Match+"\"")
 	}
-	return true, fmt.Sprintf("Execution Profile=isolated_lab：违禁动作[%s]已被拦截。"+
-		"隔离靶场内仍禁止向公网分发测试产物与接触生产数据；请改用合规方式取证。", strings.Join(hits, "、"))
+	if prof == ProfileProductionSafe {
+		return true, fmt.Sprintf("Execution Profile=production_safe：违禁动作[%s]已被逐动作强制拦截（v5.3.1）——命中文本: %s。"+
+			"生产口径只允许存在性证明（无害回显/随机标记/受控 OOB）；如确属可快照回滚的隔离靶场，"+
+			"请在项目设置将执行档显式切换为 isolated_lab 后重试；若本命令混合了合法动作与被禁动作，请拆分后单独重试合法部分。",
+			strings.Join(names, "、"), strings.Join(matches, "、"))
+	}
+	return true, fmt.Sprintf("Execution Profile=isolated_lab：违禁动作[%s]已被拦截——命中文本: %s。"+
+		"隔离靶场内仍禁止向公网分发测试产物与接触生产数据；请改用合规方式取证。", strings.Join(names, "、"), strings.Join(matches, "、"))
 }
 
 // labOnlyBannerText Lab Only 禁用横幅文案（production_safe 口径）。

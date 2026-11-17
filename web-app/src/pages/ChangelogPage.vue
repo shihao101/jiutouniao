@@ -15,6 +15,13 @@
 // 版本规则（遇十进一）：末位递增，末位满 10 进位到前一位（如 2.9 的下一版是 3.0）。
 // 每次发版（含 Bug 修复）必须：递增 server/internal/version/version.go 的 App 常量 + 在此补记录。
 const CHANGELOG = [
+  { v: 'v5.4.3', date: '2026-11-17', items: [
+    '新增（A·收口执行闭环）：收口前扫描 .async/ 状态侧车——已完成（finished/failed）且结论未进证据链的后台作业，输出尾部自动落证据+时间线（harvestAsyncOutputs）；V3「就绪未投递」清单按作业实际状态校正（资产已被后台作业执行的不再误标）。通用机制：只核对「启动→完成→消费」三态一致性，不读作业内容做语义判断，对任意后台用途同构生效（实证缺陷：某判别作业 finished 落盘但收口台账误标未投递，结论仅存叙事交付物）',
+    '新增（B·覆盖台账自描述契约）：update_coverage 四个结论态（vulnerable/ruled_out/no_issue_found/needs_follow_up）notes 必填——空依据入口拒收（有状态必有依据）；deterministicGate 新增收口兜底检查（本收口阶段名下结论态条目 notes 为空进拦截清单，跨阶段历史条目不连坐）。waf_blocked/skipped 过渡态豁免',
+    '修复（C·治理门精确性与可解释性）：规则⑤「订单/支付/短信状态变更」关键词全部词边界锚定（原 pay 无边界子串曾命中 payloads 导致纯只读工具预检命令连坐被拦——实证）；新增 skipIfReadOnly 规则字段（状态变更合取类规则对只读命令豁免，SQL 写/HTTP DELETE/导出类不豁免——拦截能力零放松）；拦截消息附规则名+命中文本（可解释拒绝，执行主体一次自纠）；registrationGate 拒绝文案补充混合命令拆分指引',
+    '测试：TestV543HarvestAsyncOutputs（收割+幂等消费判定+在途不收）/TestV543HarvestV3ListsSkipsExecutedVT（已执行 VT 不误标）/TestV543UpdateCoverageNoteRequired（空依据拒收+过渡态豁免）/TestV543DeterministicGateCoverageNote（收口兜底+跨阶段不连坐）/TestV543ProfileWordBoundaryAndReadOnlyExemption（词边界/只读豁免/非只读不豁免/真实变更仍拦）/TestV543ProfileGateMessageExplainable（消息含规则名+命中文本+泛化预检放行）——全部泛化样本，无项目特定内容；go 全测 6 包全绿',
+    '部署完成（v5.4.3）：回滚点 jiutouniao:rollback-5.4.2 留存，容器 recreate 后 /api/public/info version=5.4.3；运行中任务 auto_resume 断点续测',
+  ]},
   { v: 'v5.4.2', date: '2026-11-17', items: [
     '修复（下拉背景纯黑·用户实测反馈）：v5.4.1 自定义下拉的背景误用不存在的主题变量（var(--card, var(--bg-card, #1b2230))——两个变量名都未定义，回落到写死深色 #1b2230），亮色主题下下拉框呈纯黑；改用实际存在的 var(--bg2)（亮=#ffffff/暗=#161b22）与 var(--shadow-lg)，明暗两主题均与卡片/弹窗表面一致',
     '- 部署完成（v5.4.2）：回滚点 jiutouniao:rollback-5.4.1 留存，容器 recreate 后 /api/public/info version=5.4.2；运行中任务 auto_resume 断点续测；生产环境 headless 双主题实测——亮色下拉背景 rgb(255,255,255)/暗色 rgb(22,27,34)，候选文字可读',
