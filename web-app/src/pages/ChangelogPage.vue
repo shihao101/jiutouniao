@@ -15,6 +15,28 @@
 // 版本规则（遇十进一）：末位递增，末位满 10 进位到前一位（如 2.9 的下一版是 3.0）。
 // 每次发版（含 Bug 修复）必须：递增 server/internal/version/version.go 的 App 常量 + 在此补记录。
 const CHANGELOG = [
+  { v: 'v5.4.2', date: '2026-11-17', items: [
+    '修复（下拉背景纯黑·用户实测反馈）：v5.4.1 自定义下拉的背景误用不存在的主题变量（var(--card, var(--bg-card, #1b2230))——两个变量名都未定义，回落到写死深色 #1b2230），亮色主题下下拉框呈纯黑；改用实际存在的 var(--bg2)（亮=#ffffff/暗=#161b22）与 var(--shadow-lg)，明暗两主题均与卡片/弹窗表面一致',
+    '- 部署完成（v5.4.2）：回滚点 jiutouniao:rollback-5.4.1 留存，容器 recreate 后 /api/public/info version=5.4.2；运行中任务 auto_resume 断点续测；生产环境 headless 双主题实测——亮色下拉背景 rgb(255,255,255)/暗色 rgb(22,27,34)，候选文字可读',
+  ]},
+  { v: 'v5.4.1', date: '2026-11-17', items: [
+    '修复（拉取模型列表后看不到其它候选·用户实测反馈）：模型名下拉弃用原生 datalist——其按输入值过滤候选（输入框已有 deepseek-chat 时，deepseek-reasoner 因不含该子串被滤掉，实测拉取 2 个只显示 1 个）；改为自定义下拉：聚焦/点击 ▾ 显示全部候选、输入时子串过滤（不区分大小写）、点击条目填入、失焦关闭；拉取成功后立即展开全部候选；样式复用主题变量（暗/亮自适应），手动填写不受影响',
+    '部署完成（v5.4.1）：回滚点 jiutouniao:rollback-5.4.0 留存，容器 recreate 后 /api/public/info version=5.4.1；运行中任务 auto_resume 断点续测；生产环境 headless 实测用户报告场景（输入框有 deepseek-chat 时拉取候选）——下拉显示全部候选并可点击填入',
+  ]},
+  { v: 'v5.4.0', date: '2026-11-17', items: [
+    '修复（P1·创建页选择模型静默失效）：orch.CreateProject 构造持久化对象时漏拷 ModelID 字段——Web 层正确接收并传入，但落库恒为空，clientFor 读到空值静默回退默认模型且无任何提示（实证：32/32 项目 model_id 全空，创建页选 DeepSeek 实际跑 glm-5.3-flash）；补拷一行修复 + TestV540CreateProjectCarriesModelID 回归（还原缺陷即抓出）+ TestV540CreateProjectEmptyModelIDOK（默认路径不受影响）',
+    '新增（选择模型三重加固）：①handleCreateProject 前置校验 model_id——不在注册表直接 400（原静默回退）；②clientFor 对「项目指定模型不在注册表」每项目一次日志留痕（TestV540ClientForFallbackWarnOnce 验证去重，防每轮 LLM 调用刷日志）；③模型注册表读取逻辑不变（项目指定 > 默认 > 兜底）',
+    '新增（模型连通性测试）：POST /api/settings/models/test——真实 LLM 调用验证（中性探针「回复 OK」，max_tokens=96（推理型模型思考耗 token，实证 16 会全花在 reasoning 上），60s 超时容忍共享网关排队），支持两种模式：按已存模型 id 测（服务端解密已存 key）/ 表单未保存字段直测（key 留空回退已存 key，编辑场景）；可抓出 401 密钥无效/404 模型名错/402 欠费/400 参数错四类问题；单次成本几十 token；错误输出过密钥脱敏（maskKey），日志只记 host+耗时',
+    '新增（设置页模型卡片 UI）：每个已保存模型行新增「测试」按钮（行内显示 ✅ 耗时/tokens/回复 或 ❌ 错误详情）与「编辑」按钮（回填表单）；表单新增「先测试连接」（保存前即可验证）；结果文案明示边界——中性探针不覆盖业务内容风控（如 DeepSeek 对渗透语义的 Content Exists Risk 拦截）',
+    '新增（服务商模型列表拉取）：POST /api/settings/models/available——服务端以表单/已存 key 调服务商模型列举接口（openai 协议 GET {base}/models Bearer；anthropic 协议 /v1/models x-api-key+version），兼容 {data:[{id}]}/{models:[...]}/[id,...] 三种响应形态，去重排序封顶 500；api_key 走 POST body 不进 URL 查询串（防访问日志留存）',
+    '新增（模型名下拉选择）：模型名输入框升级为可搜索下拉（datalist）+「拉取模型列表」按钮——实时清单优先，拉取失败/不支持列举的服务商自动回退内置预设清单，始终保留手填；清单来源实时标注（实时拉取 N 个 / 预设清单 / 拉取失败回退）',
+    '新增（服务商预设扩容）：5→23 个预设——新增 火山方舟Coding/智谱GLM/Kimi/阿里百炼/百度千帆/腾讯混元/MiniMax/讯飞星火/硅基流动/Google Gemini（OpenAI 兼容层）/xAI Grok/Mistral/Groq/OpenRouter/Together/vLLM/LM Studio/自定义聚合，全部自动填 URL+协议+常见模型清单（静态兜底）；火山方舟预设 URL 修正为 /api/v3 并新增 /api/coding/v3 专用预设',
+    '修复（协议选择）：添加/修改模型的协议改显式下拉（openai/anthropic）——原实现依赖预设名判断（选「自定义」无法指定协议，anthropic 只能靠预设名命中）',
+    '测试：TestV540FetchProviderModelsDataShape/ModelsShape/AuthHeaders（解析三形态+双协议鉴权头+anthropic 路径追加）、TestV540ResolveModelCfgStoredKeyFallback（id 回退已存 key/表单覆盖/本地空 key/anthropic 必填/base_url 形态/脱敏）、TestV540CreateProjectCarriesModelID 三件套；go build/vet/全测全绿',
+    '核查口径：连续三轮全量核查通过（每轮=代码级 go build/vet/全测 6 包全绿 + API 级 14 项断言 + UI 级 headless Chromium 10 项断言）——三轮 glm 连通性实测均回复 OK（4.4s/2.2s/4s，94 tokens）；负面用例（错 key 401/缺 model 400/无效 model_id 400/不可达列举 502）全部按预期失败且无密钥泄漏；DeepSeek 生产密钥经连通性实测确认有效（回复 OK）',
+    '部署口径：镜像 jiutouniao:5.4.0-pending 预构建待命，运行中任务结项后零中断切换（沿用 v5.3.9 先例）；切换后 /api/public/info 应为 5.4.0，创建页选模型自此真实生效',
+    '部署完成（v5.4.0）：回滚点 jiutouniao:rollback-5.3.9 留存，镜像 5.4.0-pending→latest 晋级，容器 recreate 后 /api/public/info version=5.4.0；两运行中任务中断即置 paused（内部任务编号已泛化），auto_resume 30s 内断点续测（done 阶段自动跳过，s3/s2 各归其位续跑）；多模型注册表恢复 2 个默认 glm',
+  ]},
   { v: 'v5.3.9', date: '2026-11-16', items: [
     '新增（架构信号→技能强制路由）：00-router 资产表新增 5 行确定性映射——网关统一路由/多异构后端→request-smuggling+intranet-lateral；JWT/令牌机制确证或密钥材料泄露→jwt-crypto；SSO/票据/扫码机制→auth-flow-deep+jwt-crypto；同应用多实例/多节点→instance-diff；登录态不可得→observable-degradation——架构确证即触发，不再依赖模型自主联想',
     '新增（instance-diff 技能）：同构多实例/多节点行为差分手册——同构性判定四件套+共享态验证+行为差分矩阵五维（状态码/响应头/body 结构/行为语义/密钥配置值），差异=配置漂移/版本滞后/门控不一致信号',

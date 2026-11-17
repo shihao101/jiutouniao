@@ -62,6 +62,7 @@ type Orchestrator struct {
 
 	projMu    sync.Mutex        // v2.7 A8：项目级模型故障切换覆盖表
 	projModel map[string]string // v2.7 A8：projectID -> 故障切换后接管的项目模型 id
+	modelWarn map[string]bool   // v5.4.0：projectID -> 回退默认模型告警已记（去重防刷日志）
 
 	chatMu      sync.Mutex                    // v3.4.0：对话轮取消注册表
 	chatCancels map[string]context.CancelFunc // v3.4.0：projectID -> 在途对话轮 cancel
@@ -307,6 +308,18 @@ func (o *Orchestrator) clientFor(p *store.Project) (llm.Client, string) {
 	if p != nil && p.ModelID != "" {
 		if c, ok := o.clients[p.ModelID]; ok {
 			return c, o.models[p.ModelID]
+		}
+		// v5.4.0：项目指定了模型但注册表中不存在（配置已删除/旧数据）——回退默认并留痕。
+		// 每项目只记一次，避免每轮 LLM 调用刷日志。
+		o.projMu.Lock()
+		if o.modelWarn == nil {
+			o.modelWarn = map[string]bool{}
+		}
+		first := !o.modelWarn[p.ID]
+		o.modelWarn[p.ID] = true
+		o.projMu.Unlock()
+		if first {
+			log.Printf("[engine] 项目 %s 指定模型 %s 不在注册表，回退默认模型（model_id=%q）", p.ID, o.models[o.defModel], p.ModelID)
 		}
 	}
 	if c, ok := o.clients[o.defModel]; ok {
@@ -882,6 +895,9 @@ func (o *Orchestrator) CreateProject(in *store.Project) (*store.Project, error) 
 		Contact: in.Contact, SuccessCriteria: in.SuccessCriteria,
 		AuthInfo: in.AuthInfo, StrictScope: in.StrictScope, BudgetTokens: in.BudgetTokens,
 		Authorized: in.Authorized, AutoApprove: in.AutoApprove,
+		// v5.4.0 修复：ModelID 此前被漏拷——创建页选择模型静默失效（32/32 项目 model_id 全空，
+		// 全部回退默认模型），clientFor 读到空值不报错，用户无从察觉。补上即修复。
+		ModelID:          in.ModelID,
 		ExecutionProfile: in.ExecutionProfile, // v5.3.1：执行档随项目持久化（store 层缺省 production_safe）
 		PostExploit:      in.PostExploit,      // v5.3.7：后渗透勾选随项目持久化
 		Specializations:  in.Specializations, Status: "created",

@@ -2,7 +2,7 @@
 
 > **Jiutouniao** — an open-source, full-lifecycle AI agent platform for **authorized** penetration testing: multi-head orchestration, human-in-the-loop approvals, deterministic governance gates, and evidence-chain reporting. For written-authorization engagements only.
 >
-> 当前版本 **v5.3.9**（单一事实源：`server/internal/version/version.go`；Web 顶栏与 `/api/public/info` 同源展示）。
+> 当前版本 **v5.4.2**（单一事实源：`server/internal/version/version.go`；Web 顶栏与 `/api/public/info` 同源展示）。
 > 八个阶段专家头 + 三个专项头 + 一个真头（主控），断一头、生一头——阶段间自动回环，直到拿下业务影响证明。（v1.4 起阶段 0 授权并入项目创建页、阶段 9 复测并入人工流程）
 >
 > 架构源自对 46 个开源安全 Agent（strix / pentagi / BreachWeave / VulnBot / hexstrike-ai 等）的共性提炼，流程严格映射《AI 渗透测试全流程图》（10 阶段 + 专项 A/B1/B2/C + 执行循环引擎）。
