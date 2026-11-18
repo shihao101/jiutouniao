@@ -9,6 +9,7 @@
 用法：python3 scripts/verify_v544_v545.py [run 标注]
 退出码 0=本轮零异常；1=有异常。"""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -103,7 +104,7 @@ check("R3 引擎 build+全量测试零失败", rc == 0 and "FAIL" not in out, ou
 rc, out = sh("curl -s -m 10 http://127.0.0.1:8787/api/public/info")
 info = json.loads(out) if out.strip().startswith("{") else {}
 check("R3 线上版本 5.4.5", info.get("version") == "5.4.5", str(info.get("version")))
-rc, out = sh("curl -s -m 10 -H 'Authorization: Bearer REDACTED-AUTH-TOKEN' http://127.0.0.1:8787/api/skills")
+rc, out = sh('curl -s -m 10 -H "Authorization: Bearer ' + os.environ.get("JT_AUTH_TOKEN", "") + '" http://127.0.0.1:8787/api/skills')
 items = json.loads(out)
 items = items if isinstance(items, list) else items.get("skills", [])
 live_ids = {s.get("id") for s in items}
@@ -133,7 +134,7 @@ dist = subprocess.run("grep -oE 'index-[A-Za-z0-9_-]+\\.js' /root/jiutouniao/web
                       shell=True, capture_output=True, text=True).stdout.strip()
 check("R3 线上前端=本地最新 dist", served == dist and served, f"served={served} dist={dist}")
 # 项目数据完整性
-rc, out = sh("curl -s -m 10 -H 'Authorization: Bearer REDACTED-AUTH-TOKEN' http://127.0.0.1:8787/api/projects")
+rc, out = sh('curl -s -m 10 -H "Authorization: Bearer ' + os.environ.get("JT_AUTH_TOKEN", "") + '" http://127.0.0.1:8787/api/projects')
 n = len(json.loads(out))
 check("R3 项目数据完整（34 个）", n == 34, str(n))
 

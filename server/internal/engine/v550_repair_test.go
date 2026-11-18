@@ -57,7 +57,7 @@ func TestV550CredentialsRoundtrip(t *testing.T) {
 		t.Fatal("配置主密钥后应启用")
 	}
 	meta, err := svc.Put(credentials.Input{ProjectID: "PA", Target: "http://t", Identity: "operator",
-		Role: "admin", Kind: "bearer", Username: "ops-user", Secret: "super-secret-token"})
+		Role: "admin", Kind: "bearer", Username: "ops-user", Secret: "ops-cred-2026"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestV550CredentialsRoundtrip(t *testing.T) {
 		t.Fatalf("meta 用户名应掩码: %q", meta.Username)
 	}
 	sec, err := svc.Get("PA", meta.ID)
-	if err != nil || sec.Value != "super-secret-token" {
+	if err != nil || sec.Value != "ops-cred-2026" {
 		t.Fatalf("解密回读不符: %v %q", err, sec.Value)
 	}
 	// ① 项目隔离

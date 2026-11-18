@@ -571,7 +571,7 @@ var defaultScopeAllowlist = []string{
 	"dns.alidns.com", "223.5.5.5", "119.29.29.29", "8.8.8.8", "1.1.1.1",
 	"gitee.com", // v5.3.1：install_tool git 策略的国内镜像源（installToolGitMap 第二策略）
 	// v5.3.9：OSINT 数据源补全——对第三方 API 的读请求不是对目标发包，不应被目标匹配器误拦
-	// （实测事故：JT-CB28FC05F0 空间测绘四平台全被 strict_scope 拦截，OSINT 轨空转）。
+	// （实测事故：某历史任务空间测绘四平台全被 strict_scope 拦截，OSINT 轨空转）。
 	// 泄露库/测绘/代码检索与档案类数据源；recon-playbook / osint-leak-intel / history-recon 消费。
 	"fofa.info", "quake.360.net", "zoomeye.org", "hunter.qianxin.com",
 	"api.pwnedpasswords.com", "haveibeenpwned.com", "virustotal.com", "shodan.io", "censys.io",
@@ -3160,7 +3160,7 @@ func gitSourceLabel(source string) string {
 }
 
 // buildInstallAttempts v5.7.2 安装通道分流：按源地域生成直连/代理互为兜底的尝试序列。
-// 实证事故（JT-351169BBD7/JT-8991DD1A6D 等多条任务）：pip 走清华源报 SSL EOF（TLS 被上游重置）、
+// 实证事故（多条历史任务）：pip 走清华源报 SSL EOF（TLS 被上游重置）、
 // github 直连恒定 Connection reset——单路径策略哪条坏就整链失败。本环境实测：国内源直连可达、
 // github 仅代理可达；代理链路（LLM_PROXY→上游）恰好相反。故：
 //   - 通道优先级不变：apt → pip 清华源 → git（installToolGitMap 顺序，github 优先 gitee 镜像）；

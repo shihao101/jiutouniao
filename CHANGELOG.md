@@ -8,7 +8,7 @@
 
 ## v5.7.2 · 2026-11-18
 
-- 修复（安装通道分流·实证事故）：install_tool 按源地域直连/代理互为兜底——此前 apt/pip/git 单路径直连，本环境直连对 pip 清华源间歇 TLS 重置（SSL: UNEXPECTED_EOF_WHILE_READING，JT-351169BBD7/JT-8991DD1A6D 等多条任务 tesseract/验证码 OCR 链路因此中断）、对 github 恒定 Connection reset（git 通道仅剩 gitee 镜像可用），而代理链路（LLM_PROXY→上游）恰好相反（国内源 TLS 被上游掐断、github 可达）——单路径哪条坏整链必败。分流矩阵：apt/pip 清华源/gitee 直连优先、主路径失败自动代理兜底；github 代理优先、失败直连兜底；代理地址 TOOL_PROXY 优先、未配置回退容器全局 HTTP(S)_PROXY，两者皆空仅直连（公开分发默认行为不变）；直连路径命令级显式 unset 自保证，不依赖执行器 sanitizeEnv 剥离（靶机测试流量直连纪律不变）
+- 修复（安装通道分流·实证事故）：install_tool 按源地域直连/代理互为兜底——此前 apt/pip/git 单路径直连，本环境直连对 pip 清华源间歇 TLS 重置（SSL: UNEXPECTED_EOF_WHILE_READING，多条历史任务 tesseract/验证码 OCR 链路因此中断）、对 github 恒定 Connection reset（git 通道仅剩 gitee 镜像可用），而代理链路（LLM_PROXY→上游）恰好相反（国内源 TLS 被上游掐断、github 可达）——单路径哪条坏整链必败。分流矩阵：apt/pip 清华源/gitee 直连优先、主路径失败自动代理兜底；github 代理优先、失败直连兜底；代理地址 TOOL_PROXY 优先、未配置回退容器全局 HTTP(S)_PROXY，两者皆空仅直连（公开分发默认行为不变）；直连路径命令级显式 unset 自保证，不依赖执行器 sanitizeEnv 剥离（靶机测试流量直连纪律不变）
 - 修复（strict_scope 代理赋值误拦·同型潜伏面）：scopeGate 目标提取前剥离代理环境赋值（export/env http_proxy=… https_proxy=…）——install_tool 代理兜底命令携带的 docker 网桥 IP、loop-core 教的「env http_proxy=$TOOL_PROXY <cmd>」下载前缀此前都会被误判为范围外目标确定性拦截；业务目标口径不变（范围外 URL 仍拦、白名单照常放行，单测正反两向断言）
 - 增强（install_tool 可观测性）：尝试日志与时间线按「通道·路径」逐条标注（如 pip 清华源·代理兜底），失败文案区分「直连+代理兜底均失败」与「包不存在」；工具描述同步分流语义（国内直连优先/国外代理优先/互为兜底）
 
