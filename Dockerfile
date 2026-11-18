@@ -52,12 +52,16 @@ ENV GOPROXY=${GOPROXY} CGO_ENABLED=0 \
 
 # 安全工具（与引擎解耦）：优先 go install 最新版；编译失败时回退底座自带版本——
 # 两者皆无则构建失败（不再静默跳过产出残缺镜像）
+# v5.7.3：interactsh-client 补进清单——OOB 通道核心工具，Kali 仓库/PyPI 均无包，此前全靠底座
+# 预装 ~/go/bin（登录 shell PATH 剥离后探测不到，install_tool 误判缺失走必败安装链，实证事故
+# 实测事故：go install 落位 /usr/local/bin（登录 shell PATH 可见），失败回退底座版本
 RUN mkdir -p /out/tools; \
     (go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.17.0 || echo "go install subfinder failed——回退底座版本") && \
     (go install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0 || echo "go install httpx failed——回退底座版本") && \
     (go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1 || echo "go install nuclei failed——回退底座版本") && \
     (go install github.com/ffuf/ffuf/v2@v2.3.0 || echo "go install ffuf failed——回退底座版本") && \
-    for t in subfinder httpx nuclei ffuf; do \
+    (go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@v1.4.1 || echo "go install interactsh-client failed——回退底座版本") && \
+    for t in subfinder httpx nuclei ffuf interactsh-client; do \
       if [ -f /go/bin/$t ]; then cp /go/bin/$t /out/tools/; \
       elif p=$(command -v $t 2>/dev/null) && [ -n "$p" ]; then cp "$p" /out/tools/; \
       else echo "FATAL: $t 编译失败且底座未提供，拒绝产出镜像"; exit 1; fi; \
@@ -104,6 +108,15 @@ RUN rm -f /etc/apt/sources.list.d/docker.list && \
     for t in nmap python3 curl sqlmap git; do \
       command -v $t >/dev/null 2>&1 || { echo "FATAL: 运行时缺 $t（底座与 apt 均未提供），请联网重建或换全量 Kali 底座"; exit 1; }; \
     done; true
+
+# v5.7.3：登录 shell PATH 修复——Kali /etc/profile 重置 PATH 会剥掉底座预装工具所在的
+# /root/go/bin（实证事故：interactsh-client 随底座预装 ~/go/bin，exec.Run 的
+# bash -lc 探测不到 → install_tool 误判缺失走必败安装链）。profile.d 统一恢复，使底座全部
+# 预装 go 工具在 install_tool 探测、run_command 执行、安装验证全链路可见（非登录 shell 的
+# 场景由 installProbeCmd 的显式路径探测兜底，双保险）。
+RUN printf '#!/bin/sh\n# v5.7.3：恢复底座预装 go 工具目录（/etc/profile 会重置 PATH 剥掉本目录）\nexport PATH="/root/go/bin:$PATH"\n' > /etc/profile.d/go-bin.sh && \
+    chmod +x /etc/profile.d/go-bin.sh && \
+    bash -lc 'case ":$PATH:" in *":/root/go/bin:"*) true;; *) echo "FATAL: 登录 shell PATH 修复失败（/root/go/bin 不可见）"; exit 1;; esac'
 
 # v2.5.2：剥离越界文件能力位（实测 vxcontrol 底座 nmap 带 fcap=cap_net_admin，
 # 不在 Docker 默认 bounding set → exec EPERM，智能体报「nmap 二进制存在但容器权限受限」）；

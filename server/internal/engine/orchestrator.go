@@ -3125,6 +3125,19 @@ var installToolGitMap = map[string][]string{
 	"nuclei": {"https://github.com/projectdiscovery/nuclei.git", "https://gitee.com/mirrors/projectdiscovery-nuclei.git"},
 }
 
+// installProbeCmd v5.7.3 存在性探测命令：PATH 命中 + /root/go/bin 显式探测 + 安装标记三路。
+// 背景（实证事故）：exec.Run 用 bash -lc 登录 shell，Kali /etc/profile 重置 PATH
+// 剥掉 /root/go/bin——interactsh-client 明明随底座预装于 ~/go/bin，command -v 探测不到 →
+// install_tool 误判缺失，走 apt/pip/git 必败安装链（Kali 无此包/PyPI 无发行版/git 未注册）。
+func installProbeCmd(name, marker string) string {
+	return fmt.Sprintf("command -v %s || test -x /root/go/bin/%s || test -f %s", name, name, marker)
+}
+
+// installVerifyCmd 安装成功校验命令（与探测同口径，含 /root/go/bin 显式路径）。
+func installVerifyCmd(name string) string {
+	return fmt.Sprintf("command -v %s >/dev/null 2>&1 || test -x /root/go/bin/%s || test -f /opt/tools/%s/%s.py", name, name, name, name)
+}
+
 // installAttempt 单次安装尝试（通道·路径 标签 + 完整命令）。
 type installAttempt struct {
 	label string
@@ -3216,7 +3229,7 @@ func (o *Orchestrator) toolInstallTool(ctx context.Context, p *store.Project, st
 	}
 	marker := fmt.Sprintf("/opt/tools/.installed-%s", name)
 	// 已存在则直接确认可用
-	chk, _ := o.exec.Run(ctx, p.ID, fmt.Sprintf("command -v %s || test -f %s", name, marker), 30)
+	chk, _ := o.exec.Run(ctx, p.ID, installProbeCmd(name, marker), 30)
 	if chk != nil && chk.ExitCode == 0 {
 		return fmt.Sprintf("工具 %s 已可用（无需安装）。直接使用即可。", name)
 	}
@@ -3265,7 +3278,7 @@ func (o *Orchestrator) toolInstallTool(ctx context.Context, p *store.Project, st
 		}
 		log.WriteString(fmt.Sprintf("\n[%s] 退出码=%d\n%s", st.label, map[bool]int{true: 0, false: 1}[err == nil && res != nil && res.ExitCode == 0], truncateText(out, 400)))
 		// 验证安装是否成功
-		verify := fmt.Sprintf("command -v %s >/dev/null 2>&1 || test -f /opt/tools/%s/%s.py", name, name, name)
+		verify := installVerifyCmd(name)
 		vr, _ := o.exec.Run(ctx, p.ID, verify, 15)
 		if err == nil && vr != nil && vr.ExitCode == 0 {
 			installed = st.label

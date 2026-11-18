@@ -15,6 +15,12 @@
 // 版本规则（遇十进一）：末位递增，末位满 10 进位到前一位（如 2.9 的下一版是 3.0）。
 // 每次发版（含 Bug 修复）必须：递增 server/internal/version/version.go 的 App 常量 + 在此补记录。
 const CHANGELOG = [
+  { v: 'v5.7.4', date: '2026-11-18', items: [
+    '增强（前端 API 响应守卫·实证事故）：api 统一封装的 r.json() 裸解析——服务端老版本对新增路由回纯文本 404（「404 page not found」）、网关/代理回 HTML 错误页时，JSON SyntaxError 原文（Unexpected non-whitespace character after JSON at position 4）被直接抛给用户，看不出根因（实证：v5.4.0 新增的模型测试/拉取路由打到半升级部署的老服务端——前端有按钮、服务端无路由）。改为先 text 后 JSON.parse：解析失败抛出含 HTTP 状态码与响应片段的友好提示，明确指向「前端与服务端版本不一致（请升级服务端）或网关拦截」',
+  ]},
+  { v: 'v5.7.3', date: '2026-11-18', items: [
+    '修复（install_tool 误判缺失·实证事故）：interactsh-client 随底座预装于 /root/go/bin，但 exec.Run 的 bash -lc 登录 shell 经 Kali /etc/profile 重置 PATH 剥掉该目录——存在性探测 command -v 探测不到，误判缺失后走 apt/pip/git 必败安装链（Kali 仓库无此包、PyPI 无发行版、git 映射未注册——v5.7.2 直连+代理兜底四连败白烧 5 分钟，当日 19:37 时间线实证）。三处收口：①pre-check/verify 探测补 test -x /root/go/bin/<name> 显式路径（installProbeCmd/installVerifyCmd 提取为可测函数并单测固化）；②镜像 /etc/profile.d/go-bin.sh 统一恢复登录 shell PATH——底座全部预装 go 工具在 install_tool 探测、run_command 执行、安装验证全链路可见（构建期 fail-hard 冒烟断言 PATH 含 go/bin）；③Dockerfile go-install 清单补 interactsh-client@v1.4.1（与 subfinder/httpx/nuclei/ffuf 同模式，落位 /usr/local/bin，编译失败回退底座版本）——OOB 通道核心工具不再依赖「底座恰好预装+PATH 恰好可见」',
+  ]},
   { v: 'v5.7.2', date: '2026-11-18', items: [
     '修复（安装通道分流·实证事故）：install_tool 按源地域直连/代理互为兜底——此前 apt/pip/git 单路径直连，本环境直连对 pip 清华源间歇 TLS 重置（SSL: UNEXPECTED_EOF_WHILE_READING，多条历史任务 tesseract/验证码 OCR 链路因此中断）、对 github 恒定 Connection reset（git 通道仅剩 gitee 镜像可用），而代理链路（LLM_PROXY→上游）恰好相反（国内源 TLS 被上游掐断、github 可达）——单路径哪条坏整链必败。分流矩阵：apt/pip 清华源/gitee 直连优先、主路径失败自动代理兜底；github 代理优先、失败直连兜底；代理地址 TOOL_PROXY 优先、未配置回退容器全局 HTTP(S)_PROXY，两者皆空仅直连（公开分发默认行为不变）；直连路径命令级显式 unset 自保证，不依赖执行器 sanitizeEnv 剥离（靶机测试流量直连纪律不变）',
     '修复（strict_scope 代理赋值误拦·同型潜伏面）：scopeGate 目标提取前剥离代理环境赋值（export/env http_proxy=… https_proxy=…）——install_tool 代理兜底命令携带的 docker 网桥 IP、loop-core 教的「env http_proxy=$TOOL_PROXY <cmd>」下载前缀此前都会被误判为范围外目标确定性拦截；业务目标口径不变（范围外 URL 仍拦、白名单照常放行，单测正反两向断言）',

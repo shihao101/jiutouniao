@@ -9,7 +9,18 @@ export async function api(path, method = 'GET', body) {
     session.logout()
     throw new Error('未登录或会话过期')
   }
-  const j = await r.json()
+  // v5.7.4：非 JSON 响应守卫——服务端老版本对新增路由回纯文本 404（「404 page not found」）、
+  // 网关/代理回 HTML 错误页时，裸 r.json() 会把 SyntaxError 原文（Unexpected non-whitespace
+  // character after JSON at position 4）直接抛给用户，看不出根因（实证：v5.4.0 新增路由打到
+  // 半升级部署的老服务端）。改为先 text 后 parse，失败抛含状态码与响应片段的友好提示。
+  const text = await r.text()
+  let j
+  try {
+    j = JSON.parse(text)
+  } catch (e) {
+    const snippet = text.slice(0, 80).replace(/\s+/g, ' ').trim() || '(空响应)'
+    throw new Error(`服务端返回了非 JSON 响应（HTTP ${r.status}）——多为前端与服务端版本不一致（请升级服务端）或网关拦截；响应片段: ${snippet}`)
+  }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status))
   return j
 }
