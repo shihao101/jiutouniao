@@ -73,6 +73,10 @@ type EngineConfig struct {
 	// v4.4 多目标轮次自适应（方向二B）：S2/S4/S5 阶段预算 = base + (目标数-1)*PerTargetRounds，封顶 3×base
 	PerTargetRounds int `json:"per_target_rounds"` // 每增 1 个目标追加的轮次（默认 10；<=0 视为默认）
 
+	// v5.5.0 能力修复（docs/repair-plan-capability-20261118.md 方案 D/E）：
+	BudgetExhaustedPolicy string `json:"budget_exhausted_policy"` // 阶段预算耗尽策略：pause（默认，阶段置 paused+项目暂停，可提升预算/手动重跑续跑；不再把未完成阶段装作 done）/auto_close（v4.9 旧行为：代收口 done+quality-pending，流水线继续）
+	LoopbackMaxRuns       int    `json:"loopback_max_runs"`       // 单项目自动回环补跑上限（默认 3；超额的 loopback 请求显式拒绝并留痕，不再"置 pending 却不排队"成死角）
+
 	// v4.6 K7 命令空闲护栏：同步命令连续 N 秒无输出 → 终止进程组（实测 searchsploit 更新
 	// 网络挂死烧掉 91 分钟窗口）。<=0 视为默认 120；显式 -1 禁用。长静默任务应走 run_async。
 	CommandIdleTimeoutSec int `json:"command_idle_timeout_sec"`
@@ -260,6 +264,17 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Engine.PerTargetRounds <= 0 {
 		c.Engine.PerTargetRounds = 10 // v4.4：多目标轮次自适应默认每目标 +10 轮（方向二B）
+	}
+	// v5.5.0：预算耗尽策略（默认 pause——未完成阶段不得假装完成）与回环上限（默认 3，沿用原值）
+	if c.Engine.BudgetExhaustedPolicy == "" {
+		c.Engine.BudgetExhaustedPolicy = "pause"
+	}
+	c.Engine.BudgetExhaustedPolicy = strings.ToLower(strings.TrimSpace(c.Engine.BudgetExhaustedPolicy))
+	if c.Engine.BudgetExhaustedPolicy != "pause" && c.Engine.BudgetExhaustedPolicy != "auto_close" {
+		c.Engine.BudgetExhaustedPolicy = "pause"
+	}
+	if c.Engine.LoopbackMaxRuns <= 0 {
+		c.Engine.LoopbackMaxRuns = 3
 	}
 	// v4.8 W5 行为预算器：批量动作配额（默认 12 次/10 分钟）与冷却时长（默认 5 分钟，完全静默）
 	if c.Engine.BatchQuotaPer10Min <= 0 {

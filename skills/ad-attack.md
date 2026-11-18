@@ -90,3 +90,53 @@ certipy ca -u <u>@<domain> -p <p> -dc-ip DC                  # CA 信息
 ## v4.8 M6 工具通道兼容性声明
 
 > 通用判据以 `tool-channels.md` 为准（v5.1 单源去重）；本技能差异：certipy/Impacket/netexec 等内网工具链在内网直连下可用（无应用层挑战）——经隧道运行时注意双层限速；Kerberoast/ASREPRoast 类请求受 ROE cred_attack 额度约束。nmap/curl 通用行不再内联。
+
+## v5.6.0 AD 票据伪造链补全（三凭证审计 S2 轨；MITRE T1558 对照）
+
+> 前置纪律：本节全部动作属 **Lab Only**（isolated_lab 可快照回滚的隔离域）——生产档只做只读枚举与影响说明（Golden/Silver 票据伪造对生产域控有真实副作用）。工具探针先行：`which impacket-secretsdump impacket-getST mimikatz 2>/dev/null`（impacket 已随 Kali 底座；mimikatz 类 Windows 原生工具标注"需实验域环境"）。
+
+### 新增伪造矩阵
+
+1. **Golden Ticket（T1558.001）**： krbtgt NTLM 哈希在手（secretsdump 已覆盖）→ `impacket-ticketer -nthash <krbtgt> -domain-sid <SID> -domain <域> -user-id 500 administrator` 伪造 TGT；判据：psexec/smbexec 用伪造票访问域控 ADMIN$ 成功（隔离域）。清理：销毁本地 ccache，域侧不产生工件（票据由 DC 日志可见 → 报告标注）。
+2. **Silver Ticket（T1558.002）**： 服务账号 NTLM + SPN → `impacket-ticketer -spn <SPN> ...` 伪造 TGS；判据：目标服务接受伪造票（CIFS/HTTP/Host 类 SPN 分别验证）。
+3. **Pass-the-Ticket（T1550.003）**： 收集的 ccache/票据注入新会话（`export KRB5CCNAME=...` + impacket 工具族）——跨主机票据复用面；判据：注入后访问新资源成功。
+3b. **票据缓存收集（T1558.005，v5.6.1 补齐）**：①标准路径发现：Linux `/tmp/krb5cc_*`、`/var/lib/sss/db/ccache_*`；Windows 域内 mimikatz/Rubeus triage（Lab Only）②自定义 `KRB5CCNAME` 枚举（`env | grep KRB5CC`）③权限判据：当前用户可读他人 ccache = 票据窃取候选（影响=该用户全部 Kerberos 服务票据）④提取：cp 工作区（0600）→ kirbi 转换 → PtT 注入验证。证据：路径+权限位+principal 列表（`klist -C`），票据值不落库（掩码纪律）。
+4. **ccache 变体与跨格**： kirbi(ccache) ↔ KRB-CRED 转换（impacket ticketer 自带）；文件名/注入路径标准化（/tmp/ticket.ccache 权限 600，收口删除）。
+5. **RBCD/S4U2self+u2x** 已有节——本节与其衔接：RBCD 成功取得的 ST 同样走 Pass-the-Ticket 注入测试。
+
+### 证据与谱系
+
+- 伪造票据 store_credential **origin=forged method=golden-ticket/silver-ticket/pass-the-ticket** 入库（kind=token，target=域控/服务 SPN）；
+- 每张伪造票的 S4U/DER 编码原文不入库（太大）——存 evidence/<stage>/ticket-<n>.ccache（0600）+ 掩码登记；
+- 报告口径：票据伪造 = 影响证明（域接管级），全部在隔离域演示；production_safe 项目只报告"具备伪造前提"（krbtgt 哈希在手）+ 人工移交。
+
+### 与既有节衔接
+
+Kerberoast/AS-REP（上文）取得服务账号哈希 → 离线破解（password-offline）→ Silver Ticket 伪造 → Pass-the-Ticket 横向——五步构成完整"凭证从获取到伪造到横向"链，覆盖矩阵按此记账。
+
+## v5.6.0 枚举证据格式与低权→影响验证矩阵（三凭证审计补强）
+
+### 工具能力探针（开工先行，缺失如实降级）
+
+`which impacket-secretsdump impacket-getUsersNP impacket-getTGT bloodhound-python certipy ldeep`——impacket 族随 Kali 底座；BloodHound 数据采集（bloodhound-python 用合法凭据运行，生产档只读）缺失 → SharpHound 需 Windows 域内环境（标注"需域内执行环境"），不硬凑。
+
+### 枚举证据格式（每项产出结构化记录）
+
+```
+枚举单：<对象类型（用户/组/ACL/GPO/证书模板）>
+工具与命令：精确命令行（可复现）
+产出：结果文件路径 + 关键行摘录
+影响线索：写权限/委派/证书模板危险位（如 EnrolleeSuppliesSubject、ESC1-8 判据位）
+```
+
+### 低权 → 影响验证矩阵（逐级收口）
+
+| 起点能力 | 验证动作（Lab/审批内） | 影响级 |
+|---|---|---|
+| 任意域用户凭据 | 血励枚举 → 攻击路径图（短路径优先） | 基础 |
+| Kerberoast 可破 SPN | 破解 → 服务账号权限面（Silver Ticket 前置） | 中 |
+| WriteDacl/AllExtendedRight | 对 DC/ADCS 对象的写权限验证（Lab） | 高 |
+| 证书模板 ESC1 位 | certipy 申请 UA（Lab） | 接管 |
+| krbtgt 哈希 | Golden Ticket（v5.6.0 节，Lab Only） | 全域接管 |
+
+- 每行命中即 record_finding（路径上每步 evidence 留证）；全程隔离域演示口径（生产档只枚举+报告路径，不执行写/伪造——对齐 v5.6.0 票据节纪律）。

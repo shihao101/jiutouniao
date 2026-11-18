@@ -34,10 +34,17 @@ type SubAgentRun struct {
 	Summary   string
 	StartedAt time.Time
 	EndedAt   time.Time
+	Attempts  int // v5.5.0（修复方案 F）：LLM 调用累计尝试次数（含重试），poll 可观测
 
 	reported bool // poll_subagents 已向主头汇报过最终结果
 	cancel   context.CancelFunc
 }
+
+// subAgentLLMRetries v5.5.0（修复方案 F）：瞬时 LLM 错误的有界重试（线性退避 2s/5s/10s）。
+// 原实现单次失败即整跑 failed、产出静默蒸发（无重试+结果只在内存摘要）。
+// 重试安全性：Chat 调用失败意味着本轮没有产出任何 tool_calls，不存在已执行的副作用可重放；
+// 上一轮工具结果已在 msgs 中，恢复续发不会重复执行任何工具。Kill（ctx 取消）不重试。
+const subAgentLLMRetries = 3
 
 var subAgentTools = map[string]bool{
 	"run_command": true, "run_async": true, "poll_async": true,
@@ -45,6 +52,9 @@ var subAgentTools = map[string]bool{
 	"record_finding": true, "record_asset": true, "record_timeline": true,
 	"upsert_fact": true, "record_loot": true, "update_coverage": true,
 	"load_skill": true, "search_memory": true, "install_tool": true, "hexstrike_command": true,
+	// v5.5.0（修复方案 A/F）：带态测试进子代理工具面（角色矩阵扇出复放依赖 http_request/cred_command）；
+	// 凭据管理类动作（store/revoke）仍只属于主头。
+	"http_request": true, "cred_command": true, "list_credentials": true,
 }
 
 // subAgentToolDefs 主头工具面的受控子集（按白名单过滤）。
@@ -161,13 +171,34 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 			run.Status = "killed"
 			return
 		}
-		resp, usage, err := cli.Chat(ctx, model, msgs, tools, o.cfg.LLM.Temperature, o.cfg.LLM.MaxTokens)
+		// v5.5.0（修复方案 F）：LLM 瞬时错误有界重试（2s/5s/10s 退避）——
+		// Chat 失败时本轮无 tool_calls 产出，重试不重放任何工具副作用；Kill 不重试。
+		var resp llm.Message
+		var usage llm.Usage
+		var err error
+		for attempt := 1; attempt <= subAgentLLMRetries; attempt++ {
+			run.Attempts++ // 累计尝试次数（跨轮累计，poll 可观测）
+			resp, usage, err = cli.Chat(ctx, model, msgs, tools, o.cfg.LLM.Temperature, o.cfg.LLM.MaxTokens)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			if attempt < subAgentLLMRetries {
+				backoff := time.Duration(2*attempt+1) * time.Second // 2s/5s/10s 线性退避
+				select {
+				case <-ctx.Done():
+				case <-time.After(backoff):
+				}
+			}
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				run.Status = "killed"
 			} else {
 				run.Status = "failed"
-				run.Summary = "LLM 调用失败: " + truncateText(err.Error(), 200)
+				run.Summary = fmt.Sprintf("LLM 调用失败（重试 %d 次后放弃）: %s", subAgentLLMRetries, truncateText(err.Error(), 200))
 			}
 			return
 		}

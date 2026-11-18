@@ -43,9 +43,26 @@ tags: "对抗,鉴权,差分,白名单遗漏,未授权,s4"
 5. **收口门槛**：清点覆盖率未达 100%（或缺口行无三态处置）不得收口移交——离线门 `coverage_gate.py` 端点表↔矩阵计数对账会拦截（v5.1）。
 6. **清点率 ≠ 测试执行率（v5.3.0 概念分离）**：`diffed/total=100%` 是**清点归账**（每端点有归宿），不等于每个方法/参数/角色都已实测。两类指标分开报告：①端点登记率（目标 100%）；②实际测试执行率（tested/blocked/deferred/ROE_excluded/not_applicable 按端点×方法×身份状态分列）。写端点实测效果属 L2 且生产模式默认不做（见 execution_profile）。
 
+## 六、字段级过度暴露差分（v5.3.9，API3 联动——对治"状态码全 MISS 但响应多吐敏感字段"盲区）
+
+1. **HIT-DATA 行强制追加字段 diff**：凡判 `vulnerable`（200+业务 JSON）的端点，load_skill api-field-exposure 做匿名/低权/高权字段集合差分（`field-exposure.py`），矩阵回填 `field_diff` 列（over_exposed / no_issue / needs_follow_up）；
+2. **匿名可达的对象详情端点必做**：401/403 行不做字段 diff（不可达无字段），但 200 行不做字段 diff = 端点测了、数据没测——PII/PHI 字段级泄露对医疗/金融目标属高危面；
+3. coverage 记账双指标：`diffed/total`（可达性）+ `field_diffed/total`（字段级，仅对 200 行计数）。
+
 ## v4.8 M6 工具通道兼容性声明
 
 > 口径（loop-core v4.8 纪律 3）：先 probe 后 batch——每个外部工具对目标首次使用前先用小样本探针确认可用性，探针被拦/挂起先切适配通道再批量；探针结果写入交付物工具声明小节。各工具在「挑战型 WAF / 封闭站」下的可用性与适配通道：
 
 - authz-diff.py：**无 token 列无需会话态、纯匿名可全量执行（见第五节硬门）**；「有效token/正确签名」列批量复放需会话态；挑战型目标先 channel-snapshot 提取态注入 header 再跑矩阵。
+- field-exposure.py：纯匿名单角色模式零会话依赖；多角色模式需会话态（session-state-chain 供 token）；判据见 api-field-exposure 技能。
+- authz-matrix-roles.py：**端点级多角色复放矩阵（BFLA 机械化）**——取得 ≥2 角色会话后跑全端点表，EQUAL-200=越权候选（api-idor 角色矩阵节判据）；无身份项目不适用（匿名门已由本技能覆盖）。
 - curl：低频手工请求始终可用——也是挑战态复放的最小工具（channel-snapshot 快照 cookie/UA 复放）；禁用它做大批量枚举。
+
+## v5.5.0 凭据仓库与带态注入（方案 A 接线——矩阵从手册级变为引擎可执行）
+
+- **身份盘点开工前置**：先 list_credentials 盘点已入库身份；矩阵每一行**显式引用 identity**（`identity:<名>` 或 `cred-<id>`），禁止"当前全局账号"式隐式会话——行定义=`端点×方法×身份引用`，缺身份引用的行不得标记 tested。
+- **注入通道二选一**：
+  1. `http_request`（首选）：`auth_ref` 传 cred-<id> 或 identity:<名>，引擎注入 Authorization/Cookie；请求/响应自动落证据（凭据掩码）；角色 diff = 同请求换 auth_ref 分别发送再比对。
+  2. `cred_command`：hydra/curl/ffuf 等命令行工具用 `${CRED_USERNAME}/${CRED_SECRET}` 占位符模板，密文走临时文件中介（命令文本/证据无明文，执行后即删）。
+- **纪律不变**：A/B 重放、单变量、阴阳性对照全部照旧；凭据明文禁止出现在 record_finding/时间线/交付物（掩码纪律）。
+- **无凭证项目**：本节不适用——按第五节匿名基线执行，越权候选转 VT 移交（不伪造身份）。

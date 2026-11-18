@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>创建项目 · 紧凑单屏设计稿</title>
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#1c2333;--border:#2d333b;--text:#e6edf3;--text2:#9aa4b2;--muted:#6e7681;--accent2:#58a6ff;--green:#3fb950;--warn:#d29922}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;padding:14px}
+.page{max-width:1400px;margin:0 auto}
+.top{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+.top .lbl{font-size:12px;color:var(--muted);margin-right:6px}
+.top button{font:inherit;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:7px;padding:4px 11px;font-size:12.5px}
+.top button.on{border-color:var(--accent2);background:rgba(88,166,255,.12);color:var(--accent2)}
+.cols{display:grid;grid-template-columns:1.15fr 1fr 0.95fr;gap:10px;align-items:start}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.card h4{margin:0 0 6px;font-size:13px;color:var(--text)}
+.fld{display:block;color:var(--muted);font-size:11.5px;margin:6px 0 3px}
+input,select,textarea{width:100%;font:inherit;font-size:13px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 9px;box-sizing:border-box}
+textarea{resize:vertical;overflow:hidden;min-height:30px;max-height:132px;line-height:1.4}
+textarea.auto{field-sizing:content}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.spec{display:flex;gap:5px;margin:4px 0}
+.spec .chip{flex:1;border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;cursor:pointer;color:var(--text2)}
+.spec .chip b{display:block;color:var(--text);font-size:12px}
+.spec .chip.on{border-color:var(--accent2);background:rgba(88,166,255,.1);color:var(--accent2)}
+.spec .chip.on b{color:var(--accent2)}
+.ck{display:flex;gap:7px;align-items:flex-start;font-size:12px;margin:5px 0;color:var(--text2)}
+.ck input{width:auto;margin-top:2px}
+.ck b{color:var(--text)}
+.auth{border:1px dashed var(--border);border-radius:8px;padding:7px 9px;margin-top:7px}
+.auth.ok{border-color:var(--green);background:rgba(63,185,80,.07)}
+.note{background:rgba(210,153,34,.07);border:1px solid rgba(210,153,34,.3);border-radius:8px;padding:6px 9px;font-size:11.5px;color:var(--text2);margin-top:7px}
+.btn{width:100%;margin-top:8px;padding:9px;border-radius:8px;border:0;background:#238636;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.hint{font-size:10.5px;color:var(--muted);margin-top:6px;text-align:center}
+.mono{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
+</style></head>
+<body>
+<div class="page">
+  <div class="top">
+    <span class="lbl">快速模板：</span>
+    <button class="on">Web 应用（黑盒）</button><button>APP / 小程序</button><button>内网 / 主机（灰盒）</button><button>AI / LLM 应用</button>
+    <span class="hint" style="margin:0 0 0 auto">模板一键填充下方全部字段 · 提交前核对授权信息</span>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <h4>任务与授权</h4>
+      <label class="fld">项目名称 *</label>
+      <input value="XX 系统 Web 渗透测试">
+      <label class="fld">测试目标 *（每行一个）</label>
+      <textarea rows="3">demo.example.com
+10.70.160.234
+https://chat.example.com（LLM 入口）</textarea>
+      <label class="fld">授权范围（一句话）</label>
+      <textarea class="auto" rows="1">授权 demo.example.com 全部子域与 80/443；第三方与生产库除外</textarea>
+      <label class="fld">测试规则 ROE（一句话·随内容自动增高）</label>
+      <textarea class="auto" rows="2">仅测试已授权目标；禁破坏性写入/持久化/拒绝服务/批量下载；高危动作逐项审批；数据只做存在性证明；凭据只登记掩码；自建数据登记移交不删除；异常立即停止上报</textarea>
+      <div class="r2">
+        <div><label class="fld">测试目的 / 成功标准</label><textarea class="auto" rows="1">发现并验证可利用漏洞；结论有 POC 证据与影响说明</textarea></div>
+        <div><label class="fld">认证会话（可选）</label><textarea class="auto" rows="1">测试账号 / Cookie / Token</textarea></div>
+      </div>
+    </div>
+    <div class="card">
+      <h4>运行配置</h4>
+      <label class="fld">测试类型 · 模型</label>
+      <div class="r2">
+        <select><option>黑盒</option></select>
+        <select><option>默认模型 glm-5.3-flash</option></select>
+      </div>
+      <label class="fld">审批策略</label>
+      <select><option>推荐：仅高危利用（L2）人工批准，其余自动留痕</option></select>
+      <label class="fld">执行档</label>
+      <select><option>production_safe（生产目标 · 只做存在性证明）</option><option>isolated_lab（隔离靶场 · 可完整 PoC 链）</option></select>
+      <label class="fld">九头编制（可选专项）</label>
+      <div class="spec">
+        <div class="chip on"><b>专项 A · AI/LLM</b>提示注入 / 越狱 / Agent 滥用</div>
+        <div class="chip"><b>专项 B1 · APP</b>静态 + Frida 动态</div>
+        <div class="chip"><b>专项 B2 · 小程序</b>解包 → 接口与云侧</div>
+      </div>
+      <div class="note"><b>审批矩阵</b>：L0 自动留痕 · L1/L2 按策略 · FORBIDDEN 直接拒绝 · 全程可一键熔断</div>
+    </div>
+    <div class="card">
+      <h4>执行开关</h4>
+      <label class="ck"><input type="checkbox" checked>严格限定范围（范围外只记录不访问）</label>
+      <label class="ck"><input type="checkbox" checked>创建后立即启动全流程</label>
+      <label class="ck"><input type="checkbox">后渗透阶段 S6（提权 / 横向 / 维持演示）——<b>默认不执行</b>，可流水线补跑</label>
+      <div class="auth ok"><label class="ck" style="margin:0"><input type="checkbox" checked><span>授权确认：已获<b>书面授权</b>，知悉测试风险与合规边界</span></label></div>
+      <button class="btn">创建项目并授权开工</button>
+      <div class="hint">未勾选授权确认时按钮置灰 · 创建后可在工作台一键熔断</div>
+    </div>
+  </div>
+</div>
+<script>
+// ROE/范围框自适应：input 与模板填充后自动增高（上限 6 行内部滚动）
+document.querySelectorAll('textarea.auto').forEach(t=>{
+  const fit=()=>{t.style.height='auto';t.style.height=Math.min(t.scrollHeight+2,132)+'px'};
+  t.addEventListener('input',fit); setTimeout(fit,50);
+});
+</script>
+</body></html>

@@ -41,6 +41,34 @@ func (c *ChatSessions) saveToStore(key string, msgs []llm.Message) {
 	}
 }
 
+// ---- v5.5.0（修复方案 H）：轮次耗尽的挂起运行链 ----
+// 原实现轮次耗尽只回一句「已暂停」，中间的工具调用/结果链随即丢失（promised 延续是假的）。
+// 现将完整消息链（system+上下文包+历史+本轮全部 tool call/结果）持久化到独立键，
+// 用户下一条消息自动从断点续跑；正常完成后清除挂起链。
+func pendingRunKey(key string) string { return "chatrun:" + key }
+
+func (c *ChatSessions) loadPendingRun(key string) ([]llm.Message, bool) {
+	raw, ok := c.orch.store.LoadChat(pendingRunKey(key))
+	if !ok {
+		return nil, false
+	}
+	var msgs []llm.Message
+	if err := json.Unmarshal(raw, &msgs); err != nil || len(msgs) == 0 {
+		return nil, false
+	}
+	return msgs, true
+}
+
+func (c *ChatSessions) savePendingRun(key string, msgs []llm.Message) {
+	if raw, err := json.Marshal(msgs); err == nil {
+		_ = c.orch.store.SaveChat(pendingRunKey(key), raw)
+	}
+}
+
+func (c *ChatSessions) clearPendingRun(key string) {
+	_ = c.orch.store.DeleteChat(pendingRunKey(key))
+}
+
 // Turn 处理一轮对话；projectID 为空时进入咨询模式（禁用工具）。
 // 返回助手最终回复文本。
 func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
@@ -50,7 +78,8 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 	}
 	// 用户消息先落执行流（修复：LLM 失败时用户消息凭空消失，表现为「发了没反应」）
 	if projectID != "" {
-		_, _ = c.orch.store.AddStream(projectID, &store.StreamRecord{Kind: "msg", Role: "user", Stage: "chat", Text: truncateText(userMsg, 2000)})
+		// v5.6.1（审计 RunB#15）：执行流副本脱敏——用户误粘贴凭据不落明文（LLM 历史保真）
+		_, _ = c.orch.store.AddStream(projectID, &store.StreamRecord{Kind: "msg", Role: "user", Stage: "chat", Text: truncateText(maskSensitiveText(userMsg), 2000)})
 	}
 	c.mu.Lock()
 	hist := append([]llm.Message{}, c.loadFromStore(key)...)
@@ -69,20 +98,38 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 			"- 用户问「现在什么情况」时，先 search_memory 再回答。",
 	}, "\n\n")
 
-	msgs := []llm.Message{{Role: "system", Content: sys}}
+	// v5.5.0（修复方案 H）：存在挂起运行链（上轮轮次耗尽）时从断点续跑——
+	// 完整保留上一轮的 system/上下文包/工具调用与结果，不重放已执行的工具（它们只是历史消息）。
+	var msgs []llm.Message
+	resumed := false
 	if projectID != "" {
-		if p, err := orch.store.GetProject(projectID); err == nil {
-			msgs = append(msgs, llm.Message{Role: "user", Content: orch.buildContextPack(p, "chat")})
+		if pending, ok := c.loadPendingRun(key); ok {
+			msgs = pending
+			resumed = true
 		}
-		toolDefs := orch.toolDefs()
-		_ = toolDefs
-	} else {
-		msgs = append(msgs, llm.Message{
-			Role:    "user",
-			Content: "（咨询模式：未选择项目，工具不可用。请基于方法论与经验回答，建议用户先创建项目。）",
-		})
 	}
-	msgs = append(msgs, hist...)
+	if msgs == nil {
+		msgs = []llm.Message{{Role: "system", Content: sys}}
+		if projectID != "" {
+			if p, err := orch.store.GetProject(projectID); err == nil {
+				msgs = append(msgs, llm.Message{Role: "user", Content: orch.buildContextPack(p, "chat")})
+			}
+			toolDefs := orch.toolDefs()
+			_ = toolDefs
+		} else {
+			msgs = append(msgs, llm.Message{
+				Role:    "user",
+				Content: "（咨询模式：未选择项目，工具不可用。请基于方法论与经验回答，建议用户先创建项目。）",
+			})
+		}
+		msgs = append(msgs, hist...)
+	}
+	if resumed {
+		if projectID != "" {
+			_, _ = orch.store.AddStream(projectID, &store.StreamRecord{Kind: "msg", Role: "assistant", Stage: "chat",
+				Text: "⏯ 检测到上轮轮次耗尽的挂起执行链，本轮从断点续跑（已执行动作不重放）。"})
+		}
+	}
 	msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
 
 	// 有项目 → 带工具的执行循环（最多 8 轮内部工具轮次后必须给文字答复）
@@ -127,7 +174,19 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 		continue
 	}
 	if final == "" {
-		final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），已暂停本轮执行；已有动作与结论见执行流。继续对话将在此基础上延续。）", maxRounds)
+		if projectID != "" {
+			// v5.5.0（修复方案 H）：轮次耗尽 → 持久化完整运行链，下一条用户消息自动续跑。
+			c.mu.Lock()
+			c.savePendingRun(key, msgs)
+			c.mu.Unlock()
+			final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），本轮执行链已挂起保存。你直接发送下一条消息即可从断点续跑——已执行的工具调用不会重放，无需重复背景。已有动作与结论见执行流。）", maxRounds)
+		} else {
+			final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），已暂停本轮执行；已有动作与结论见执行流。继续对话将在此基础上延续。）", maxRounds)
+		}
+	} else if projectID != "" {
+		c.mu.Lock()
+		c.clearPendingRun(key) // 正常完成：清除可能存在的挂起链
+		c.mu.Unlock()
 	}
 
 	// 落历史（持久化）
@@ -141,7 +200,7 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 
 	// 对话轮写入执行流（统一时间线：前端单一流数据源；用户消息已在开工时先落，此处补助手回复）
 	if projectID != "" {
-		_, _ = c.orch.store.AddStream(projectID, &store.StreamRecord{Kind: "msg", Role: "assistant", Stage: "chat", Text: truncateText(final, 4000)})
+		_, _ = c.orch.store.AddStream(projectID, &store.StreamRecord{Kind: "msg", Role: "assistant", Stage: "chat", Text: truncateText(maskSensitiveText(final), 4000)})
 	}
 
 	return final, nil
@@ -167,6 +226,7 @@ func (c *ChatSessions) Reset(projectID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_ = c.orch.store.DeleteChat(key)
+	c.clearPendingRun(key) // v5.5.0：会话重置同时清除挂起运行链
 }
 
 var _ = fmt.Sprintf

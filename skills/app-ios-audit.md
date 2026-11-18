@@ -38,3 +38,16 @@ strings Payload/*.app/* | grep -E "https?://|api\.|token|key" | sort -u | head -
 
 - 用户的真实 iCloud/keychain 数据禁止触碰；只对测试 APP 自身数据操作。
 - 静态为主：容器内动态能力有限时，动态项登记 needs_follow_up 待设备窗口。
+
+## v5.6.0 动态测试可执行路径与收口（三凭证审计补强）
+
+### 动态轨分级（按可用设备逐级展开）
+
+1. **无设备（默认档）**：静态全量（本技能主体）+ 网络面回注（客户端泄露 API → authz-diff/api-idor）——动态轨整体 needs_follow_up 并给出所需设备清单。
+2. **有越狱设备/可注入通道**：探针 `ssh <ios> "uname -a"` + Frida 注入（frida-server iOS 版）；可执行：运行时 hook（越权函数参数观察）、keychain 导出（联动凭据仓库登记）、SSL Pinning 绕过（Frida 脚本 + 抓包链验证——判据：绕过后的 API 流量完整可见）。
+3. **模拟器/签名重签**：应用重签（codesign — 多数企业应用可重签进模拟器——isolated_lab）→ 动态基础轨。
+4. **测试收口**：静态候选（keychain/日志/剪贴板/证书校验）逐项到动态验证单（对齐 app-dynamic-audit v5.6.0 格式）；无法验证的候选 confidence=待查。
+
+### 工具探针
+
+`which frida idevice_id codesign`（iOS 工具链）+ 设备通道探针——全部缺失时动态轨整体降级，不硬做；结果格式同 app-dynamic-audit v5.6.0。

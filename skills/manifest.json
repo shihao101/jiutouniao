@@ -1,9 +1,9 @@
 {
- "version": "5.3.2",
+ "version": "5.6.0",
  "generated": "2026-11-14",
  "description": "机器可读技能清单（v5.3.2：gen_skill_manifest.py 单源生成——aliases/depends_on/handoff_to/stage_fit/lab_only 全量结构化，引擎 SkillRegistry 消费；重新生成请跑 scripts/gen_skill_manifest.py）",
  "route_file": "skills/00-router.md",
- "count": 109,
+ "count": 126,
  "skills": [
   {
    "id": "00-router",
@@ -96,6 +96,39 @@
     "枚举",
     "s4"
    ],
+   "depends_on": [
+    "history-recon"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "api-field-exposure",
+   "file": "skills/api-field-exposure.md",
+   "title": "\"字段级过度暴露差分（OWASP API3 · 角色间响应字段集合 diff）\"",
+   "tags": [
+    "api",
+    "过度暴露",
+    "字段",
+    "敏感数据",
+    "authz",
+    "s4"
+   ],
+   "aliases": [
+    "过度暴露",
+    "字段泄露",
+    "api3",
+    "多吐字段"
+   ],
+   "depends_on": [
+    "api-idor",
+    "authz-diff"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
    "stage_fit": [
     "s4"
    ],
@@ -117,6 +150,7 @@
     "越权对象"
    ],
    "depends_on": [
+    "api-field-exposure",
     "authz-diff"
    ],
    "handoff_to": [
@@ -275,7 +309,8 @@
     "s4"
    ],
    "depends_on": [
-    "jwt-crypto"
+    "jwt-crypto",
+    "session-lifecycle"
    ],
    "stage_fit": [
     "s4"
@@ -301,6 +336,7 @@
     "idor"
    ],
    "depends_on": [
+    "api-field-exposure",
     "api-idor"
    ],
    "handoff_to": [
@@ -860,6 +896,69 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "fuzz-harness-go",
+   "file": "skills/fuzz-harness-go.md",
+   "title": "Go 原生 Fuzz Harness 模板与 checkpoint 长作业纪律",
+   "tags": [
+    "fuzzing",
+    "go",
+    "harness",
+    "模板",
+    "长任务",
+    "s4"
+   ],
+   "aliases": [
+    "go fuzz",
+    "native fuzz",
+    "崩溃复现"
+   ],
+   "depends_on": [
+    "fuzzing-workflow"
+   ],
+   "handoff_to": [
+    "whitebox-source-audit"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "fuzzing-workflow",
+   "file": "skills/fuzzing-workflow.md",
+   "title": "Fuzzing 工作流（目标选型→harness→语料→执行→崩溃去重→复现验证）",
+   "tags": [
+    "fuzzing",
+    "模糊测试",
+    "0day",
+    "harness",
+    "崩溃",
+    "s4",
+    "长任务"
+   ],
+   "aliases": [
+    "模糊测试",
+    "fuzz",
+    "崩溃",
+    "harness"
+   ],
+   "depends_on": [
+    "fuzz-harness-go"
+   ],
+   "handoff_to": [
+    "fuzz-harness-go",
+    "hypothesis-0day"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
    "id": "gateway-filter-playbook",
    "file": "skills/gateway-filter-playbook.md",
    "title": "\"网关过滤器架构目标剧本（阳性对照差分法/500 可达判据）\"",
@@ -921,6 +1020,38 @@
     "api-idor"
    ],
    "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "history-recon",
+   "file": "skills/history-recon.md",
+   "title": "\"历史快照与影子接口挖掘（Wayback CDX · 影子 API 对照矩阵）\"",
+   "tags": [
+    "wayback",
+    "历史",
+    "shadow-api",
+    "影子接口",
+    "端点",
+    "s2",
+    "s4"
+   ],
+   "aliases": [
+    "wayback",
+    "历史接口",
+    "影子api",
+    "旧版本"
+   ],
+   "depends_on": [
+    "api-doc-leak",
+    "authz-diff"
+   ],
+   "handoff_to": [
+    "authz-diff"
+   ],
+   "stage_fit": [
+    "s2",
     "s4"
    ],
    "execution_profile_default": "production_safe"
@@ -993,6 +1124,44 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "ics-ot",
+   "file": "skills/ics-ot.md",
+   "title": "ICS/OT/SCADA 渗透评估（工业协议/PLC/过程安全边界）",
+   "tags": [
+    "ics",
+    "ot",
+    "scada",
+    "plc",
+    "modbus",
+    "工业",
+    "s2",
+    "s4"
+   ],
+   "aliases": [
+    "ics",
+    "ot",
+    "scada",
+    "plc",
+    "modbus",
+    "工业"
+   ],
+   "depends_on": [
+    "intranet-lateral",
+    "iot-firmware"
+   ],
+   "handoff_to": [
+    "cve-weaponization",
+    "intranet-lateral"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
    "id": "identity-bootstrapping",
    "file": "skills/identity-bootstrapping.md",
    "title": "无凭证身份获取路线图（从匿名到第一身份的决策树）",
@@ -1013,6 +1182,7 @@
    "depends_on": [
     "browser-auth",
     "injection-points",
+    "osint-leak-intel",
     "session-state-chain",
     "weak-cred-bruteforce"
    ],
@@ -1158,6 +1328,40 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "iot-firmware",
+   "file": "skills/iot-firmware.md",
+   "title": "IoT 与固件审计（固件提取/文件系统分析/升级链/嵌入式服务面）",
+   "tags": [
+    "iot",
+    "固件",
+    "嵌入式",
+    "binwalk",
+    "升级链",
+    "s4"
+   ],
+   "aliases": [
+    "iot",
+    "固件",
+    "binwalk",
+    "嵌入式"
+   ],
+   "depends_on": [
+    "cve-weaponization",
+    "password-offline",
+    "whitebox-sca-taint",
+    "whitebox-source-audit"
+   ],
+   "handoff_to": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
    "id": "java-deser-playbook",
    "file": "skills/java-deser-playbook.md",
    "title": "Java 反序列化武器化手册（Shiro/Fastjson/Log4j2/原生/WebLogic）",
@@ -1215,7 +1419,8 @@
     "认证"
    ],
    "depends_on": [
-    "auth-flow-deep"
+    "auth-flow-deep",
+    "session-lifecycle"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1550,6 +1755,71 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "org-member-abuse",
+   "file": "skills/org-member-abuse.md",
+   "title": "\"组织/成员管理逻辑滥用（邀请提权/移除残留/角色传播/层级穿越）\"",
+   "tags": [
+    "组织",
+    "成员",
+    "邀请",
+    "角色",
+    "权限残留",
+    "多租户",
+    "s4"
+   ],
+   "aliases": [
+    "邀请",
+    "成员管理",
+    "角色传播",
+    "权限残留",
+    "多租户"
+   ],
+   "depends_on": [
+    "api-idor",
+    "instance-diff",
+    "session-lifecycle"
+   ],
+   "handoff_to": [
+    "instance-diff"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "osint-leak-intel",
+   "file": "skills/osint-leak-intel.md",
+   "title": "\"泄露情报与密钥扫描（L2 泄露面数据源手册 · HIBP/GitHub dork/gitleaks/测绘）\"",
+   "tags": [
+    "osint",
+    "泄露",
+    "密钥",
+    "hibp",
+    "gitleaks",
+    "dork",
+    "s2",
+    "s4"
+   ],
+   "aliases": [
+    "泄露库",
+    "hibp",
+    "密钥扫描",
+    "测绘"
+   ],
+   "depends_on": [
+    "recon-playbook"
+   ],
+   "handoff_to": [
+    "weak-cred-bruteforce"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "parallel-execution",
    "file": "skills/parallel-execution.md",
    "title": "并行与后台执行手册（长任务后台化 · 单命令并行 · 超时预算）",
@@ -1591,6 +1861,39 @@
     "s6"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "patch-diffing",
+   "file": "skills/patch-diffing.md",
+   "title": "补丁差分（patch diffing）——从安全公告反推漏洞机理与检测特征",
+   "tags": [
+    "补丁",
+    "差分",
+    "diff",
+    "0day",
+    "nday",
+    "代码审计",
+    "s4"
+   ],
+   "aliases": [
+    "补丁差分",
+    "patch diff",
+    "1day",
+    "nday无poc"
+   ],
+   "depends_on": [
+    "cve-weaponization",
+    "hypothesis-0day"
+   ],
+   "handoff_to": [
+    "hypothesis-0day"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "path-traversal",
@@ -1875,7 +2178,9 @@
     "s2"
    ],
    "depends_on": [
-    "intel-factory"
+    "history-recon",
+    "intel-factory",
+    "osint-leak-intel"
    ],
    "stage_fit": [
     "s2"
@@ -1943,6 +2248,40 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "session-lifecycle",
+   "file": "skills/session-lifecycle.md",
+   "title": "\"会话生命周期缺陷族（登出吊销/改密踢会话/refresh 轮换/超时/并发/remember-me）\"",
+   "tags": [
+    "会话",
+    "生命周期",
+    "吊销",
+    "登出",
+    "refresh",
+    "超时",
+    "s4",
+    "s5"
+   ],
+   "aliases": [
+    "会话吊销",
+    "登出",
+    "token生命周期",
+    "refresh",
+    "改密踢会话"
+   ],
+   "depends_on": [
+    "jwt-crypto",
+    "session-state-chain"
+   ],
+   "handoff_to": [
+    "evidence-standard"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "session-state-chain",
    "file": "skills/session-state-chain.md",
    "title": "会话态测试链（注册→登录→会话保持→带态测试→清理）",
@@ -1963,13 +2302,79 @@
    ],
    "depends_on": [
     "auth-bypass",
-    "browser-auth"
+    "browser-auth",
+    "session-lifecycle"
    ],
    "stage_fit": [
     "s4",
     "s5"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "share-link-abuse",
+   "file": "skills/share-link-abuse.md",
+   "title": "\"分享面安全专项（分享 token 熵值/过期/吊销/改参越权/未列分享）\"",
+   "tags": [
+    "分享",
+    "share",
+    "签名",
+    "过期",
+    "吊销",
+    "越权",
+    "s4"
+   ],
+   "aliases": [
+    "分享",
+    "分享链接",
+    "签名伪造",
+    "keyId"
+   ],
+   "depends_on": [
+    "capability-primitive-search",
+    "crypto-offensive",
+    "intel-factory"
+   ],
+   "handoff_to": [
+    "api-idor",
+    "crypto-offensive"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "social-engineering",
+   "file": "skills/social-engineering.md",
+   "title": "受控社工演练（钓鱼/语音钓鱼/现场进入——授权红队专用）",
+   "tags": [
+    "社工",
+    "钓鱼",
+    "红队",
+    "现场",
+    "授权",
+    "s2"
+   ],
+   "aliases": [
+    "社工",
+    "钓鱼",
+    "红队演练",
+    "现场"
+   ],
+   "depends_on": [
+    "osint-leak-intel",
+    "phishing-infra"
+   ],
+   "handoff_to": [
+    "osint-leak-intel"
+   ],
+   "stage_fit": [
+    "s2"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "spring-family",
@@ -2080,6 +2485,75 @@
     "s2"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "thick-client",
+   "file": "skills/thick-client.md",
+   "title": "厚客户端与桌面应用审计（Electron/桌面客户端/自动更新/本地 IPC）",
+   "tags": [
+    "厚客户端",
+    "electron",
+    "桌面",
+    "ipc",
+    "自动更新",
+    "s2",
+    "s4"
+   ],
+   "aliases": [
+    "electron",
+    "桌面应用",
+    "客户端",
+    "自动更新劫持"
+   ],
+   "depends_on": [
+    "whitebox-source-audit"
+   ],
+   "handoff_to": [
+    "whitebox-source-audit",
+    "api-idor"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "tls-deep-audit",
+   "file": "skills/tls-deep-audit.md",
+   "title": "TLS 深度审计（协议套件/证书链/降级/客户端证书/应用层信任）",
+   "tags": [
+    "tls",
+    "ssl",
+    "证书",
+    "降级",
+    "协议",
+    "s2",
+    "s4"
+   ],
+   "aliases": [
+    "tls",
+    "ssl",
+    "证书",
+    "协议降级",
+    "mtls"
+   ],
+   "depends_on": [
+    "app-static-audit",
+    "ssrf-deep"
+   ],
+   "handoff_to": [
+    "cve-weaponization"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "tool-channels",
@@ -2207,7 +2681,8 @@
     "s5"
    ],
    "depends_on": [
-    "instance-diff"
+    "instance-diff",
+    "osint-leak-intel"
    ],
    "stage_fit": [
     "s4",
@@ -2260,6 +2735,112 @@
    "stage_fit": [
     "s5",
     "s7"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "whitebox-sca-taint",
+   "file": "skills/whitebox-sca-taint.md",
+   "title": "SCA 依赖分析 + 污点候选细化（source/sink 表 + 跨函数路径三问）",
+   "tags": [
+    "白盒",
+    "SCA",
+    "依赖",
+    "污点",
+    "sink",
+    "0day",
+    "s4"
+   ],
+   "aliases": [
+    "sca",
+    "依赖分析",
+    "污点",
+    "sink"
+   ],
+   "depends_on": [
+    "cve-weaponization",
+    "whitebox-source-audit"
+   ],
+   "handoff_to": [
+    "cve-weaponization",
+    "patch-diffing"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "whitebox-source-audit",
+   "file": "skills/whitebox-source-audit.md",
+   "title": "白盒源码审计工作流（源码获取→识别→危险模式检索→验证）",
+   "tags": [
+    "白盒",
+    "代码审计",
+    "0day",
+    "源码",
+    "灰盒",
+    "s3",
+    "s4"
+   ],
+   "aliases": [
+    "白盒",
+    "源码审计",
+    "代码审计",
+    "危险模式"
+   ],
+   "depends_on": [
+    "patch-diffing",
+    "whitebox-sca-taint"
+   ],
+   "handoff_to": [
+    "whitebox-sca-taint",
+    "hypothesis-0day"
+   ],
+   "stage_fit": [
+    "s3",
+    "s4"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "wifi-nearfield",
+   "file": "skills/wifi-nearfield.md",
+   "title": "无线与近场渗透（Wi-Fi/BLE/NFC/RFID——授权现场任务专用）",
+   "tags": [
+    "无线",
+    "wifi",
+    "蓝牙",
+    "ble",
+    "nfc",
+    "rfid",
+    "现场",
+    "s2"
+   ],
+   "aliases": [
+    "wifi",
+    "无线",
+    "蓝牙",
+    "ble",
+    "nfc",
+    "门禁"
+   ],
+   "depends_on": [
+    "intranet-lateral",
+    "password-offline"
+   ],
+   "handoff_to": [
+    "password-offline",
+    "intranet-lateral"
+   ],
+   "stage_fit": [
+    "s2"
    ],
    "execution_profile_default": "production_safe",
    "lab_only": true,

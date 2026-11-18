@@ -24,7 +24,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 SKILLS_DIR = os.path.join(ROOT, "skills")
 ROUTER = os.path.join(SKILLS_DIR, "00-router.md")
 OUT = os.path.join(SKILLS_DIR, "manifest.json")
-VERSION = "5.3.2"
+VERSION = "5.6.0"
 
 STAGE_RE = re.compile(r"^(s[1-8]|specA|specB1|specB2)$")
 
@@ -35,12 +35,29 @@ CURATED = {
     "sqli-deep": {"aliases": ["sql注入", "盲注", "堆叠注入"], "handoff_to": ["evidence-standard"]},
     "authz-diff": {"aliases": ["越权", "未授权", "水平越权", "idor"], "handoff_to": ["evidence-standard"]},
     "api-idor": {"aliases": ["idor", "越权对象"], "depends_on": ["authz-diff"], "handoff_to": ["evidence-standard"]},
+    "api-field-exposure": {"aliases": ["过度暴露", "字段泄露", "api3", "多吐字段"], "depends_on": ["authz-diff"], "handoff_to": ["evidence-standard"]},
+    "session-lifecycle": {"aliases": ["会话吊销", "登出", "token生命周期", "refresh", "改密踢会话"], "depends_on": ["session-state-chain", "jwt-crypto"], "handoff_to": ["evidence-standard"]},
+    "share-link-abuse": {"aliases": ["分享", "分享链接", "签名伪造", "keyId"], "depends_on": ["intel-factory"], "handoff_to": ["api-idor", "crypto-offensive"]},
+    "org-member-abuse": {"aliases": ["邀请", "成员管理", "角色传播", "权限残留", "多租户"], "depends_on": ["api-idor", "session-lifecycle"], "handoff_to": ["instance-diff"]},
+    "osint-leak-intel": {"aliases": ["泄露库", "hibp", "密钥扫描", "测绘"], "handoff_to": ["weak-cred-bruteforce"]},
+    "history-recon": {"aliases": ["wayback", "历史接口", "影子api", "旧版本"], "handoff_to": ["authz-diff"]},
     "upload-bypass": {"aliases": ["文件上传", "上传绕过"], "handoff_to": ["webshell-memshell"]},
     "webshell-memshell": {"aliases": ["webshell", "内存马", "后门"]},
     "persistence": {"aliases": ["权限维持", "后门驻留"]},
     "logic-csrf-deser": {"aliases": ["反序列化", "csrf"]},
     "identity-bootstrapping": {"aliases": ["身份获取", "账号获取"], "handoff_to": ["session-state-chain"]},
-    "session-state-chain": {"aliases": ["会话链", "会话构造"]},
+        "session-state-chain": {"aliases": ["会话链", "会话构造"]},
+    "whitebox-source-audit": {"aliases": ["白盒", "源码审计", "代码审计", "危险模式"], "handoff_to": ["whitebox-sca-taint", "hypothesis-0day"]},
+    "whitebox-sca-taint": {"aliases": ["sca", "依赖分析", "污点", "sink"], "depends_on": ["whitebox-source-audit"], "handoff_to": ["cve-weaponization", "patch-diffing"]},
+    "patch-diffing": {"aliases": ["补丁差分", "patch diff", "1day", "nday无poc"], "depends_on": ["cve-weaponization"], "handoff_to": ["hypothesis-0day"]},
+    "fuzzing-workflow": {"aliases": ["模糊测试", "fuzz", "崩溃", "harness"], "handoff_to": ["fuzz-harness-go", "hypothesis-0day"]},
+    "fuzz-harness-go": {"aliases": ["go fuzz", "native fuzz", "崩溃复现"], "depends_on": ["fuzzing-workflow"], "handoff_to": ["whitebox-source-audit"]},
+    "tls-deep-audit": {"aliases": ["tls", "ssl", "证书", "协议降级", "mtls"], "handoff_to": ["cve-weaponization"]},
+    "thick-client": {"aliases": ["electron", "桌面应用", "客户端", "自动更新劫持"], "handoff_to": ["whitebox-source-audit", "api-idor"]},
+    "wifi-nearfield": {"aliases": ["wifi", "无线", "蓝牙", "ble", "nfc", "门禁"], "handoff_to": ["password-offline", "intranet-lateral"]},
+    "iot-firmware": {"aliases": ["iot", "固件", "binwalk", "嵌入式"], "depends_on": ["whitebox-source-audit"], "handoff_to": ["cve-weaponization"]},
+    "ics-ot": {"aliases": ["ics", "ot", "scada", "plc", "modbus", "工业"], "handoff_to": ["cve-weaponization", "intranet-lateral"]},
+    "social-engineering": {"aliases": ["社工", "钓鱼", "红队演练", "现场"], "depends_on": ["phishing-infra"], "handoff_to": ["osint-leak-intel"]},
     "evidence-standard": {"aliases": ["证据", "取证标准"]},
     "hypothesis-matrix": {"aliases": ["筛查矩阵", "k3"]},
     "hypothesis-0day": {"aliases": ["0day", "nday假设"]},

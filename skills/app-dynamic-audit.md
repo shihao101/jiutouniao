@@ -58,3 +58,27 @@ objection -g com.target.pkg explore                  # 交互式：android sslpi
 - **反"代理检测"**：Frida 绕过代理检测 hook 为先（主线通道）；无 Frida 环境时的历史备选：模拟器关代理，宿主机 Proxifier 按进程规则强制走 Burp——无系统代理抓包
 - **双向认证（SSL Pinning）**：Frida objection/unpinning 脚本为主（主线）；Xposed+JustTrustMe 为历史备选（注意 xposed 生态已停更，且不支持 Android 7+）——已有 Frida 方案时不要回退此路径
 - **iOS 证书信任遗漏**：装描述文件后必须到 设置→通用→关于本机→证书信任设置 手动开 PortSwigger CA 完全信任，否则抓不到
+## v5.6.0 能力探针与可复现结果格式（三凭证审计补强）
+
+### 前置能力探针（逐项探，缺失如实降级——不硬做）
+
+| 探针 | 命令 | 缺失处置 |
+|---|---|---|
+| 设备连接 | `adb devices`（须有 device 行） | 无设备 → 标注"静态轨已完成，动态轨 needs_follow_up" |
+| 模拟器 | `emulator -list-avds`（或第三方模拟器探针） | 缺 → 可申请客户提供测试机 |
+| Frida 服务端 | `adb shell "ls /data/local/tmp/frida-server"` + `frida-ps -U` | 缺 → push 对应架构 frida-server（isolated_lab）；失败降级 objection/无 hook 静态+网络面 |
+| 抓包链 | mitmproxy 监听 + 设备代理已配（`adb shell settings get global http_proxy`） | CA 未装（`adb shell "ls /system/etc/security/"` 用户证书面）→ 按版本降级（Android 7+ 用户证书只对 debuggable 应用生效——判据写明） |
+| 备份与 root | `adb backup` 可用性 / `adb shell su -c id` | 不可 root → 剥壳/ Frida gadget 重打包路径（isolated_lab） |
+
+### 可复现结果格式（每项动态验证产出）
+
+```
+动态验证单：<场景名>
+环境：设备型号/系统版本/Frida 版本/抓包位置
+前置：应用版本 hash + 安装来源
+动作：具体输入/操作序列（逐条）
+观测：预期 vs 实际（截图/logcat 片段/hash）
+判据：命中/未命中/降级 + 对应 coverage 单元
+```
+
+- 全部动态验证按此单产出 → evidence/；无环境单的动态结论不得入 findings（防"我测过了"式空泛断言）。

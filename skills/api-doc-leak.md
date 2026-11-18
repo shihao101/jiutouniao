@@ -27,7 +27,7 @@ tags: swagger,openapi,api文档,knife4j,dubbo,枚举,s4
 2. **模型泄露**：schema 定义里敏感字段（idCard/password/token 内部字段）→ 敏感信息面。
 3. **未授权试调**：无鉴权端点直接 GET（L0）；**try-it-out UI 交互只允许 GET/只读**（防误触真实业务动作）。
 4. **写端点门控判定（v5.1 补偿条款，对治"只看不调=不测"覆盖空洞）**：POST/PUT/DELETE 端点的**门控存在性必须判定，不实调**——①OPTIONS 读 Allow 头枚举写动词；②无 token GET 探测（401/403/302→SSO/hasLogin:false=门控有效；200/500 控制器形态=绕过候选，authz-diff 判读表）；③门控缺失的写端点按 authz-diff `exploitability=conditional` 呈现，**写效果实测走 L2+ROE 最小状态变更（自建对象）**，禁止把"没实调"写成"已排除"。
-5. **版本差异**：/v1 /v2 /v3 文档并存 → 老版本遗留端点（越权高发，api-idor 联动）。
+5. **版本差异**：/v1 /v2 /v3 文档并存 → 老版本遗留端点（越权高发，api-idor 联动）；**老版本文档未暴露时 load_skill history-recon**——Wayback 历史路径 − 自述面 = 影子接口候选矩阵（旧版本鉴权常停留在历史水位，API9 对治）。
 
 ## 三、隐蔽文档发现（文档被隐藏时）
 

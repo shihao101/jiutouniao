@@ -67,6 +67,12 @@ func TestV52ScopeGate(t *testing.T) {
 	if blocked, _ := o.scopeGate(p2, "curl -s https://anywhere.example/"); blocked {
 		t.Fatalf("非 strict_scope 项目不应校验")
 	}
+	// v5.3.9：OSINT 数据源白名单补全（测绘/泄露库/档案）——对第三方 API 读请求应放行
+	for _, src := range []string{"fofa.info", "quake.360.net", "zoomeye.org", "hunter.qianxin.com", "api.pwnedpasswords.com", "web.archive.org"} {
+		if blocked, _ := o.scopeGate(p, "curl -s https://"+src+"/query"); blocked {
+			t.Fatalf("OSINT 数据源 %s 不应拦截（v5.3.9 白名单）", src)
+		}
+	}
 }
 
 func writeTempROE(t *testing.T, content string) string {

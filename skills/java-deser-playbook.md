@@ -82,3 +82,18 @@ EL/OGNL 探针区分：`%{7*7}`=49→OGNL；`${7*7}`=49 且 `%{7*7}` 原样→Sp
 
 - nmap：传输层扫描与应用层挑战无关——挑战型 WAF 下可用；封闭站/网关白名单外端口可能全 filtered——先 probe（top100 快扫）确认端口可达性再批量，必要时 --max-rate 限速防封锁。
 - curl：低频手工请求始终可用——也是挑战态复放的最小工具（channel-snapshot 快照 cookie/UA 复放）；禁用它做大批量枚举。
+
+## v5.6.0 证据分层与版本适用性（三凭证审计补强）
+
+### 三层证据分离（此前指纹/回连/执行混谈——现在逐层记账）
+
+| 层 | 动作 | 证据 | coverage 状态 |
+|---|---|---|---|
+| L1 候选指纹 | 反序列化特征点识别（rO0AB/Cookie 特征/接口形态） | 特征请求/响应原文 | vulnerable 候选（不入 finding） |
+| L2 无害回连 | DNS/HTTP 回连 payload（dnslog 类可控外联） | 回连日志 + 时间戳 | vulnerable（可达性确证） |
+| L3 执行证明 | 无害命令回显（`id`/`echo jt-probe`）或文件存在性读 | 命令输出原文 | vulnerable 确证（RCE） |
+| L4 实验室利用 | 提权/驻留类 | isolated_lab 档 | 不在生产档执行 |
+
+- 每层独立判据：L1≠漏洞；L2=可达性；L3=RCE 确证（record_finding confidence=确证 cwe= CWE-502）。
+- **版本适用性**：组件版本 × 反序列化 gadget 链可用性对照（CommonsCollections 各版本阈值/Fastjson autoType 各版本关闭状态/JRE 版本对 gadget 限制）——指纹命中但 gadget 不适用 = vulnerable 降级 needs_follow_up（注明"版本约束待验证"）。
+- 误报排除：DNS 回连可能来自安全设备主动解析——用双通道（DNS+HTTP 独立回连）交叉确认。

@@ -32,40 +32,43 @@ var (
 	bucketStream    = []byte("stream")
 	bucketSubtasks  = []byte("subtasks")
 	bucketAsks      = []byte("asks")
-	bucketFacts     = []byte("facts")   // v3.3.0 项目黑板（事实账本）
-	bucketLoot      = []byte("loot")    // v3.3.0 战利品库（凭据/票据/flag 掩码登记）
-	bucketLessons   = []byte("lessons") // v3.4.0 组织级教训库（跨项目脱敏经验）
-	bucketVTs       = []byte("vts")     // v4.6 A2 验证队列（VerificationTask 一等对象）
+	bucketFacts     = []byte("facts") // v3.3.0 项目黑板（事实账本）
+	bucketLoot      = []byte("loot")  // v3.3.0 战利品库（凭据/票据/flag 掩码登记）
+	// v5.5.0 能力修复：结构化凭据仓库（静态加密，明文仅执行瞬间解密）与压缩前工具回执归档（按 receipt id 可检索原文）
+	bucketCredentials = []byte("credentials")
+	bucketReceipts    = []byte("receipts")
+	bucketLessons     = []byte("lessons") // v3.4.0 组织级教训库（跨项目脱敏经验）
+	bucketVTs         = []byte("vts")     // v4.6 A2 验证队列（VerificationTask 一等对象）
 )
 
 // ---------- 记录结构 ----------
 
 type Project struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	Target          string                 `json:"target"`
-	Scope           string                 `json:"scope"`
-	ROE             string                 `json:"roe"`
-	TestType        string                 `json:"test_type"`        // 黑盒/灰盒/白盒
-	TimeWindow      string                 `json:"time_window"`      // 测试时间窗口
-	Contact         string                 `json:"contact"`          // 应急联系人
-	SuccessCriteria string                 `json:"success_criteria"` // 测试目的 / 成功标准
-	AuthInfo        string                 `json:"auth_info"`         // 认证会话（可选·登录后测试）
-	ExecutionProfile string                `json:"execution_profile"` // v5.3.1：执行档 production_safe（默认）/isolated_lab——引擎逐动作强制校验
-	PostExploit     bool                   `json:"post_exploit"`      // v5.3.7：后渗透勾选——false（默认）s6 整段 skipped（范围决策非漏测），true 按流水线正常执行
-	StrictScope     bool                   `json:"strict_scope"`      // 严格限定范围（只测给定目标）
-	BudgetTokens    int64                  `json:"budget_tokens"`    // 项目级 Token 预算（0=用全局配置）
-	Authorized      bool                   `json:"authorized"`       // 创建时勾选授权确认（视为已授权开工）
-	ModelID         string                 `json:"model_id"`         // 本项目使用的模型（空=默认模型）
-	AutoApprove     string                 `json:"auto_approve"`     // 审批策略：manual（默认，全部人工）/l1（仅 L1 自动）/all（L1+L2 自动）；空=全局配置
-	Specializations []string               `json:"specializations"`  // A / B1 / B2
-	Status          string                 `json:"status"`           // created/running/paused/killed/done
-	CurrentStage    string                 `json:"current_stage"`
-	CreatedAt       time.Time              `json:"created_at"`
-	StartedAt       string                 `json:"started_at,omitempty"`  // v2.6：首次启动时间（断点续跑不重置，仪表盘运行时长基准）
-	FinishedAt      string                 `json:"finished_at,omitempty"` // v2.6：终态时间（done/failed/killed），仪表盘总耗时基准
-	StageStates     map[string]*StageState `json:"stage_states"`          // key: stage id（s0..s9, specA/B1/B2）
-	KillReason      string                 `json:"kill_reason,omitempty"`
+	ID               string                 `json:"id"`
+	Name             string                 `json:"name"`
+	Target           string                 `json:"target"`
+	Scope            string                 `json:"scope"`
+	ROE              string                 `json:"roe"`
+	TestType         string                 `json:"test_type"`         // 黑盒/灰盒/白盒
+	TimeWindow       string                 `json:"time_window"`       // 测试时间窗口
+	Contact          string                 `json:"contact"`           // 应急联系人
+	SuccessCriteria  string                 `json:"success_criteria"`  // 测试目的 / 成功标准
+	AuthInfo         string                 `json:"auth_info"`         // 认证会话（可选·登录后测试）
+	ExecutionProfile string                 `json:"execution_profile"` // v5.3.1：执行档 production_safe（默认）/isolated_lab——引擎逐动作强制校验
+	PostExploit      bool                   `json:"post_exploit"`      // v5.3.7：后渗透勾选——false（默认）s6 整段 skipped（范围决策非漏测），true 按流水线正常执行
+	StrictScope      bool                   `json:"strict_scope"`      // 严格限定范围（只测给定目标）
+	BudgetTokens     int64                  `json:"budget_tokens"`     // 项目级 Token 预算（0=用全局配置）
+	Authorized       bool                   `json:"authorized"`        // 创建时勾选授权确认（视为已授权开工）
+	ModelID          string                 `json:"model_id"`          // 本项目使用的模型（空=默认模型）
+	AutoApprove      string                 `json:"auto_approve"`      // 审批策略：manual（默认，全部人工）/l1（仅 L1 自动）/all（L1+L2 自动）；空=全局配置
+	Specializations  []string               `json:"specializations"`   // A / B1 / B2
+	Status           string                 `json:"status"`            // created/running/paused/killed/done
+	CurrentStage     string                 `json:"current_stage"`
+	CreatedAt        time.Time              `json:"created_at"`
+	StartedAt        string                 `json:"started_at,omitempty"`  // v2.6：首次启动时间（断点续跑不重置，仪表盘运行时长基准）
+	FinishedAt       string                 `json:"finished_at,omitempty"` // v2.6：终态时间（done/failed/killed），仪表盘总耗时基准
+	StageStates      map[string]*StageState `json:"stage_states"`          // key: stage id（s0..s9, specA/B1/B2）
+	KillReason       string                 `json:"kill_reason,omitempty"`
 }
 
 // StageState 单个阶段头的执行状态。
@@ -81,6 +84,9 @@ type StageState struct {
 	// v4.8 M5：反思门 LLM 调用失败计数（重试 3 次全败记 1 次）——按阶段统计自查可靠性，
 	// 持续高失败时 buildContextPack 注入修复提示（M5 频次监控）。
 	ReflectFailures int `json:"reflect_failures,omitempty"`
+	// v5.5.0：预算耗尽暂停语义（budget_exhausted_policy=pause 时）——阶段可续跑而非被代收口为 done。
+	// PauseReason 记录暂停原因，人工提升预算或手动重跑该阶段后从 pending 继续。
+	PauseReason string `json:"pause_reason,omitempty"`
 }
 
 // FindingClaim v4.6 E1：结论-证据判据串（断言与所引文件内容的机械绑定）。
@@ -112,7 +118,7 @@ type Finding struct {
 	// v4.6 E4 可利用性双维：verified（已实测利用）/ conditional（条件性，schema 未知等）/ untested（未投递）。
 	// 高危+untested 由引擎自动降级为中级呈现（F2320 双轨定级口径固化）。
 	Exploitability string         `json:"exploitability,omitempty"`
-	Claims         []FindingClaim `json:"claims,omitempty"` // v4.6 E1 判据串（肯定/否定断言均应有）
+	Claims         []FindingClaim `json:"claims,omitempty"`      // v4.6 E1 判据串（肯定/否定断言均应有）
 	Remediation    string         `json:"remediation,omitempty"` // v5.3.6：修复建议（LLM 登记时提供；旧数据为空→UI 显示「未填写」）
 	POC            []FindingPOC   `json:"poc,omitempty"`         // v5.3.6：POC 请求/响应对（≤5 组，单侧 ≤16KB 截断）
 	EvidenceIDs    []string       `json:"evidence_ids"`          // v5.3.6 起参数废弃：模型不再显式提供，一律引擎自动关联真实证据编号；字段保留供旧数据展示
@@ -169,17 +175,17 @@ type EvidenceRecord struct {
 // Subtask 阶段内子任务（PentAGI task/subtask 双层模型移植）：
 // 阶段头把当阶段工作拆解为可跟踪的子任务清单，进度可查可回填。
 type Subtask struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id"`
-	Stage     string    `json:"stage"`
-	Title     string    `json:"title"`
-	Detail    string    `json:"detail,omitempty"`
-	Status    string    `json:"status"` // created/running/waiting/finished/failed
-	Result    string    `json:"result,omitempty"`
-	Priority  int       `json:"priority,omitempty"`     // v5.3.2 P1-5：覆盖缺口/风险/证据自调优先级（1=最高，引擎重排，id 稳定）
-	PriorityWhy string  `json:"priority_why,omitempty"` // 排序依据（覆盖缺口/高危动作/证据缺口…供头引用）
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Stage       string    `json:"stage"`
+	Title       string    `json:"title"`
+	Detail      string    `json:"detail,omitempty"`
+	Status      string    `json:"status"` // created/running/waiting/finished/failed
+	Result      string    `json:"result,omitempty"`
+	Priority    int       `json:"priority,omitempty"`     // v5.3.2 P1-5：覆盖缺口/风险/证据自调优先级（1=最高，引擎重排，id 稳定）
+	PriorityWhy string    `json:"priority_why,omitempty"` // 排序依据（覆盖缺口/高危动作/证据缺口…供头引用）
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // AskRecord 向人提问（PentAGI ask_user 屏障移植）：阶段/对话执行中挂起等待人工回答，全量留痕。
@@ -193,6 +199,9 @@ type AskRecord struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	AnsweredAt *time.Time `json:"answered_at,omitempty"`
 	AnsweredBy string     `json:"answered_by,omitempty"`
+	// v5.6.0：提问类型（空=普通问答；"credential"=凭据专用通道——回答不落明文，
+	// 引擎拦截原文写入加密凭据仓库，Answer 只保留掩码摘要）。
+	Kind string `json:"kind,omitempty"`
 }
 
 // FactRecord v3.3.0 项目黑板（CyberStrikeAI pentest-blackboard 移植）：跨阶段可复用的结构化事实账本。
@@ -257,7 +266,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs} {
+		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -356,8 +365,8 @@ func (s *Store) DeleteProject(id string) error {
 		tx.Bucket(bucketChats).Delete([]byte(id))
 		// 键前缀作用域桶：coverage（ID\x00...）与 stream（ID|seq）
 		for _, spec := range []struct {
-			bkt     *bolt.Bucket
-			prefix  string
+			bkt    *bolt.Bucket
+			prefix string
 		}{{tx.Bucket(bucketCoverage), id + "\x00"}, {tx.Bucket(bucketStream), id + "|"}} {
 			if spec.bkt == nil {
 				continue
@@ -378,7 +387,8 @@ func (s *Store) DeleteProject(id string) error {
 			ProjectID string `json:"project_id"`
 		}
 		for _, b := range [][]byte{bucketFindings, bucketAssets, bucketTimeline, bucketApprovals,
-			bucketEvidence, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketVTs} {
+			bucketEvidence, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketVTs,
+			bucketCredentials, bucketReceipts} {
 			bkt := tx.Bucket(b)
 			if bkt == nil {
 				continue
@@ -523,6 +533,14 @@ func getProjectID(rec any) string {
 	case VerificationTask: // v4.6 A2
 		return r.ProjectID
 	case *VerificationTask:
+		return r.ProjectID
+	case CredentialRecord: // v5.5.0 凭据仓库
+		return r.ProjectID
+	case *CredentialRecord:
+		return r.ProjectID
+	case ReceiptRecord: // v5.5.0 回执归档
+		return r.ProjectID
+	case *ReceiptRecord:
 		return r.ProjectID
 	}
 	return ""
@@ -1030,6 +1048,97 @@ func (s *Store) ListLoot(projectID string, limit int) ([]*LootRecord, error) {
 		out = out[:limit]
 	}
 	return out, err
+}
+
+// ---------- v5.5.0 结构化凭据仓库（静态加密；明文不落库，密文按项目隔离） ----------
+// 设计约定（docs/repair-plan-capability-20261118.md 方案 A）：
+//   - SecretCiphertext 为 AES-256-GCM 密文（nonce||ciphertext，加密封装版本化），由 credentials 包加密后写入；
+//   - 存储层不接触明文，也不做掩码——展示层（引擎工具回执/UI）只输出 CredentialMeta 派生的掩码；
+//   - Loot 库继续只登记掩码摘要（纪律不变），凭据本体在 credentials 桶，两者可用 SourceLootID 关联。
+
+type CredentialRecord struct {
+	ID               string    `json:"id"` // cred- 前缀
+	ProjectID        string    `json:"project_id"`
+	Target           string    `json:"target"`                   // 归属目标（主机/服务/账号）
+	Identity         string    `json:"identity"`                 // 身份名（如 operator / viewer；同 role 多会话用 operator/session-2）
+	Role             string    `json:"role,omitempty"`           // 可选角色标注（admin/user/…）
+	Kind             string    `json:"kind"`                     // bearer/basic/cookie/header/token
+	Username         string    `json:"username,omitempty"`       // 可选（basic 场景）；展示时由引擎层掩码
+	SecretCiphertext []byte    `json:"secret_ciphertext"`        // AES-GCM 密文（nonce||ciphertext）
+	SecretVersion    int       `json:"secret_version"`           // 加密封装版本（v1）
+	SourceLootID     string    `json:"source_loot_id,omitempty"` // 可选关联 Loot 记录（不回填明文）
+	Status           string    `json:"status"`                   // active/revoked
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	// v5.6.0 凭据来源谱系（S2 伪造凭证轨：真实→还原→伪造→矩阵的引擎级可追溯）：
+	Origin   string `json:"origin,omitempty"`    // real（客户提供）/ forged（伪造构造）/ derived（由真实凭据推导还原）
+	ParentID string `json:"parent_id,omitempty"` // 伪造/派生的父凭据 cred-<id>
+	Method   string `json:"method,omitempty"`    // 伪造/派生方法（如 jwt-none、alg-confusion、cookie-forge、token-relay）
+}
+
+// AddCredential 写入一条凭据（ID/时间戳为空时补齐）；密文由调用方加密。
+func (s *Store) AddCredential(c *CredentialRecord) (string, error) {
+	if c.ID == "" {
+		c.ID = newID("cred")
+	}
+	if c.Status == "" {
+		c.Status = "active"
+	}
+	c.CreatedAt = time.Now()
+	c.UpdatedAt = c.CreatedAt
+	return c.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCredentials, c.ID, c) })
+}
+
+// SaveCredential 覆盖写（撤销/更新用，保留原 ID）。
+func (s *Store) SaveCredential(c *CredentialRecord) error {
+	c.UpdatedAt = time.Now()
+	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCredentials, c.ID, c) })
+}
+
+// GetCredential 按 id 读取（含密文；解密由 credentials 服务完成）。
+func (s *Store) GetCredential(projectID, id string) (*CredentialRecord, error) {
+	var c CredentialRecord
+	err := s.db.View(func(tx *bolt.Tx) error { return getJSON(tx, bucketCredentials, id, &c) })
+	if err != nil {
+		return nil, err
+	}
+	if c.ProjectID != projectID {
+		return nil, fmt.Errorf("凭据 %s 不属于项目 %s", id, projectID)
+	}
+	return &c, nil
+}
+
+// ListCredentials 项目全部凭据（含密文，仅服务层内部使用；展示走掩码投影）。
+func (s *Store) ListCredentials(projectID string) ([]*CredentialRecord, error) {
+	return listBy[CredentialRecord](s, bucketCredentials, projectID)
+}
+
+// ---------- v5.5.0 工具回执归档（压缩可恢复） ----------
+// compactMsgs 存根化旧工具回执前，原文先归档本桶；search_memory 支持 receipt:<id> 取回原文。
+// 键为回执 ID（追加式，不覆盖），压缩多轮不互相覆盖；项目删除时一并清理。
+
+type ReceiptRecord struct {
+	ID        string    `json:"id"` // rpt- 前缀
+	ProjectID string    `json:"project_id"`
+	Stage     string    `json:"stage,omitempty"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// SaveReceipt 归档一条工具回执原文，返回 receipt id。
+func (s *Store) SaveReceipt(projectID, stage, content string) (string, error) {
+	r := &ReceiptRecord{ID: newID("rpt"), ProjectID: projectID, Stage: stage, Content: content, CreatedAt: time.Now()}
+	return r.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketReceipts, r.ID, r) })
+}
+
+// GetReceipt 按 id 取回原文（跨项目读取在服务层由调用方保证 project 归属校验）。
+func (s *Store) GetReceipt(id string) (*ReceiptRecord, error) {
+	var r ReceiptRecord
+	err := s.db.View(func(tx *bolt.Tx) error { return getJSON(tx, bucketReceipts, id, &r) })
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // ---------- v3.4.0 组织级教训库（lessons） ----------

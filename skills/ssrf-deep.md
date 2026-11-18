@@ -47,7 +47,7 @@ http://metadata.google.internal/                # GCP（需头 Metadata-Flavor�
 - **解析变体**：`0.0.0.0` 解析为 localhost；CNAME 链最终指向 localhost
 - **headless 浏览器接管**：CDP `127.0.0.1:9222/json` → WebSocket 接管 → 读 cookie/DOM
 - **链式**：WebLogic CVE-2014-4210 `uddiexplorer/SearchPublicRegistries.jsp?operator=` + CRLF 打 Redis 写 cron；K8s CVE-2020-8554/8562 绕过判据（校验时外部 IP、请求时内部 IP）；DNS rebinding（TTL=0、rbndr.us 双解析）；Gopherus 四服务（mysql/fastcgi/redis/smtp）
-- **时间侧信道判内网存活**（无回显 SSRF）：资源 URL 参数（avatar 型）→ `http://x.dnslog.cn/#` 注释原后缀确认出网 → 依次替换 127.0.0.1/内网段 → **响应时长分档**（基线：外网 0.3s / loopback 1.1s / 内网不通 6s+）→ 时长偏离基线 ≥3 倍 = 该地址被服务端请求过 → 画内网存活判定表
+- **时间侧信道判内网存活**（无回显 SSRF）：资源 URL 参数（avatar 型）→ `http://x.dnslog.cn/#` 注释原后缀确认出网 → 依次替换 127.0.0.1/内网段 → **响应时长差分（v5.6.1 修订：目标级动态基线，禁用固定分档）**——先对目标测噪声基线：连发 5 次已知外网 URL 取中位时长 T_ext、5 次必然超时地址取中位 T_to；判定=候选地址时长 ≥ max(3×T_ext, T_to÷3) 且**连续 3 轮稳定复现**（排除网络抖动）→ 才画内网存活判定表；单次时长偏离只记 candidate
 ### 实战补遗（v4.4 一线 SRC 实战实证，已去标识）
 
 - **第一排查位**："保存头像"/avatar 类资源 URL 参数是无回显 SSRF 最高频入口——上传/保存动作全部抓包核对 URL 参数是否服务端发起请求。

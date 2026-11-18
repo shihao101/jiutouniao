@@ -21,9 +21,15 @@ import urllib.request, urllib.error
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 idor-baseline/1.0"
 
-def fetch(url, cookies=None, timeout=15):
-    req = urllib.request.Request(url)
+METHOD = {"m": "GET", "d": None, "h": {}}  # v5.6.0 全局请求形态（__main__ 装配；selftest 默认 GET）
+
+
+def fetch(url, cookies=None, timeout=15, method="GET", data=None, extra_headers=None):
+    """v5.6.0：支持任意方法/请求体/额外认证头（Bearer/token 类带态矩阵不再限于 Cookie）。"""
+    req = urllib.request.Request(url, data=data, method=method)
     req.add_header("User-Agent", UA)
+    for k, v in (extra_headers or {}).items():
+        req.add_header(k, v)
     if cookies:
         req.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
     t0 = time.monotonic()
@@ -47,7 +53,7 @@ def run(url_tpl, start, count, cookies=None, owner_grep=None, anonymous=True):
     ids = list(range(start, start + count))
     samples, oids_ok = [], []
     for oid in ids:
-        data, status, _ = fetch(url_tpl.format(oid), cookies=cookies)
+        data, status, _ = fetch(url_tpl.format(oid), cookies=cookies, method=METHOD["m"], data=METHOD["d"], extra_headers=METHOD["h"])
         s = sig(data, status)
         s["id"] = oid
         s["owners"] = owners_visible(data, owner_grep)
@@ -62,7 +68,11 @@ def run(url_tpl, start, count, cookies=None, owner_grep=None, anonymous=True):
     anon_hits = []
     if anonymous and oids_ok:
         for oid in oids_ok[:3]:  # 最多 3 个：存在性证明即可
-            data, status, _ = fetch(url_tpl.format(oid), cookies=None)
+            # v5.6.1 修复审计缺陷#17：匿名重放必须剥离全部认证面（cookies 与 --header 认证头）——
+            # 否则带 Authorization 的"匿名"请求命中 200 会被误报 anonymous IDOR（假阳性）。
+            anon_headers = {k: v for k, v in METHOD["h"].items()
+                            if not any(f in k.lower() for f in ("auth", "token", "cookie", "key", "session", "csrf"))}
+            data, status, _ = fetch(url_tpl.format(oid), cookies=None, method=METHOD["m"], data=METHOD["d"], extra_headers=anon_headers)
             if status == 200 and len(data) > 0:
                 anon_hits.append({"id": oid, **sig(data, status)})
     owner_set = sorted({o for s in samples for o in s["owners"]})
@@ -125,11 +135,28 @@ def main():
     ap.add_argument("--start", type=int, default=1, help="起始对象 ID")
     ap.add_argument("--count", type=int, default=5, help="采样个数（默认 5，存在性证明足够）")
     ap.add_argument("--cookie", action="append", default=[], help="会话态 k=v（可多次）")
+    ap.add_argument("--header", action="append", default=[], help="v5.6.0 认证头 '名: 值'（可多次，如 Authorization: Bearer …）")
+    ap.add_argument("--method", default="GET", help="v5.6.0 请求方法（GET/POST/…）")
+    ap.add_argument("--data", help="v5.6.0 请求体（内联或 @file）")
     ap.add_argument("--owner-grep", help="响应中归属证据正则（如 owner=([0-9]+)）")
     ap.add_argument("--no-anonymous", dest="anonymous", action="store_false", help="跳过匿名差分")
     ap.add_argument("--json", action="store_true", help="输出 JSON（默认）")
     ap.add_argument("--selftest", action="store_true")
     ns = ap.parse_args()
+    _extra = {}
+    for h in ns.header or []:
+        k, _, v = h.partition(":")
+        if k.strip():
+            _extra[k.strip()] = v.strip()
+    _data = None
+    if ns.data:
+        if ns.data.startswith("@"):
+            with open(ns.data[1:], "rb") as _f:
+                _data = _f.read()
+        else:
+            _data = ns.data.encode("utf-8")
+        _extra.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    METHOD.update({"m": ns.method.upper(), "d": _data, "h": _extra})
     if ns.selftest:
         selftest(); return
     if not ns.url:

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"jiutouniao/internal/config"
+	"jiutouniao/internal/credentials"
 	"jiutouniao/internal/events"
 	"jiutouniao/internal/llm"
 	"jiutouniao/internal/store"
@@ -38,11 +39,12 @@ type Orchestrator struct {
 	approver *Approver
 	bus      *events.Bus
 	heads    map[string]*Head
-	coreLoop string           // 执行循环宪法（prompts/loop-core.md）
-	skills   *SkillRegistry   // 技能库（strix/PentesterFlow 移植）
-	hex      *HexStrikeBridge // hexstrike-ai 工具网关桥（可空）
-	roe      *ROEProfile      // v4.6 T3/H：ROE Profile（nil=未启用）
-	profiles *ExecutionProfiles // v5.3.1：Execution Profile 声明（双运行模式单一事实源，逐动作强制）
+	coreLoop string               // 执行循环宪法（prompts/loop-core.md）
+	skills   *SkillRegistry       // 技能库（strix/PentesterFlow 移植）
+	hex      *HexStrikeBridge     // hexstrike-ai 工具网关桥（可空）
+	roe      *ROEProfile          // v4.6 T3/H：ROE Profile（nil=未启用）
+	profiles *ExecutionProfiles   // v5.3.1：Execution Profile 声明（双运行模式单一事实源，逐动作强制）
+	creds    *credentials.Service // v5.5.0：结构化凭据仓库（方案 A；未配置主密钥时 Enabled()=false，工具 fail closed）
 
 	mu      sync.Mutex
 	running map[string]context.CancelFunc // projectID -> 取消函数
@@ -233,9 +235,19 @@ func NewOrchestrator(cfg *config.Config, st *store.Store, client llm.Client, exe
 		return nil, fmt.Errorf("Execution Profile 声明加载失败（execution_profiles_path=%s）: %w", profilesPath, perr)
 	}
 	log.Printf("Execution Profile 声明已加载: %s（production_safe/isolated_lab 逐动作强制生效）", profiles.Path)
+	// v5.5.0（修复方案 A）：结构化凭据仓库——未配置主密钥时 fail closed（不报错，工具不可用）。
+	creds, cerr := credentials.New(st)
+	if cerr != nil {
+		return nil, fmt.Errorf("凭据仓库初始化失败: %w", cerr)
+	}
+	if creds.Enabled() {
+		log.Printf("凭据仓库已启用（CREDENTIALS_MASTER_KEY 已配置：静态 AES-256-GCM 加密，日志/证据全程掩码）")
+	} else {
+		log.Printf("凭据仓库未启用（未配置 CREDENTIALS_MASTER_KEY）：store_credential/http_request 带态注入不可用，有凭证深度测试请先配置主密钥")
+	}
 	o := &Orchestrator{
 		cfg: cfg, store: st, llm: client, exec: exec, approver: ap, bus: bus,
-		heads: heads, coreLoop: string(core), skills: skills, hex: hex, roe: roeProfile, profiles: profiles,
+		heads: heads, coreLoop: string(core), skills: skills, hex: hex, roe: roeProfile, profiles: profiles, creds: creds,
 		running:    map[string]context.CancelFunc{},
 		tokens:     map[string]int64{},
 		inputs:     map[string][]string{},
@@ -326,6 +338,29 @@ func (o *Orchestrator) clientFor(p *store.Project) (llm.Client, string) {
 		return c, o.models[o.defModel]
 	}
 	return o.llm, o.cfg.LLM.Model
+}
+
+// SetProjectModel v5.4.x：更新项目级模型（校验在 web 层注册表完成）；清内存故障切换覆盖避免遮蔽新值。
+func (o *Orchestrator) SetProjectModel(projectID, modelID string) error {
+	p, err := o.store.GetProject(projectID)
+	if err != nil {
+		return err
+	}
+	old := p.ModelID
+	p.ModelID = modelID
+	if err := o.store.SaveProject(p); err != nil {
+		return err
+	}
+	o.liveMu.Lock()
+	if lp, ok := o.liveP[projectID]; ok {
+		lp.ModelID = modelID
+	}
+	o.liveMu.Unlock()
+	o.projMu.Lock()
+	delete(o.projModel, projectID)
+	o.projMu.Unlock()
+	o.log(p, "", fmt.Sprintf("🔀 项目模型已切换: %s → %s（下一轮 LLM 调用生效）", old, modelID))
+	return nil
 }
 
 // setModelOverride v2.7 A8：故障切换后锁定本项目后续轮次使用接管模型（项目结束即清除）。
@@ -519,6 +554,14 @@ func (o *Orchestrator) registrationGate(command string) (bool, string) {
 var urlHostRe = regexp.MustCompile(`https?://([A-Za-z0-9_.:-]+)`)
 var ipLitRe = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
 
+// proxyAssignRe 匹配命令文本中的代理环境变量赋值（export/env http_proxy=… https_proxy=… 等）。
+// 值由部署环境或 TOOL_PROXY 注入，属传输通道配置而非测试目标——v5.7.2 安装通道分流后
+// install_tool 的代理兜底命令携带代理地址（如 docker 网桥 IP），目标匹配前必须剥离，否则
+// strict_scope 项目会把代理 IP 误判为范围外目标确定性拦截；loop-core 教的
+// `env http_proxy=$TOOL_PROXY <cmd>` 下载前缀同理，属既有潜伏误拦面。与 v5.3.9 OSINT 白名单
+// 同理：范围匹配器只应校验业务目标。
+var proxyAssignRe = regexp.MustCompile(`(?i)\b[a-z_]*(https?_proxy|all_proxy|no_proxy)=\S+`)
+
 var defaultScopeAllowlist = []string{
 	"crt.sh", "github.com", "raw.githubusercontent.com", "api.github.com", "objects.githubusercontent.com",
 	"nvd.nist.gov", "services.nvd.nist.gov", "nuclei.sh", "cve.mitre.org", "cve.org",
@@ -527,6 +570,11 @@ var defaultScopeAllowlist = []string{
 	"http.kali.org", "kali.download", "mirrors.ustc.edu.cn", "mirrors.aliyun.com",
 	"dns.alidns.com", "223.5.5.5", "119.29.29.29", "8.8.8.8", "1.1.1.1",
 	"gitee.com", // v5.3.1：install_tool git 策略的国内镜像源（installToolGitMap 第二策略）
+	// v5.3.9：OSINT 数据源补全——对第三方 API 的读请求不是对目标发包，不应被目标匹配器误拦
+	// （实测事故：JT-CB28FC05F0 空间测绘四平台全被 strict_scope 拦截，OSINT 轨空转）。
+	// 泄露库/测绘/代码检索与档案类数据源；recon-playbook / osint-leak-intel / history-recon 消费。
+	"fofa.info", "quake.360.net", "zoomeye.org", "hunter.qianxin.com",
+	"api.pwnedpasswords.com", "haveibeenpwned.com", "virustotal.com", "shodan.io", "censys.io",
 	"oast.pro", "oast.live", "oast.site", "dnslog.cn", "interact.sh", "oob.interactsh.com",
 	"searchsploit", "localhost", "127.0.0.1", "0.0.0.0", "example.com", "example.edu",
 	"grep.app", "searchcode.com", "web.archive.org", "archive.org", "haveibeenpwned.com",
@@ -551,6 +599,8 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 	if !p.StrictScope {
 		return false, ""
 	}
+	// v5.7.2：代理赋值是传输通道配置而非测试目标，剥离后再做目标提取（见 proxyAssignRe 注释）
+	command = proxyAssignRe.ReplaceAllString(command, "")
 	allow := map[string]bool{}
 	for _, a := range defaultScopeAllowlist {
 		allow[strings.ToLower(a)] = true
@@ -879,7 +929,11 @@ func (o *Orchestrator) streamMsg(projectID, stage, text string) {
 
 // streamTool 持久化并推送一次工具调用（阶段执行与对话模式通用，刷新后可回填工具调用页签）。
 func (o *Orchestrator) streamTool(projectID, stage string, tc llm.ToolCall, result string) {
-	rec := &store.StreamRecord{Kind: "tool", Stage: stage, Tool: tc.Name, Args: truncateText(tc.Arguments, 800), Result: truncateText(result, 1600)}
+	// v5.6.0 秘密卫生（审计修复高危#2）：工具参数/结果持久化前统一脱敏——
+	// 原实现把 tc.Arguments 前 800 字节原样落执行流+推 UI，store_credential 的 secret
+	// 参数会绕过加密仓库明文留存；现在参数走 JSON 感知脱敏、结果走模式兜底脱敏。
+	rec := &store.StreamRecord{Kind: "tool", Stage: stage, Tool: tc.Name,
+		Args: truncateText(maskToolArgsJSON(tc.Arguments), 800), Result: truncateText(maskSensitiveText(result), 1600)}
 	_, _ = o.store.AddStream(projectID, rec)
 	o.bus.Publish(projectID, "stage_tool", map[string]any{"tool": rec.Tool, "args": rec.Args, "result": rec.Result, "stage": stage})
 }
@@ -1147,6 +1201,16 @@ func (o *Orchestrator) runPipeline(ctx context.Context, p *store.Project) {
 			o.log(p, stageID, "⛔ 阶段未收口（"+st.Summary+"），流水线停止（可手动重跑该阶段后继续）")
 			return
 		}
+		// v5.5.0（修复方案 E）：预算耗尽暂停——阶段 paused 时流水线不再推进后续阶段，
+		// 等待人工提升预算/重跑（后续阶段基于半成品交付物工作比停下来更危险）。
+		if st := p.StageStates[stageID]; st != nil && st.Status == "paused" {
+			p.Status = "paused"
+			p.CurrentStage = stageID
+			_ = o.store.SaveProject(p)
+			o.bus.Publish(p.ID, "project", p)
+			o.log(p, stageID, "⏸ 阶段预算耗尽已暂停，流水线停止推进（"+st.Summary+"）——提升预算后在「阶段流水线」重跑该阶段继续")
+			return
+		}
 	}
 	// 回环补跑（F-03 修复）：阶段头 loopback 登记的前置阶段在此真正重跑
 	o.loopMu.Lock()
@@ -1285,9 +1349,22 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 		// v3.3.0 输出治理③窗口压缩（pentagi window_compaction / HackSynth 滚动摘要的确定性版）：
 		// 消息链估算超预算时把最旧的中段工具回执/长助手消息替换为存根——不再「只增不减」，
 		// 实测 125k tokens/200 msgs 的注意力稀释与成本失控由此收敛；保护 system/上下文包/最近 N 条。
-		if cm, nc := compactMsgs(msgs, o.cfg.Engine.ContextBudgetTokens, o.cfg.Engine.ContextKeepRecent); nc > 0 {
+		// v5.5.0（修复方案 G）：压缩前工具回执原文先归档 receipts 桶，存根携带 receipt id，
+		// search_memory query="receipt:<id>" 可取回原文——压缩不再不可逆。
+		receiptArchive := func(stage, content string) string {
+			// v5.6.1（审计 RunB#11）：归档前统一脱敏——Receipt 是持久化出口之一；
+			// 秘密值掩码不影响上下文恢复（凭据可经 auth_ref 重新注入，无需原文）。
+			content = maskSensitiveText(content)
+			rid, rerr := o.store.SaveReceipt(p.ID, stage, content)
+			if rerr != nil {
+				log.Printf("[stage %s] 回执归档失败（存根降级为不可检索）: %v", stageID, rerr)
+				return ""
+			}
+			return rid
+		}
+		if cm, nc := compactMsgsWithArchive(msgs, o.cfg.Engine.ContextBudgetTokens, o.cfg.Engine.ContextKeepRecent, receiptArchive); nc > 0 {
 			msgs = cm
-			o.log(p, stageID, fmt.Sprintf("🧹 上下文窗口压缩：%d 条旧消息已存根化（当前估算 %d tokens）", nc, estimateTokens(msgs)))
+			o.log(p, stageID, fmt.Sprintf("🧹 上下文窗口压缩：%d 条旧消息已存根化（当前估算 %d tokens；工具回执原文已归档可按 receipt id 检索）", nc, estimateTokens(msgs)))
 		}
 		// 指挥室指令注入（PentAGI putUserInput 移植）：运行中项目用户可直接下达指令
 		injectedN := 0
@@ -1458,6 +1535,23 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 			_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
 				Event: "v4.6 V3 清单（护栏代填）", Detail: pair.field + ": " + strings.Join(pair.items, " | ")})
 		}
+	}
+	// v5.5.0（修复方案 E）：预算耗尽不再一律把未完成阶段装作 done——默认 pause：
+	// 阶段置 paused+项目暂停，人工提升预算/手动重跑后从断点继续（auto_close 档保留 v4.9 代收口旧行为）。
+	// 代收口曾造成"未完成的 S4 被流水线继续推进"的结构性能力损失：后续阶段基于半成品交付物工作。
+	if o.cfg.Engine.BudgetExhaustedPolicy != "auto_close" {
+		state.Status = "paused"
+		state.PauseReason = "token/迭代预算耗尽（可提升 max_stage_iterations 或项目 budget_tokens 后重跑续接）"
+		state.EndedAt = time.Now().Format(time.RFC3339)
+		if len(readyItems) > 0 || len(l2Items) > 0 {
+			state.Summary = fmt.Sprintf("迭代轮次耗尽，阶段暂停（paused）等待续跑：已收割在途产出（就绪未投递 %d 项、已批未用 %d 项已登记台账），未完成部分不标记完成", len(readyItems), len(l2Items))
+		} else {
+			state.Summary = "迭代轮次耗尽，阶段暂停（paused）等待续跑：本阶段未收口，不标记完成"
+		}
+		state.Review = ""
+		_ = o.store.SaveProject(p)
+		o.log(p, stageID, "⏸ 迭代轮次耗尽，阶段置为 paused（修复方案 E：未完成不装作完成）——提升 max_stage_iterations/budget 后在「阶段流水线」重跑该阶段即可从断点继续")
+		return nil
 	}
 	state.Status = "done"
 	state.EndedAt = time.Now().Format(time.RFC3339)
@@ -2020,6 +2114,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if (st == "closed-roe" || st == "deferred") && reason == "" {
 			return "错误: closed-roe / deferred 必须附 note 处置理由（deferred 还须在 result_ref 写移交位置与启动条件/步骤/工作量三要素）"
 		}
+		// v5.6.1（审计缺陷#2）：executed 必须附 result_ref（结果/证据位置）——处置≠空口声称执行
+		if st == "executed" && strings.TrimSpace(s("result_ref")) == "" {
+			return "错误: executed 必须附 result_ref（结果/证据位置，如 evidence/<stage>/xxx 或交付物路径）——无证据的处置不闭环"
+		}
 		target.Status = st
 		target.ResultRef = s("result_ref")
 		target.Note = reason
@@ -2053,7 +2151,9 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 				if o.skills.LabOnly(h.ID) {
 					labOnly = true
 				}
-				b.WriteString(fmt.Sprintf("【技能 %s】%s\n\n%s\n\n---\n", h.ID, h.Title, truncateText(h.Body, 2500)))
+				// v5.6.0（审计修复：关键词截断丢尾部补遗）：头 2500 + 尾 1200——技能尾部的
+				// 工具兼容/误报排除/Execution Profile 补遗与正文头部一起保留，中间段省略。
+				b.WriteString(fmt.Sprintf("【技能 %s】%s\n\n%s\n\n---\n", h.ID, h.Title, headTail(h.Body, 2500, 1200)))
 			}
 			if labOnly {
 				b.WriteString(labOnlyBannerText())
@@ -2065,7 +2165,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if hits := o.skills.Bundle(s("query"), stageID, 5); len(hits) > 0 {
 			var b strings.Builder
 			for _, h := range hits {
-				b.WriteString(fmt.Sprintf("【技能 %s】%s（组合候选）\n\n%s\n\n---\n", h.ID, h.Title, truncateText(h.Body, 2000)))
+				b.WriteString(fmt.Sprintf("【技能 %s】%s（组合候选）\n\n%s\n\n---\n", h.ID, h.Title, headTail(h.Body, 2000, 900)))
 			}
 			o.log(p, stageID, fmt.Sprintf("📖 技能组合展开 %d 条", len(hits)))
 			return b.String()
@@ -2141,9 +2241,25 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		}
 		return fmt.Sprintf("覆盖矩阵已更新（该单元累计测试 %d 次）: %s | %s | %s → %s%s", entry.Count, entry.Endpoint, entry.VulnClass, entry.Param, entry.Status, downgraded)
 	case "search_memory": // 记忆检索（pentagi/VulnBot 简化版：关键词扫描）
-		q := strings.ToLower(s("query"))
+		rawQ := strings.TrimSpace(s("query"))
+		q := strings.ToLower(rawQ)
 		if q == "" {
 			return "错误: query 为空"
+		}
+		// v5.5.0（修复方案 G）：receipt:<id> 直取压缩前归档的工具回执原文（ID 大写敏感，用 rawQ）。
+		if strings.HasPrefix(strings.ToLower(rawQ), "receipt:") {
+			rid := strings.TrimSpace(rawQ[len("receipt:"):])
+			if rid == "" {
+				return "错误: receipt id 为空（用法 query=\"receipt:rpt-XXXXXXXXXX\"）"
+			}
+			r, rerr := o.store.GetReceipt(rid)
+			if rerr != nil || r == nil {
+				return "归档中无该回执（可能早于 v5.5.0 压缩或归档失败）：" + rid
+			}
+			if r.ProjectID != p.ID {
+				return "该回执不属于本项目，拒绝读取。"
+			}
+			return fmt.Sprintf("📄 回执 %s（阶段 %s，归档于 %s）原文：\n%s", r.ID, r.Stage, r.CreatedAt.Format("01-02 15:04:05"), r.Content)
 		}
 		var out []string
 		if fs, _ := o.store.ListFindings(p.ID); len(fs) > 0 {
@@ -2462,18 +2578,29 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		return "阶段已收口"
 	case "loopback":
 		to := s("to_stage")
-		if st, ok := p.StageStates[to]; ok {
-			st.Status = "pending" // 回环：目标阶段重开
-			_ = o.store.SaveProject(p)
+		st, ok := p.StageStates[to]
+		if !ok || st == nil {
+			return "错误: 回环目标阶段不存在: " + to
 		}
-		// 登记回环补跑（F-03 修复：原先仅改回 pending，主循环已过不会真正重跑）
+		// v5.5.0（修复方案 D）：回环上限内才置 pending+排队——原实现先置 pending 再查上限，
+		// 超额时状态已改但永远不入补跑队列，形成"看似已回环实则死死角"。
 		o.loopMu.Lock()
 		q := o.loops[p.ID]
-		if len(q) < 3 { // 防回环风暴：单项目最多补跑 3 次
-			q = append(q, to)
-			o.loops[p.ID] = q
+		queued := len(q) < o.cfg.Engine.LoopbackMaxRuns
+		if queued {
+			o.loops[p.ID] = append(q, to)
 		}
 		o.loopMu.Unlock()
+		if !queued {
+			// 超额：不改状态（保持 done/pending 原状），持久留痕 + 显式告知未排队。
+			_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+				Event:  "回环超额拒绝（v5.5.0 方案 D）",
+				Detail: fmt.Sprintf("to=%s reason=%s——已达单项目自动补跑上限 %d 次，未入补跑队列；请人工在「阶段流水线」重跑 %s 或评估新线索价值后手动触发", to, s("reason"), o.cfg.Engine.LoopbackMaxRuns, to)})
+			o.log(p, stageID, fmt.Sprintf("⚠ 回环请求超额未排队（上限 %d）：%s → %s（已留痕待人工处置）", o.cfg.Engine.LoopbackMaxRuns, stageID, to))
+			return fmt.Sprintf("回环未执行：本项目自动回环补跑已达上限（%d 次）。本请求已持久留痕（时间线「回环超额拒绝」），状态未改动。请人工决策：①在「阶段流水线」手动重跑 %s；②调用 record_vt 登记为移交/待验证项。不要再次调用 loopback。", o.cfg.Engine.LoopbackMaxRuns, to)
+		}
+		st.Status = "pending" // 回环：目标阶段重开
+		_ = o.store.SaveProject(p)
 		o.log(p, stageID, fmt.Sprintf("↩ 新线索回环 → 阶段[%s]：%s", to, s("reason")))
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: "回环", Detail: to + ": " + s("reason")})
 		return fmt.Sprintf("已触发回环至阶段[%s]；该阶段将在本项目后续轮次自动补跑，请继续当前阶段收尾。", to)
@@ -2588,6 +2715,19 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		return msg
 	case "poll_subagents": // v3.6.0 收子代理结果（已结束的报简报并标记消费）
 		return o.pollSubAgents(p)
+	// ---- v5.5.0 结构化凭据仓库与带态注入（修复方案 A）----
+	case "store_credential":
+		return o.toolStoreCredential(p, stageID, args)
+	case "list_credentials":
+		return o.toolListCredentials(p)
+	case "revoke_credential":
+		return o.toolRevokeCredential(p, stageID, args)
+	case "http_request": // 结构化 HTTP + auth_ref 注入（治理/审批/留证与 run_command 同级）
+		return o.toolHTTPRequest(ctx, p, stageID, args)
+	case "cred_command": // 显式占位符命令模板，密文走临时文件中介（治理/审批同 run_command）
+		return o.toolCredCommand(ctx, p, stageID, args)
+	case "request_credential": // v5.6.0 凭据专用索取通道：回答原文不落库，直入加密仓库
+		return o.toolRequestCredential(ctx, p, stageID, args)
 	case "record_lesson": // v3.4.0 组织级教训库：跨项目脱敏经验（收口/失败复盘时登记）
 		text, tags := s("text"), s("tags")
 		if strings.TrimSpace(text) == "" {
@@ -2746,7 +2886,8 @@ func (o *Orchestrator) toolRunCommand(ctx context.Context, p *store.Project, sta
 		return "拒绝执行：该命令命中破坏性操作禁令。请改用最小影响方式。"
 	}
 	approvedBy := "auto"
-	decision, err := o.approver.Request(ctx, p.ID, stageID, fmt.Sprintf("执行命令: %s\n原因: %s", command, reason), risk)
+	// v5.6.1（审计 RunB#8）：审批工单 Action 统一脱敏——命令含内联凭据时不再明文落审批记录
+	decision, err := o.approver.Request(ctx, p.ID, stageID, fmt.Sprintf("执行命令: %s\n原因: %s", maskSensitiveText(command), maskSensitiveText(reason)), risk)
 	if err != nil {
 		return "审批异常: " + err.Error()
 	}
@@ -2792,9 +2933,11 @@ func (o *Orchestrator) toolRunCommand(ctx context.Context, p *store.Project, sta
 	if err != nil {
 		status = "error: " + err.Error()
 	}
+	// v5.6.1（审计 RunB#8）：Evidence Input/Output 统一脱敏——命令回显凭据/输出含令牌时
+	// 不再明文落证据链（模型实时回执不脱敏，保持测试能力）。
 	_, _ = o.store.AddEvidence(&store.EvidenceRecord{
 		ProjectID: p.ID, Stage: stageID, Type: "command",
-		Input: command, Output: truncateText(out, 2000), Risk: risk,
+		Input: maskSensitiveText(command), Output: truncateText(maskSensitiveText(out), 2000), Risk: risk,
 		ApprovedBy: approvedBy, ExitCode: exit, DurationMs: dur,
 	})
 	if spilled != "" {
@@ -2838,16 +2981,16 @@ func (o *Orchestrator) toolRunAsync(ctx context.Context, p *store.Project, stage
 	risk := o.exec.ClassifyRisk(command)
 	if risk == tools.Forbidden {
 		o.log(p, stageID, "⛔ 拒绝破坏性命令（红线，后台通道同样适用）: "+truncateText(command, 120))
-		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + command, Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk})
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + maskSensitiveText(command), Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk})
 		return "拒绝执行：该命令命中破坏性操作禁令。请改用最小影响方式。"
 	}
 	approvedBy := "auto"
-	decision, err := o.approver.Request(ctx, p.ID, stageID, fmt.Sprintf("后台执行命令: %s\n原因: %s", command, reason), risk)
+	decision, err := o.approver.Request(ctx, p.ID, stageID, fmt.Sprintf("后台执行命令: %s\n原因: %s", maskSensitiveText(command), maskSensitiveText(reason)), risk)
 	if err != nil {
 		return "审批异常: " + err.Error()
 	}
 	if decision != "approved" && decision != "auto-approved" {
-		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + command, Output: "人工拒绝", Risk: risk, ApprovedBy: "human-rejected"})
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + maskSensitiveText(command), Output: "人工拒绝", Risk: risk, ApprovedBy: "human-rejected"})
 		return "人工审批拒绝该命令。请说明替代方案或收口本阶段。"
 	}
 	if decision == "approved" {
@@ -2858,7 +3001,7 @@ func (o *Orchestrator) toolRunAsync(ctx context.Context, p *store.Project, stage
 	if err != nil {
 		return "错误: 后台启动失败 " + err.Error() + "（可回退 run_command 或 nohup 约定）"
 	}
-	_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + command, Output: "job=" + job.ID + " log=" + job.LogPath, Risk: risk, ApprovedBy: approvedBy})
+	_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + maskSensitiveText(command), Output: "job=" + job.ID + " log=" + job.LogPath, Risk: risk, ApprovedBy: approvedBy})
 	o.log(p, stageID, fmt.Sprintf("🚀 后台任务 %s 已启动（超时 %ds，期间继续其他工作）：%s", job.ID, int(job.Timeout.Seconds()), truncateText(command, 100)))
 	return fmt.Sprintf("后台任务已启动 job=%s log=%s（超时 %ds）。\n立即用 poll_async 收结果而非同步等待；期间继续其他子任务。收口前必须确认其已结束（引擎会在流水线结束时强制清理）。", job.ID, job.LogPath, int(job.Timeout.Seconds()))
 }
@@ -2982,6 +3125,86 @@ var installToolGitMap = map[string][]string{
 	"nuclei": {"https://github.com/projectdiscovery/nuclei.git", "https://gitee.com/mirrors/projectdiscovery-nuclei.git"},
 }
 
+// installAttempt 单次安装尝试（通道·路径 标签 + 完整命令）。
+type installAttempt struct {
+	label string
+	cmd   string
+}
+
+// installDomesticHostHints 国内安装源特征（直连优先）；未列出的默认按国外源处理（代理优先）。
+var installDomesticHostHints = []string{
+	"gitee.com", "pypi.tuna.tsinghua.edu.cn", "mirrors.tuna.tsinghua.edu.cn",
+	"mirrors.aliyun.com", "mirrors.ustc.edu.cn", "mirrors.cloud.tencent.com",
+	"mirrors.huaweicloud.com", "registry.npmmirror.com",
+}
+
+// installSourceDomestic 判断安装源是否国内镜像（v5.7.2 安装通道分流用）。
+func installSourceDomestic(source string) bool {
+	s := strings.ToLower(source)
+	for _, h := range installDomesticHostHints {
+		if strings.Contains(s, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// gitSourceLabel 从 git 源地址提取可读标签（github.com→github），替代旧版按下标硬编码。
+func gitSourceLabel(source string) string {
+	h := source
+	if m := urlHostRe.FindStringSubmatch(source); m != nil {
+		h = m[1]
+	}
+	h = strings.TrimPrefix(h, "www.")
+	return strings.TrimSuffix(strings.TrimSuffix(h, ".com"), ".net")
+}
+
+// buildInstallAttempts v5.7.2 安装通道分流：按源地域生成直连/代理互为兜底的尝试序列。
+// 实证事故（JT-351169BBD7/JT-8991DD1A6D 等多条任务）：pip 走清华源报 SSL EOF（TLS 被上游重置）、
+// github 直连恒定 Connection reset——单路径策略哪条坏就整链失败。本环境实测：国内源直连可达、
+// github 仅代理可达；代理链路（LLM_PROXY→上游）恰好相反。故：
+//   - 通道优先级不变：apt → pip 清华源 → git（installToolGitMap 顺序，github 优先 gitee 镜像）；
+//   - 国内源直连优先、国外源代理优先，每条通道主路径失败后以反向路径兜底再试一次；
+//   - proxyURL 为空（公开分发默认未配 TOOL_PROXY/全局代理）时仅试直连，行为同旧版。
+func buildInstallAttempts(name, proxyURL string) []installAttempt {
+	// 直连前缀显式剥离代理变量（防御性：不依赖执行器 sanitizeEnv 剥离，命令级自保证）；
+	// 代理前缀显式注入（命令内 export 不经 sanitizeEnv 白名单，子进程可达）
+	pDirect := "unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; "
+	pProxy := ""
+	if proxyURL != "" {
+		pProxy = fmt.Sprintf("export http_proxy=%s https_proxy=%s; ", proxyURL, proxyURL)
+	}
+	aptCmd := fmt.Sprintf("mkdir -p /opt/tools; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq 2>&1 | tail -2; apt-get install -y --no-install-recommends %s 2>&1 | tail -3", name)
+	pipCmd := fmt.Sprintf("command -v pip3 >/dev/null 2>&1 || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y --no-install-recommends python3-pip >/dev/null 2>&1); python3 -m pip install --no-cache-dir --break-system-packages -i https://pypi.tuna.tsinghua.edu.cn/simple %s 2>&1 | tail -3", name)
+	var attempts []installAttempt
+	attempts = append(attempts, installAttempt{"apt 包管理器(Kali)·直连", pDirect + aptCmd})
+	if pProxy != "" {
+		attempts = append(attempts, installAttempt{"apt 包管理器(Kali)·代理兜底", pProxy + aptCmd})
+	}
+	attempts = append(attempts, installAttempt{"pip 清华源·直连", pDirect + pipCmd})
+	if pProxy != "" {
+		attempts = append(attempts, installAttempt{"pip 清华源·代理兜底", pProxy + pipCmd})
+	}
+	if sources, ok := installToolGitMap[name]; ok {
+		for _, src := range sources {
+			gitCmd := fmt.Sprintf("git clone --depth 1 %s /opt/tools/%s 2>&1 | tail -2 && ln -sf /opt/tools/%s/%s.py /usr/local/bin/%s 2>/dev/null; chmod +x /opt/tools/%s/%s.py 2>/dev/null; true", src, name, name, name, name, name, name)
+			label := "git 源码(" + gitSourceLabel(src) + ")"
+			if installSourceDomestic(src) {
+				attempts = append(attempts, installAttempt{label + "·直连", pDirect + gitCmd})
+				if pProxy != "" {
+					attempts = append(attempts, installAttempt{label + "·代理兜底", pProxy + gitCmd})
+				}
+			} else {
+				if pProxy != "" {
+					attempts = append(attempts, installAttempt{label + "·代理", pProxy + gitCmd})
+				}
+				attempts = append(attempts, installAttempt{label + "·直连兜底", pDirect + gitCmd})
+			}
+		}
+	}
+	return attempts
+}
+
 // toolInstallTool 自动安装缺失的安全工具（v2.5 Kali 化）：apt → pip(国内源) → git(github→gitee)。
 // 安装位置 /opt/tools（持久化至容器生命周期），可执行入口符号链接到 /usr/local/bin。
 // 成功/失败均写时间线与审批留痕；每工具最多尝试一次（标记文件防循环）。
@@ -3011,33 +3234,23 @@ func (o *Orchestrator) toolInstallTool(ctx context.Context, p *store.Project, st
 		return "人工审批拒绝安装 " + name + "。按 loop-core 工具纪律：改用已有同类工具并把该限制如实写入交付物，禁止编造未运行的工具输出。"
 	}
 
-	// v2.5：TOOL_PROXY（compose/环境注入，默认空=直连；测试环境经 override 提供）仅拼进下载类命令，
-	// 未设置时保持直连——不影响其他命令与流程
-	pfx := ""
-	if tp := strings.TrimSpace(os.Getenv("TOOL_PROXY")); tp != "" {
-		pfx = fmt.Sprintf("export http_proxy=%s https_proxy=%s; ", tp, tp)
-	}
-
-	strategies := []struct {
-		label string
-		cmd   string
-	}{
-		{"apt 包管理器(Kali)", pfx + fmt.Sprintf("mkdir -p /opt/tools; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq 2>&1 | tail -2; apt-get install -y --no-install-recommends %s 2>&1 | tail -3", name)},
-		{"pip (国内源)", pfx + fmt.Sprintf("command -v pip3 >/dev/null 2>&1 || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y --no-install-recommends python3-pip >/dev/null 2>&1); python3 -m pip install --no-cache-dir --break-system-packages -i https://pypi.tuna.tsinghua.edu.cn/simple %s 2>&1 | tail -3", name)},
-	}
-	if sources, ok := installToolGitMap[name]; ok {
-		for i, src := range sources {
-			strategies = append(strategies, struct {
-				label string
-				cmd   string
-			}{fmt.Sprintf("git 源码(%s)", map[bool]string{true: "github", false: "gitee"}[i == 0]),
-				pfx + fmt.Sprintf("git clone --depth 1 %s /opt/tools/%s 2>&1 | tail -2 && ln -sf /opt/tools/%s/%s.py /usr/local/bin/%s 2>/dev/null; chmod +x /opt/tools/%s/%s.py 2>/dev/null; true", src, name, name, name, name, name, name)})
+	// v5.7.2：代理地址解析——TOOL_PROXY 优先（部署显式配置的工具代理）；未配置时回退容器全局
+	// HTTP(S)_PROXY（LLM_PROXY 经 compose 注入，本测试环境即 privoxy→上游）。两者皆空仅试直连。
+	// 直连/代理互为兜底的尝试序列见 buildInstallAttempts。
+	proxyURL := strings.TrimSpace(os.Getenv("TOOL_PROXY"))
+	if proxyURL == "" {
+		for _, k := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+			if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+				proxyURL = v
+				break
+			}
 		}
 	}
+	attempts := buildInstallAttempts(name, proxyURL)
 
 	var log strings.Builder
 	installed := ""
-	for _, st := range strategies {
+	for _, st := range attempts {
 		if ctx.Err() != nil {
 			return "安装中止（项目已停止）"
 		}
@@ -3064,8 +3277,8 @@ func (o *Orchestrator) toolInstallTool(ctx context.Context, p *store.Project, st
 
 	if installed == "" {
 		o.log(p, stageID, fmt.Sprintf("🛠 工具 %s 安装失败（全部策略尝试完毕）", name))
-		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: "工具安装失败", Detail: name + "：apt/pip/git 均不可达或不存在该包；请改用已有工具并如实说明"})
-		return "工具 " + name + " 自动安装失败（已尝试: apt/pip/git）。常见原因：网络受限或包名不存在。请改用环境中已有的同类工具完成测试，并把该限制如实写入交付物。尝试日志:\n" + truncateText(log.String(), 800)
+		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: "工具安装失败", Detail: name + "：apt/pip/git 各通道直连与代理兜底均失败或不存在该包；请改用已有工具并如实说明"})
+		return "工具 " + name + " 自动安装失败（已尝试: apt/pip/git 各通道直连+代理兜底）。常见原因：网络受限或包名不存在。请改用环境中已有的同类工具完成测试，并把该限制如实写入交付物。尝试日志:\n" + truncateText(log.String(), 800)
 	}
 	_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: "工具自动安装", Detail: fmt.Sprintf("%s（via %s）用途: %s", name, installed, truncateText(purpose, 60))})
 	_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "install_tool " + name, Output: "via " + installed + "\n" + truncateText(log.String(), 500), Risk: tools.L1Write, ApprovedBy: "auto"})
@@ -3209,9 +3422,13 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 		b.WriteString("> ⚡ 并行扇出提示：本阶段若剩余 ≥3 个相互独立的测试单元（不同 endpoint×漏洞类/不同指纹），用 spawn_subagent 并行派发（objective 写清目标×漏洞类×判据），主头定期 poll_subagents 收结果——这是预算内的提速手段，不是可选项。\n\n")
 	}
 	// v4.8 W4 六轨编排提示（引擎编排层）：无凭证且有登录面时注入——逐轨尝试/逐轨 VT 化/命中轨分类处置（v5.1：L1 评估轨+索取闭环）
-	if stageID == "s4" && strings.TrimSpace(p.AuthInfo) == "" && o.loginSurfacePresent(p) {
-		b.WriteString("> 🪪 身份获取编排（v4.8 W4·v5.1 修订）：本项目无凭证——按 identity-bootstrapping 六轨顺序编排（L1 注册面 → L2 泄露面 → L3 默认口令 → L4 验证码逻辑 → L5 令牌伪造 → L6 会话构造），逐轨尝试并 record_vt（title 前缀 [W4-L1]..[W4-L6]，不适用轨也登记并在 start_conditions 注明「无对应面」）；**L1 为评估轨：按 ROE identity.auto_register（默认 deny）只做注册面存在性评估与流程还原，不执行注册、命中不建会话（发现本身 record_finding）**；L2-L6 任一轨取得身份（verified loot）即 load_skill session-state-chain 建会话；验证码轨走 captcha-ocr「取码→识别→立即提交」单会话闭环，失败降级人工读码/browser-auth；凭据面预言机探针分流（browser_oracle 无验证码面直连 / SimCaptcha 类面走会话）。全部轨未命中（或 L1 被 ROE 关闭且其余轨未命中）时：先执行 identity-bootstrapping 一a节**身份索取闭环**（request_user_input 向客户索要低权+高权测试账号），客户拒绝/超时后才六轨 VT 全量登记并按 S4-7 三行报告口径移交——禁止跳过索取直接放弃。\n\n")
+	// v5.6.0：状态判据从「仅看旧 AuthInfo 字段」升级为 projectHasIdentity（AuthInfo ∪ 凭据仓库 active ∪ verified Loot）——
+	// 审计缺陷：store_credential 入库后 W4 仍当 S0 跑六轨，新机制与旧状态机脱节。
+	if stageID == "s4" && !o.projectHasIdentity(p) && o.loginSurfacePresent(p) {
+		b.WriteString("> 🪪 身份获取编排（v4.8 W4·v5.1 修订）：本项目无凭证——按 identity-bootstrapping 六轨顺序编排（L1 注册面 → L2 泄露面 → L3 默认口令 → L4 验证码逻辑 → L5 令牌伪造 → L6 会话构造），逐轨尝试并 record_vt（title 前缀 [W4-L1]..[W4-L6]，不适用轨也登记并在 start_conditions 注明「无对应面」）；**L1 为评估轨：按 ROE identity.auto_register（默认 deny）只做注册面存在性评估与流程还原，不执行注册、命中不建会话（发现本身 record_finding）**；L2-L6 任一轨取得身份（verified loot 或 store_credential 入库）即 load_skill session-state-chain 建会话；验证码轨走 captcha-ocr「取码→识别→立即提交」单会话闭环，失败降级人工读码/browser-auth；凭据面预言机探针分流（browser_oracle 无验证码面直连 / SimCaptcha 类面走会话）。全部轨未命中（或 L1 被 ROE 关闭且其余轨未命中）时：先执行 identity-bootstrapping 一a节**身份索取闭环**（request_credential 专用通道向客户索要低权+高权测试账号——回答原文不落明文），客户拒绝/超时后才六轨 VT 全量登记并按 S4-7 三行报告口径移交——禁止跳过索取直接放弃。\n\n")
 	}
+	// v5.6.0 凭证状态三态上下文（通用型：所有阶段按 S0/S1/S2 差异化注入，审计④-13）
+	b.WriteString(o.credentialStateBlock(p))
 	// v4.6 T3/H：ROE Profile 运行时含义注入（治理参数化）
 	if o.roe != nil {
 		b.WriteString("### ROE Profile（运行时治理参数，v4.6 §3——引擎已加载的许可口径）\n")
@@ -3506,8 +3723,8 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 		}, "action")},
 		{Name: "complete_stage", Description: "本阶段完成，提交收口。必须提供阶段摘要与交付物清单；s4/s5 还必须在调用参数中提供顶层字段 ready_but_unexecuted 与 l2_approved_unused（JSON 数组，无内容传空数组 []，不要只写进 summary 文本）。若收口提示存在 quality-pending 复核标记：先复核相关阶段交付物，确认无缺口后重新调用并传 \"confirm_quality_review\": true（引擎清除标记并继续收口）。", Parameters: obj(map[string]any{
 			"summary": str("阶段摘要"), "deliverables": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "交付物清单"},
-			"ready_but_unexecuted": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：有就绪脚本/PoC 而未投递的待验证项（每条含就绪资产路径与启动条件）；无内容传空数组 []"},
-			"l2_approved_unused":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：已批准但未使用的 L2 审批工单；无内容传空数组 []"},
+			"ready_but_unexecuted":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：有就绪脚本/PoC 而未投递的待验证项（每条含就绪资产路径与启动条件）；无内容传空数组 []"},
+			"l2_approved_unused":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：已批准但未使用的 L2 审批工单；无内容传空数组 []"},
 			"confirm_quality_review": map[string]any{"type": "boolean", "description": "v5.3.8（仅 s8 需要时）：收口提示存在 quality-pending 复核标记时，复核相关阶段交付物后传 true——引擎清除标记并继续收口"},
 		}, "summary", "deliverables")},
 		{Name: "loopback", Description: "发现新攻击面需要前置阶段补充分析时触发回环（如回退到 s4 漏洞发现）。", Parameters: obj(map[string]any{
@@ -3522,10 +3739,10 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 		{Name: "consult_expert", Description: "向专项专家做单次深度会诊（adviser 导师/pentester 渗透/coder 开发/searcher 情报/reflector 审查/reporter 报告）。卡壳、需要第二意见或专业方案时调用。", Parameters: obj(map[string]any{
 			"role": str("专家角色：adviser/pentester/coder/searcher/reflector/reporter"), "question": str("要咨询的问题（含必要的上下文与目标）"),
 		}, "role", "question")},
-		{Name: "request_user_input", Description: "需要人工决策/补充信息（授权、凭据、二选一路线）时向用户提问，挂起等待回答后继续。", Parameters: obj(map[string]any{
+		{Name: "request_user_input", Description: "需要人工决策/二选一路线/非敏感信息补充时向用户提问，挂起等待回答后继续。⚠ 禁止用于索取凭据（密码/令牌/口令/Cookie）——回答会明文落库；凭据索取必须用 request_credential 专用通道（原文加密入库不落明文）。", Parameters: obj(map[string]any{
 			"question": str("要问用户的问题（具体、可一句话回答）"),
 		}, "question")},
-		{Name: "install_tool", Description: "环境中缺失某个安全工具时自动安装（Kali apt 官方源 → pip国内源 → git源码 github/gitee 双源；Kali 仓库数千款渗透工具均可装）。当 run_command 返回 command not found（退出码127）时调用本工具，安装成功后直接重试原命令；安装失败则改用已有工具并如实说明。", Parameters: obj(map[string]any{
+		{Name: "install_tool", Description: "环境中缺失某个安全工具时自动安装（通道优先级：Kali apt 官方源 → pip 清华源 → git 源码 github/gitee 双源；v5.7.2 起每条通道国内源直连优先、github 等国外源代理优先，主路径失败自动以反向路径兜底——Kali 仓库数千款渗透工具均可装）。当 run_command 返回 command not found（退出码127）时调用本工具，安装成功后直接重试原命令；安装失败则改用已有工具并如实说明。", Parameters: obj(map[string]any{
 			"name": str("工具名（如 sqlmap/whatweb/hydra）"), "purpose": str("一句话说明为什么需要它（写入审批与时间线留痕）"),
 		}, "name", "purpose")},
 		{Name: "load_skill", Description: "按 id 或关键词从技能库载入攻击剧本/清单（注入本次对话），先查技能再动手。", Parameters: obj(map[string]any{
@@ -3580,6 +3797,45 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"rounds":    str(fmt.Sprintf("轮次预算，可空（默认 engine.max_subagent_rounds=%d，上限 %d）", o.cfg.Engine.MaxSubagentRounds, subagentRoundsCap)),
 		}, "objective")},
 		{Name: "poll_subagents", Description: "收取子代理结果：运行中的报进度，已结束的报简报（结果已实时入黑板/覆盖矩阵/发现库）。", Parameters: obj(map[string]any{})},
+		// ---- v5.5.0 结构化凭据仓库与带态注入（修复方案 A：有凭证深度测试的地基）----
+		{Name: "store_credential", Description: "把凭据（令牌/口令/Cookie/会话）录入加密凭据仓库（AES-256-GCM 静态加密；日志/证据/回执全程只显掩码，明文不落库）。多身份测试（角色矩阵）必须逐身份录入——同一身份的多个会话用 identity 命名区分（如 operator/session-2）。向用户索取凭据时优先用 request_credential 专用通道（回答不落明文）。", Parameters: obj(map[string]any{
+			"identity":       str("身份名（必填，如 operator/viewer/admin；多会话用 operator/session-2）"),
+			"kind":           str("凭据类型：bearer/token/basic/cookie/header（header 时 secret 为完整 \"Name: value\"）"),
+			"secret":         str("凭据明文（仅入库瞬间存在，落库即密文；禁止在其他工具参数/文本中复写）"),
+			"target":         str("归属目标（主机/URL/账号；记录后凭据将绑定该 host，http_request 跨 host 使用会被拒绝）"),
+			"role":           str("角色标注（可空，如 admin/user）"),
+			"username":       str("用户名（basic 场景必填，可空）"),
+			"source_loot_id": str("关联 Loot 编号（可空）"),
+			"origin":         str("来源：real（默认，客户提供真实凭据）/forged（伪造构造，如 JWT none/alg 混淆产物）/derived（由真实凭据推导还原）"),
+			"parent_id":      str("父凭据 cred-<id>（forged/derived 时填写，构成来源谱系）"),
+			"method":         str("伪造/派生方法（forged/derived 时填写，如 jwt-none、alg-confusion、cookie-forge、token-relay）"),
+		}, "identity", "kind", "secret")},
+		{Name: "request_credential", Description: "v5.6.0 凭据专用索取通道：向用户索取凭据时必须用本工具而非普通提问——用户回答的原文经内存直入加密仓库（AskRecord/执行流/回执只含掩码，全程不落明文）。basic 凭据用户粘贴 `用户名:口令`，header 凭据粘贴 `头名: 头值`，其余直接粘贴原文。", Parameters: obj(map[string]any{
+			"question": str("索取说明（为什么需要、用于哪个身份/场景）"),
+			"identity": str("身份名（入库用，如 operator）"),
+			"kind":     str("bearer/token/basic/cookie/header"),
+			"target":   str("归属目标（可空；建议填写，绑定 host）"),
+			"role":     str("角色标注（可空）"),
+			"username": str("用户名提示（basic 场景可空——用户粘贴串里带）"),
+			"origin":   str("real/forged/derived（可空默认 real）"),
+		}, "question", "identity", "kind")},
+		{Name: "list_credentials", Description: "列出本项目已入库凭据（掩码投影，明文不可检索）。authz-diff/api-idor 角色矩阵开工前先调用本工具盘点可用身份。", Parameters: obj(map[string]any{})},
+		{Name: "revoke_credential", Description: "撤销一条凭据（后续注入直接拒绝；测试结束/凭据失效时调用）。", Parameters: obj(map[string]any{
+			"id": str("cred- 编号"),
+		}, "id")},
+		{Name: "http_request", Description: "结构化 HTTP 请求工具（带态测试首选）：auth_ref 注入 Authorization/Cookie 后发送；治理/审批/留证与 run_command 同级（写方法至少 L1）。请求行/响应头/body 落证据（凭据掩码）；大响应自动溢出落盘。角色矩阵对比 = 对同一请求切换 auth_ref 分别发送再 diff。", Parameters: obj(map[string]any{
+			"url":      str("完整 URL（http/https）"),
+			"method":   str("GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，默认 GET"),
+			"headers":  map[string]any{"type": "object", "description": "附加请求头（JSON 对象，如 {\"Content-Type\":\"application/json\"}）", "additionalProperties": map[string]any{"type": "string"}},
+			"body":     str("请求体（可空）"),
+			"auth_ref": str("凭据引用：cred-<id> 或 identity:<身份名>（可空=匿名请求）"),
+			"timeout":  str("超时秒数（默认 30，上限 300）"),
+		}, "url")},
+		{Name: "cred_command", Description: "带凭据命令模板执行：模板中用 ${CRED_USERNAME}/${CRED_SECRET}/${CRED_TOKEN}/${CRED_PASSWORD} 占位（hydra/curl/ffuf 等命令行工具带凭据时使用）。占位符用裸形态或整段单引号形态（'${CRED_SECRET}'）；禁止把占位符写在含其他内容的单引号串内（引擎会确定性拒绝——单引号内命令替换不生效）。密文经临时文件中介注入，命令文本/审批/证据/日志全程无明文，执行后临时文件即删。治理与审批与 run_command 完全同级。", Parameters: obj(map[string]any{
+			"template":       str("命令模板（含 ${CRED_*} 占位符，如 hydra -l ${CRED_USERNAME} -p ${CRED_SECRET} …）"),
+			"credential_ref": str("凭据引用：cred-<id> 或 identity:<身份名>"),
+			"reason":         str("执行原因（展示给审批人）"),
+		}, "template", "credential_ref", "reason")},
 	}
 }
 
@@ -3792,27 +4048,37 @@ func (o *Orchestrator) sessionObtained(p *store.Project) bool {
 var w4Tracks = []string{"L1 注册面", "L2 泄露面", "L3 默认口令", "L4 验证码逻辑", "L5 令牌伪造", "L6 会话构造"}
 
 // identityTrackIssues v4.8 W4 s4 收口门：无凭证且存在登录面时，身份获取六轨必须逐轨 VT 留痕。
-// 口径：已获身份（verified loot）只需首轨 VT 留痕；未获身份需六轨全量登记（不适用轨也登记，
+// 口径：已获身份（verified loot / v5.6.0 凭据仓库 active）只需首轨 VT 留痕；未获身份需六轨全量登记（不适用轨也登记，
 // start_conditions 注明「无对应面」——与筛查矩阵三态口径一致），保证全轨失败时移交链完整。
+// v5.6.0（审计修复）：①状态判据升级为 projectHasIdentity（凭据仓库 active 不再被当 S0）；
+// ②六轨 VT 不仅要求存在，还必须处置（executed/closed-roe/deferred）——审计实证：引擎此前只查标题，
+// 记一条 pending VT 即满足存在性，失败原因/移交四元组从不被校验。
 func (o *Orchestrator) identityTrackIssues(p *store.Project, stageID string) []string {
+	// v5.6.0：AuthInfo（legacy 有凭证）或无登录面 → 不适用；注意 verified loot / 凭据仓库
+	// active 属「已获身份但仍需首轨留痕」口径，不能在此早退（v48 实测回归）。
 	if strings.TrimSpace(p.AuthInfo) != "" || !o.loginSurfacePresent(p) {
-		return nil // 有凭证项目 / 无登录面目标：不适用
+		return nil
 	}
 	vts, _ := o.store.ListVTs(p.ID)
 	registered := map[string]bool{}
+	undisposed := map[string]bool{}
 	for _, t := range vts {
 		for _, tk := range w4Tracks {
 			id := strings.Split(tk, " ")[0]
 			if strings.Contains(t.Title, "[W4-"+id+"]") {
 				registered[id] = true
+				if t.Status != "executed" && t.Status != "closed-roe" && t.Status != "deferred" {
+					undisposed[id] = true
+				}
 			}
 		}
 	}
-	if o.sessionObtained(p) {
+	// v5.6.0（审计修复）：已获身份口径扩展——verified loot ∪ 凭据仓库 active 记录。
+	if o.hasActiveCredentials(p) || o.sessionObtained(p) {
 		if len(registered) == 0 {
 			return []string{"v4.8 W4：身份已获取但六轨尝试无 VT 留痕——首轨命中也应 record_vt 登记（title 前缀 [W4-Ln]），供审计与跨任务复用"}
 		}
-		return nil
+		return undisposedIssues(undisposed)
 	}
 	var missing []string
 	for _, tk := range w4Tracks {
@@ -3824,7 +4090,33 @@ func (o *Orchestrator) identityTrackIssues(p *store.Project, stageID string) []s
 		return []string{fmt.Sprintf("v4.8 W4：无凭证且存在登录面，身份获取六轨未逐轨 VT 登记（缺 %s）——按 identity-bootstrapping 逐轨尝试并 record_vt（title 前缀 [W4-L1]..[W4-L6]；不适用轨也登记并在 start_conditions 注明「无对应面」），保证全轨失败时 VT 移交链完整",
 			truncateText(strings.Join(missing, "、"), 120))}
 	}
-	return nil
+	// v5.6.1（审计缺陷#4）：降级四通道机械门——六轨闭环后仍须 [W4-DG] VT 登记
+	// observable-degradation 四通道（可观测降级/浏览器代执行/身份复用面/索取复访）逐项评估留痕
+	dgRegistered := false
+	for _, t := range vts {
+		if strings.Contains(t.Title, "[W4-DG]") {
+			dgRegistered = true
+			break
+		}
+	}
+	if !dgRegistered {
+		return []string{"v4.8 W4：六轨已闭环但缺 [W4-DG] 降级四通道评估 VT——按 observable-degradation 对四通道（可观测降级证据/浏览器代执行/身份复用面/索取复访）逐项评估并 record_vt（title 含 [W4-DG]），全部不适用也要登记说明"}
+	}
+	return undisposedIssues(undisposed)
+}
+
+// undisposedIssues v5.6.0：六轨 VT 未处置（pending/ready）的收口问题。
+func undisposedIssues(undisposed map[string]bool) []string {
+	if len(undisposed) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(undisposed))
+	for id := range undisposed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return []string{fmt.Sprintf("v4.8 W4：六轨 VT 已登记但未处置（pending/ready：%s）——每轨必须 update_vt 三选一处置（executed 附 result_ref / closed-roe 附理由 / deferred 附移交三要素），失败原因与移交四元组随处置落库，收口前逐轨闭环",
+		strings.Join(ids, ","))}
 }
 
 // deterministicGate 确定性质量门（v3.4.0）：反思门 LLM 不可用时的硬校验兜底。

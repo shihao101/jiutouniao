@@ -268,13 +268,18 @@ func TestV48IdentityTracks(t *testing.T) {
 	if len(issues) == 0 || !strings.Contains(issues[0], "六轨未逐轨") {
 		t.Fatalf("六轨未登记应拦截: %v", issues)
 	}
-	// ② 六轨全量登记 → 放行
+	// ② 六轨全量登记 + [W4-DG] 降级评估 → 放行（v5.6.1：DG 四通道机械门）
 	for i := 1; i <= 6; i++ {
 		_, _ = st.AddVT(&store.VerificationTask{ProjectID: p.ID, Stage: "s4",
 			Title: fmt.Sprintf("[W4-L%d] 轨道 %d 尝试", i, i), Status: "executed"})
 	}
+	if issues := o.identityTrackIssues(p, "s4"); len(issues) == 0 || !strings.Contains(issues[0], "[W4-DG]") {
+		t.Fatalf("六轨闭环但缺 DG 评估应拦截: %v", issues)
+	}
+	_, _ = st.AddVT(&store.VerificationTask{ProjectID: p.ID, Stage: "s4",
+		Title: "[W4-DG] 降级四通道评估", Status: "executed"})
 	if issues := o.identityTrackIssues(p, "s4"); len(issues) != 0 {
-		t.Fatalf("六轨全量登记应放行: %v", issues)
+		t.Fatalf("六轨+DG 全量登记应放行: %v", issues)
 	}
 	// ③ 已获身份（verified session loot）但无 VT 留痕 → 拦截首轨留痕（新项目避免清库）
 	o3, st3 := v48Orchestrator(t)

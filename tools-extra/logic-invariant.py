@@ -61,13 +61,14 @@ def build_violations(machine):
         for ta in term_actions[:2]:
             out.append({"kind": "reverse", "seq": [ta, t["action"]],
                         "desc": f"逆序尝试：终态动作 {ta} 达成后仍执行前置动作 {t['action']}"})
-    # ③ 重复：幂等性/限次（重放同一动作 N 次）
+    # ③ 重复：幂等性/限次（v5.6.1 审计缺陷#3：默认单次——技能承诺「单次触发即停」；
+    # 重放 N 次仅 --repeat 显式授权且应配额守卫说明，否则构成副作用超限）
     for t in trans:
-        out.append({"kind": "repeat", "seq": [t["action"]] * 3,
-                    "desc": f"重复提交：{t['action']} 连续 3 次（幂等性/配额守卫探测）"})
+        out.append({"kind": "repeat", "seq": [t["action"]],
+                    "desc": f"重复提交：{t['action']} 单次重放（幂等性/配额守卫候选；多副本需 --repeat 显式授权）"})
     return out
 
-def execute(machine, base, cookies, repeat=3, dry_run=True):
+def execute(machine, base, cookies, repeat=1, dry_run=True):
     obj_id = machine.get("object_id", "test-obj")
     results = []
     for v in build_violations(machine):
@@ -94,10 +95,14 @@ def execute(machine, base, cookies, repeat=3, dry_run=True):
                 r["attempts"].append({"action": action, "status": st, "guarded": guarded})
                 if ok and not guarded:
                     hits += 1
-            r["verdict"] = "guard_bypassed" if hits > 0 else "guard_ok"
+            # v5.6.1（审计缺陷#3）：仅凭 HTTP 判据（200+无失败词）不定确证——守卫可能在前端/
+            # 异步侧；无服务端状态读回时降级为候选，须人工复核状态变化后才能 record_finding。
+            r["verdict"] = ("candidate_guard_bypassed" if hits > 0 else "guard_ok")
+            if hits > 0:
+                r["note"] = "候选：需服务端状态复读（对象/配额/订单状态）确认真实放行后升级"
         results.append(r)
     summary = {"total": len(results),
-               "violations": [r for r in results if r["verdict"] in ("guard_bypassed",)]}
+               "violations": [r for r in results if r["verdict"] in ("guard_bypassed", "candidate_guard_bypassed")]}
     return {"results": results, "summary": summary,
             "note": "existence-proof 口径：违例只证明一次即停；金额/并发类变异不在本工具内（write_policy 约束）"}
 
@@ -110,8 +115,11 @@ def selftest():
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
             action = body.get("action", self.path)
-            if "cancel" in str(action) or body.get("seq", 0) == 0:
-                st, resp = 400, '{"err":"invalid transition"}'   # 首步（合法迁移）守卫拦 400
+            # v5.6.1：夹具改真实语义——仅 cancel 有守卫（400）；skip/重复动作无状态机守卫
+            # 直接推进成功（200）= 违例被捕获。旧 seq==0 判据是围绕"重放×3"设计的，
+            # 与单次化后的单请求语义冲突（所有违例首请求都会撞 400 → 永远 guard_ok）。
+            if "cancel" in str(action):
+                st, resp = 400, '{"err":"invalid transition"}'   # 有守卫的动作正常拦截
             else:
                 st, resp = 200, '{"status":"paid","done":true}'  # 跳步/重复 → 推进成功（违例）
             self.send_response(st); self.send_header("Content-Type", "application/json")
@@ -137,7 +145,7 @@ def main():
     ap.add_argument("--machine", help="状态机 JSON（states+transitions，bundle 还原或手工定义）")
     ap.add_argument("--base", help="目标基址 http://t")
     ap.add_argument("--cookie", action="append", default=[], help="会话态 k=v（可多次）")
-    ap.add_argument("--repeat", type=int, default=3, help="重复类探测次数")
+    ap.add_argument("--repeat", type=int, default=1, help="重复类探测次数（默认 1=单次；>1 仅限授权明确允许的配额守卫测试）")
     ap.add_argument("--dry-run", action="store_true", default=True, help="只输出违例计划不投递（默认）")
     ap.add_argument("--live", action="store_true", help="实弹投递（写操作，需 ROE 允许）")
     ap.add_argument("--selftest", action="store_true")

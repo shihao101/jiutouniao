@@ -99,6 +99,23 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | JWT/会话令牌机制确证或密钥材料泄露（预览/部分密钥） | jwt-crypto | auth-flow-deep |
 | SSO/票据/扫码登录机制确证（ticket/QR/回调） | auth-flow-deep | jwt-crypto |
 | 同应用多实例/多节点（灰度/双活/同构换实例） | instance-diff | authz-diff |
+| authz-diff 200 JSON 行（对象详情/列表数据） | api-field-exposure | authz-diff / api-idor |
+| HTTPS/TLS 服务（任何项目默认含） | tls-deep-audit | ssrf-deep / app-static-audit |
+| 桌面客户端/Electron 应用（非移动 APP） | thick-client | whitebox-source-audit |
+| 无线/蓝牙/NFC/门禁现场任务（授权含频段） | wifi-nearfield | password-offline / intranet-lateral |
+| 固件镜像/可取升级包的设备 | iot-firmware | whitebox-sca-taint / cve-weaponization |
+| 工业协议/PLC/SCADA/OT 边界 | ics-ot | intranet-lateral / iot-firmware |
+| 授权含人员演练的现场红队 | social-engineering | phishing-infra / osint-leak-intel |
+| 客户提供源码/授权获取源码（灰盒白盒任务） | whitebox-source-audit | whitebox-sca-taint / patch-diffing |
+| 源码在侧的依赖清单/lockfile/组件版本面 | whitebox-sca-taint | cve-weaponization |
+| 有安全公告/修复 commit 但无公开 PoC（Nday 反推机理） | patch-diffing | cve-weaponization / hypothesis-0day |
+| 解析器/协议/文件处理类自建环境可编译（可插桩） | fuzzing-workflow | fuzz-harness-go |
+| 已获多身份会话（客户账号/两角色，做越权生命周期矩阵） | authz-diff（v5.5.0 凭据注入节） | api-idor / session-state-chain |
+| 泄露情报源（HIBP 预筛/GitHub dork/密钥扫描/测绘四平台 Key） | osint-leak-intel | recon-playbook |
+| Wayback 历史 URL/旧版本 API 前缀/影子接口候选 | history-recon | authz-diff / api-doc-leak |
+| 已获会话（客户账号/L2-L6 命中，测"会话怎么死"） | session-lifecycle | jwt-crypto / session-state-chain |
+| 分享面（share/sign/expires/keyId/分享二维码） | share-link-abuse | capability-primitive-search / crypto-offensive |
+| 组织/团队/成员管理功能（邀请/角色/层级） | org-member-abuse | api-idor / instance-diff |
 | 登录态不可得（身份索取闭环走完仍无账号） | observable-degradation | session-state-chain |
 
 ## 二、按症状
@@ -131,6 +148,26 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | s3 威胁建模（筛查矩阵判定/假设三态判定表） | hypothesis-matrix（K3 假设模式库：27 类×三态判定+判定表规范） | industry-templates / framework-priors |
 | 行业目标（医疗/金融/教育/政务/企业/互联网）优先级升格与数据类具象 | industry-templates（K1 行业模板六件） | hypothesis-matrix |
 | 框架指纹命中（Java/PHP/Python/Node 系）先验假设与首查清单 | framework-priors（K2 框架先验卡四件） | hypothesis-matrix / cve-weaponization |
+| 200 JSON 响应疑似多吐字段（密码哈希/手机号/内部字段回显） | api-field-exposure（field-exposure.py 角色间字段集合 diff） | api-idor / evidence-standard |
+| 需判定口令是否真实泄露过/源码配置是否泄密/测绘历史端口 | osint-leak-intel（HIBP range 免 key 预筛+gitleaks+四平台） | weak-cred-bruteforce / recon-playbook |
+| 端点表测完仍不放心（旧接口/已下线功能/老版本前缀） | history-recon（历史路径−自述面=影子接口候选矩阵） | authz-diff / api-idor |
+| 登出/改密/移除成员后旧 token 仍可用 | session-lifecycle（T1-T3/T9 复放矩阵）+ org-member-abuse（T3/T4） | jwt-crypto / session-state-chain |
+| 分享链接可改参看他人对象/过期仍可用/可离线伪造签名 | share-link-abuse（T2/T3/T4 矩阵） | api-idor / crypto-offensive |
+| 低权会话拿到与高权同款响应（admin 路径） | api-idor「角色矩阵」节（authz-matrix-roles.py 复放） | api-field-exposure / authz-diff |
+| 长时间异常输入找崩溃（解析器/协议/文件格式，自建环境） | fuzzing-workflow（对象所有权三问先行） | fuzz-harness-go |
+| fuzzer crash/panic 无法定性（复现/签名/归因） | fuzz-harness-go（testdata 复现 3 次）+ whitebox-source-audit（栈归因） | hypothesis-0day |
+| 客户给了账号但矩阵复放全靠手工拼 cookie | authz-diff/api-idor v5.5.0 凭据注入节（list_credentials + http_request auth_ref） | session-state-chain |
+| HTTPS 面测完仍存疑（协议/证书/mTLS/降级） | tls-deep-audit（nmap ssl-enum + openssl 矩阵） | app-static-audit |
+| 拿到桌面安装包（非 APK/IPA/wxapkg） | thick-client（asar 解包+IPC/更新链） | api-idor |
+| 设备固件包在手（binwalk 可解） | iot-firmware | password-offline |
+| 工业协议端口暴露（502/102/20000） | ics-ot（被动指纹→台架写验证） | cve-weaponization |
+| 授权含员工钓鱼演练 | social-engineering（命中率口径+Canary） | phishing-infra |
+| LLM/Agent 应用出现异常行为（越权工具调用/提示注入疑似） | llm-top10（v5.6.0 正负对照四件套） | llm-agent-toolchain / specA 头 |
+| Android 动态验证被卡（设备/Frida/抓包链不可用） | app-dynamic-audit v5.6.0 探针表（逐项降级口径） | app-static-audit |
+| iOS 应用只有静态候选无动态验证 | app-ios-audit v5.6.0 动态轨分级 | app-dynamic-audit |
+| 云凭据在手不知权限边界 | cloud-security v5.6.0 分云 IAM 矩阵（simulate/can-i） | k8s-attack |
+| JWT/签名/会话伪造面（拿到样例令牌） | jwt-crypto v5.6.0 矩阵（jwt_tool/PyJWT 已固化） | auth-flow-deep / crypto-offensive |
+| 取得域内哈希后想证明接管级影响 | ad-attack v5.6.0 票据伪造链（Golden/Silver/PtT，Lab Only） | password-offline |
 
 ## 三、开工三件套
 

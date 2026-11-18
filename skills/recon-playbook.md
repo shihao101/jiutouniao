@@ -40,7 +40,13 @@ nmap -sV -Pn -p <开放端口列表> --version-intensity 5 <目标>
 ```bash
 ffuf -u https://<目标>/FUZZ -w <字典> -mc 200,301,302,401,403 -rate 50
 arjun -u https://<目标>/          # 隐藏参数
+# 历史快照与影子接口（v5.3.9）：Wayback 历史路径 − 自述面 = 影子接口候选 → authz-diff 矩阵
+load_skill history-recon          # CDX API 兜底 curl 全程可用，零安装依赖
 ```
+
+## 泄露情报（被动 L0，v5.3.9）
+- 泄露口令预筛/代码托管 dork/本地密钥扫描/测绘平台 Key 用法：load_skill osint-leak-intel（identity-bootstrapping L2 轨数据源手册）；
+- 侦察期只查**目标标识**（域名/IP/组织名），命中凭据留待 S4 身份轨单次验证（不撞库）。
 
 ## AI 入口探测
 - 聊天组件特征：页面含 chat/conversation/stream 端点；SSE 流式响应。
@@ -50,9 +56,14 @@ arjun -u https://<目标>/          # 隐藏参数
 - 全部结果 record_asset；覆盖度 update_coverage(vuln_class=资产测绘)。
 - 空间测绘数据可能过期，关键结论现场复核。
 
-## 空间测绘（Quake 360，Key 已注入环境变量 $QUAKE_KEY）
+## 空间测绘（四平台，Key 注入环境变量；v5.3.9 起四平台 Host 在 scopeGate 白名单内）
 
-IP 直连/无域名目标优先用 Quake 做资产与指纹测绘（被动，L0）：
+IP 直连/无域名目标优先用测绘平台做资产与指纹测绘（被动，L0）。Quake 用法见下；FOFA/ZoomEye/Hunter 的 API 与 Key 变量（$FOFA_EMAIL+$FOFA_KEY / $ZOOMEYE_KEY / $HUNTER_KEY）见 osint-leak-intel 第四节速查表——四平台查询结果口径一致：
+
+- 查询结果只作侦察线索与漏报复核参照，仍需本机验证后才能登记为确证结论。
+- 速率限制：免费 Tier 有 QPS 限制，连续查询间 sleep 2-3 秒。
+- 无 Key 或查询失败的平台跳过并登记（record_timeline），直接走本机主动侦察（不要反复重试）。
+- ⚠ 若平台查询仍被护栏拦截（strict_scope 误拦第三方数据源）：登记环境限制改 grep.app 兜底，**禁止绕护栏**（v5.3.9 起默认白名单已含 fofa.info/quake.360.net/zoomeye.org/hunter.qianxin.com，正常不应触发）。
 
 ```bash
 # 1) IP 视角：该 IP 历史开放端口与服务指纹

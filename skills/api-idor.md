@@ -14,6 +14,13 @@ tags: api,idor,bola,越权,接口
 ## BFLA 垂直越权（API5）
 - 普通角色调用管理端点：/admin/users DELETE 等；方法绕过 GET→POST、Content-Type 换 JSON。
 
+## 角色矩阵（BFLA 机械化 · v5.4.5）
+
+- **硬门（有身份项目）**：取得 ≥2 个角色会话（客户双角色账号 / L2-L6 命中+高权索取）后，对端点表全量执行**角色矩阵**——`python3 /opt/tools/authz-matrix-roles.py --base <t> --endpoints <端点表> --role anon: --role low:"Authorization: Bearer X" --role high:"Authorization: Bearer Y"`；
+- 分类处置：OPEN-200（全角色同 200）→ 转 authz-diff 匿名 finding；**EQUAL-200（低权=高权同响应）→ BFLA 候选**，admin_path=Y 行强信号——同族复查确认端点本应高权专属后 record_finding（CWE-863）；TIERED/GATED=negative_valid；UND=needs_follow_up（不得 ruled_out）；
+- 记账：`role_matrix diffed=N/total`（与 authz-diff `diffed/total` 双硬门并列）；字段级细化接 load_skill api-field-exposure（EQUAL-200 行先于字段 diff）；
+- ROE：矩阵为只读 GET 复放；写端点只测门控存在性（authz-diff 第四节同口径）。
+
 ## 限量拉取（API4）
 - 分页 size=99999、page 快速遍历（限速）。
 
@@ -50,3 +57,10 @@ tags: api,idor,bola,越权,接口
 
 - 标准件：`python3 /opt/tools/idor-baseline.py --url 'http://t/api/order/{id}' --start <N> --count 5 --cookie <会话态> [--owner-grep 'owner=([0-9]+)']`——输出 verdict（idor_anonymous/idor_predictable_only/inconclusive/not_found）+ 可枚举区间量化 + 匿名差分单次重放；会话态来源 channel-snapshot。
 - 口径：采样仅读邻域（存在性证明）；量化只报计数不导出数据；判定 idor_anonymous 时 access=anonymous 登记（impact_rank=3 候选）；idor_predictable_only 需第二身份差分——无凭证项目登记 VT 移交（W4 六轨衔接）。
+
+## v5.5.0 凭据仓库与带态注入（方案 A 接线——角色矩阵引擎可执行）
+
+- **双身份落库前置**：角色矩阵开工前，两个身份（如 user-a/user-b）分别 store_credential 入库（identity 命名区分多会话）；list_credentials 盘点后矩阵每行显式引用 `identity:<名>`。
+- **对象替换复放**：用 `http_request` auth_ref=<身份> 对同端点分别发送（A 身份访问 B 对象 = 单变量替换），响应自动落证据且凭据掩码；对比判据沿用上文各节。
+- **命令行工具带态**：批量复放脚本（如 idor-baseline.py）的 cookie 参数用 `cred_command` 模板 `${CRED_SECRET}` 注入——命令文本/证据无明文。
+- **纪律**：采样仅读邻域；无凭证项目不做伪造身份，照旧 VT 移交；明文禁止写入 findings/交付物。

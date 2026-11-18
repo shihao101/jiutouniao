@@ -23,10 +23,22 @@ type ToolCall struct {
 }
 
 type Message struct {
-	Role       string     `json:"role"` // system / user / assistant / tool
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role             string          `json:"role"` // system / user / assistant / tool
+	Content          string          `json:"content"`
+	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"` // DeepSeek 思维链：回传 API 合约必需（400: must be passed back）
+	ThinkingBlocks  []ThinkingBlock `json:"thinking_blocks,omitempty"`   // Anthropic 扩展思维块：带签名回传合约必需
+}
+
+// ThinkingBlock Anthropic 扩展思维块（thinking / redacted_thinking）。
+// 合约：开启 extended thinking 后，多轮对话回传 assistant 消息必须原样携带历史 thinking 块
+// （含签名 signature / 加密 data），且位于 content 块序列最前，否则 400。
+type ThinkingBlock struct {
+	Type      string `json:"type"` // "thinking" | "redacted_thinking"
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"` // redacted_thinking 的加密载荷，原样回传
 }
 
 // ---------- OpenAI 线上格式适配 ----------
@@ -43,16 +55,20 @@ type wireToolCall struct {
 }
 
 type wireMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          string         `json:"content"`
+	ToolCalls        []wireToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
 }
 
 func toWireOpenAI(msgs []Message) []wireMessage {
 	out := make([]wireMessage, 0, len(msgs))
 	for _, m := range msgs {
 		w := wireMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+	if m.ReasoningContent != "" {
+		w.ReasoningContent = m.ReasoningContent // DeepSeek reasoner 合约：历史 assistant 消息必须带回 reasoning_content
+	}
 		if m.Role == "assistant" && m.Content == "" && len(m.ToolCalls) > 0 {
 			w.Content = "" // 纯工具调用轮次保留空 content
 		}
@@ -70,7 +86,7 @@ func toWireOpenAI(msgs []Message) []wireMessage {
 }
 
 func fromWireOpenAI(w wireMessage) Message {
-	m := Message{Role: w.Role, Content: w.Content, ToolCallID: w.ToolCallID}
+	m := Message{Role: w.Role, Content: w.Content, ToolCallID: w.ToolCallID, ReasoningContent: w.ReasoningContent}
 	for _, tc := range w.ToolCalls {
 		m.ToolCalls = append(m.ToolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
 	}

@@ -46,3 +46,35 @@ tags: smuggling,走私,cl,te,代理,s4
 ### CL.TE 探针与 H2 专项
 
 CL.TE 精确探针：`Content-Length: 13` + 体 `0\r\n\r\nSMUGGLED`（`0`+`\r\n`+`\r\n`+`SMUGGLED`=13 字节）。加长变体：后端 CL=11、体 `x=1` 时块长 ≈ 76 hex（118 字节），仍用 `Content-Length: 4` 卡长度行。H2 专项：H2 内 `Transfer-Encoding`/`Content-Length` 重复与大小写（H2 要求小写、翻译层可能出错）；`:method`/`:path` 异常字符降级行为；extended CONNECT 隧道与走私交互。工具补：dhmosfunk/simple-http-smuggler-generator（快速拼装原始报文模板）。
+
+### h2c 明文升级走私（v5.3.9 增补——无凭证可达的前端 ACL 绕过）
+
+> 适用：明文 HTTP（无 TLS）链路存在反代/网关→后端双跳；h2c 升级头若被前端原样转发，后端以 h2c 会话绕过前端 ACL/路由改写。
+
+```
+① 探针（单请求）：GET / HTTP/1.1 + 头
+     Upgrade: h2c
+     HTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA
+     Connection: Upgrade, HTTP2-Settings
+   响应 101 Switching Protocols + HTTP/2 帧流 = 前端放行 h2c 升级（疑似直通后端）
+② 绕过验证（受控）：h2c 会话内直接请求前端 ACL 拦截路径（如 /admin）
+   ——前端 403 而升级通道 200 = ACL 绕过确证（record_finding 高危，cwe-444）
+③ 变体：Connection 头剔除 Upgrade（部分反代只转发白名单头）+ Upgrade: h2c 独立投递
+```
+
+- 判据纪律：**仅明文 HTTP 端口可测**（HTTPS 前端不透传 Upgrade，误报源）；101 响应本身只记 Observation，**ACL 差分（前端拒 vs 通道通）才是确证判据**；
+- ROE：h2c 会话只做只读 GET 路径对比，禁止借通道注入写请求；curl `--http2-prior-knowledge` 不适用本场景（需手工原始报文，bash `printf | nc` 或 Burp Repeater 手工构造）；
+- 联动：gateway-filter-playbook（白名单矩阵第 h2c 格）、docker/ingress 场景见 k8s-attack ingress 注记。
+## v5.6.0 工具探针与自标记判据（三凭证审计补强）
+
+### 工具探针（先探后用——M6 通道纪律）
+
+- `which smuggler`（Burp 扩展等外部工具不视为内置）→ 缺失时用 **原生手工探针矩阵**（本技能主体 CL-TE/TE-CL 变体逐对发探针）。
+- 探针自证：先对目标发"无害 smuggler 探测对"（两个相互前置请求），延迟/响应错位判据出现 = 走私面候选；无探针响应 → 降级 needs_follow_up（不得 ruled_out）。
+- 代理链影响差分：若走 exit-pool/chain-proxy，先记录直连 vs 代理两种路径的探针结果差异（代理自身可能改写 Content-Length——排除代理引入的假阳性）。
+
+### 自标记判据（检测不再依赖目标报错）
+
+1. **自回显标记**： smuggle 请求体携带唯一标记（`X-JT-Probe: <随机数>`）——走私成功则后继请求"合并"了我们的标记头（目标响应/日志可观测标记）。
+2. **前端错位双判据**：①前后夹击（正常请求夹走私请求）看响应串扰；②时间差（走私 payload 挂起 → 后继请求被阻塞）。
+3. **无回显场景**：以上任一通道稳定复现 2 次即"疑似"；HTTP 请求走私确证后**立即停止**利用探索（不做缓存投毒组合演示，除非 Lab）——走私确证本身 = 高危 finding（CWE-444）。

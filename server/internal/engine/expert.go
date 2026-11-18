@@ -147,10 +147,18 @@ func (o *Orchestrator) AnswerAsk(id, answer, by string) error {
 		return fmt.Errorf("该提问已处理")
 	}
 	now := time.Now()
-	rec.Answer = truncateText(answer, 1500)
-	rec.Status = "answered"
 	rec.AnsweredAt = &now
 	rec.AnsweredBy = by
+	rec.Status = "answered"
+	// v5.6.0（审计修复高危#1）：凭据专用通道的回答不落明文——Answer 只存占位说明，
+	// 原文仅经内存通道交给等待中的 request_credential 处理（入库加密/掩码摘要回写）。
+	if rec.Kind == "credential" {
+		rec.Answer = "（凭据专用通道：原文不落库；入库结果与掩码见凭据记录）"
+	} else {
+		// v5.6.1（审计 RunB#6）：普通提问的持久化答案做模式脱敏——用户误粘贴凭据时
+		// 不落明文（模型通道返回原文，不影响会话内的正当使用）。
+		rec.Answer = truncateText(maskSensitiveText(answer), 1500)
+	}
 	if err := o.store.SaveAsk(rec); err != nil {
 		return err
 	}
@@ -160,6 +168,50 @@ func (o *Orchestrator) AnswerAsk(id, answer, by string) error {
 	o.bus.Publish(rec.ProjectID, "ask", rec)
 	o.log(o.mustProject(rec.ProjectID), rec.Stage, fmt.Sprintf("💬 提问[%s]已由 %s 回答", id, by))
 	return nil
+}
+
+// askUserCredential v5.6.0 凭据专用提问通道（审计修复高危#1）：
+// 问题落库（Kind=credential）→ 阻塞等待人工回答 → 回答原文只经内存通道返回 →
+// 调用方（request_credential 工具）负责入加密仓库并回写掩码摘要。
+// 与 askUser 的区别：AnswerAsk 对 credential 提问不落明文 Answer。
+// 返回值：(askID, 原文回答, err)——原文仅存在于内存，绝不落库。
+func (o *Orchestrator) askUserCredential(ctx context.Context, projectID, stage, question string) (string, string, error) {
+	rec := &store.AskRecord{ProjectID: projectID, Stage: stage,
+		Question: truncateText(question, 1500), Status: "pending", Kind: "credential"}
+	id, err := o.store.AddAsk(rec)
+	if err != nil {
+		return "", "", err
+	}
+	o.bus.Publish(projectID, "ask", rec)
+	o.log(o.mustProject(projectID), stage, fmt.Sprintf("🔐 向人工索取凭据[%s]：%s（回答经专用通道加密入库，不落明文）", id, firstLine(question)))
+
+	var timeoutCh <-chan time.Time
+	if o.cfg.Engine.BarrierTimeoutSec > 0 {
+		timer := time.NewTimer(time.Duration(o.cfg.Engine.BarrierTimeoutSec) * time.Second)
+		defer timer.Stop()
+		timeoutCh = timer.C
+	}
+	ch := o.askWaiter(id)
+	select {
+	case ans := <-ch:
+		return id, ans, nil
+	case <-ctx.Done():
+		o.cancelAsk(id, "")
+		return id, "", ctx.Err()
+	case <-timeoutCh:
+		o.cancelAsk(id, "等待超时")
+		o.log(o.mustProject(projectID), stage, fmt.Sprintf("⏱ 凭据索取[%s]等待超时（%d 分钟），已自动取消", id, o.cfg.Engine.BarrierTimeoutSec/60))
+		return id, "", fmt.Errorf("凭据索取等待超时（%d 分钟），已自动取消", o.cfg.Engine.BarrierTimeoutSec/60)
+	}
+}
+
+// saveCredentialAskSummary 回写凭据提问的掩码摘要（入库成功/失败两种形态，均无明文）。
+func (o *Orchestrator) saveCredentialAskSummary(id, summary string) {
+	if rec, err := o.store.GetAsk(id); err == nil {
+		rec.Answer = truncateText(summary, 500)
+		_ = o.store.SaveAsk(rec)
+		o.bus.Publish(rec.ProjectID, "ask", rec)
+	}
 }
 
 // cancelAsk 取消提问（熔断/中断时）。

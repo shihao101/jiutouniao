@@ -29,7 +29,7 @@
 | 模块 | 来源 | 用法 |
 |---|---|---|
 | **覆盖度账本** | strix（outcome 枚举/唯一键/证据强制）+ PentesterFlow（endpoint×param×vulnClass 三元组原地更新） | 头工具 `update_coverage`；UI「覆盖度」Tab 看矩阵；报告含「安全向量/盲区」两章 |
-| **技能库** | strix（运行时 load_skill 双通道）+ PentesterFlow（SKILL.md 约定+关键词路由） | `skills/` 目录 109 个中文攻击剧本；头按需 `load_skill` 注入，不撑爆上下文 |
+| **技能库** | strix（运行时 load_skill 双通道）+ PentesterFlow（SKILL.md 约定+关键词路由） | `skills/` 目录 126 个中文攻击剧本；头按需 `load_skill` 注入，不撑爆上下文 |
 | **hexstrike 工具桥** | hexstrike-ai（`/health`、`/api/command` 原样兼容） | 配置 `hexstrike_url` 后头工具 `hexstrike_command` 直调远端 150+ 安全工具（同样过审批矩阵） |
 | **Token/成本账本** | deadend-cli（按 agent 分账）+ strix（双账）+ BoxPwnr（stats） | 按阶段分账；UI 实时显示 token 与估算成本；`max_project_tokens` 超限自动熔断 |
 | **记忆检索** | pentagi/VulnBot RAG 的轻量版 | 头工具 `search_memory` 关键词扫描发现/资产/时间线 |

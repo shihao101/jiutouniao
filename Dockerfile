@@ -88,7 +88,7 @@ RUN rm -f /etc/apt/sources.list.d/docker.list && \
     if [ $ok -eq 1 ]; then \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash ca-certificates tzdata \
-        nmap sqlmap whatweb nikto hydra gobuster john masscan dirb \
+        nmap sqlmap whatweb nikto hydra gobuster john hashcat masscan dirb \
         ffuf seclists \
         jadx apktool arjun \
         curl wget git jq openssl graphviz \
@@ -120,6 +120,8 @@ COPY tools-extra/primitive-graph.py /opt/tools/primitive-graph.py
 COPY tools-extra/chain-proxy.py /opt/tools/chain-proxy.py
 COPY tools-extra/blind-inject-adjudicator.py /opt/tools/blind-inject-adjudicator.py
 COPY tools-extra/idor-baseline.py /opt/tools/idor-baseline.py
+COPY tools-extra/field-exposure.py /opt/tools/field-exposure.py
+COPY tools-extra/authz-matrix-roles.py /opt/tools/authz-matrix-roles.py
 COPY tools-extra/logic-invariant.py /opt/tools/logic-invariant.py
 COPY tools-extra/exit-pool.py /opt/tools/exit-pool.py
 COPY tools-extra/browser-farm.py /opt/tools/browser-farm.py
@@ -133,8 +135,14 @@ RUN chmod +x /opt/tools/sqlmap/sqlmap.py 2>/dev/null; \
 # v2.7.1：Node 运行时 + wxappUnpacker（B2 专项解包 wxapkg）——
 # unveilr 已从 npm/GitHub 双双下架（r3x5ur/unveilr 404、xdmjun/wxappUnpacker 被清空），
 # 固化幸存增强 fork rtcatc/wxappUnpacker（含分包/主包合并解析），入口命令 wxappUnpacker
+# v5.6.0：S2 伪造凭证工具链固化（审计修复）——jwt_tool 钉克隆（S2 轨核心武器：
+# alg:none/混淆/kid/jku 全自动）+ hashcat 补进 apt 清单（JWT HMAC 爆破 mode 16500）
 COPY --from=febuilder /usr/local/bin/node /usr/local/bin/node
 COPY --from=febuilder /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+# v5.6.0：PyJWT 与 jwt_tool 依赖 wheels 随仓库固化（离线自洽——构建容器 pip 镜像源断流，
+# 与 playwright wheelhouse 同因同解；宿主经代理从 pypi.org 下载后随包分发）
+COPY wheelhouse/pyjwt/ /tmp/jtwheel/
+COPY wheelhouse/jwttool/ /tmp/jtwheel/
 RUN chmod +x /usr/local/bin/node && \
     ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
@@ -143,24 +151,40 @@ RUN chmod +x /usr/local/bin/node && \
     cd /opt/wxappUnpacker && npm install --registry=https://registry.npmmirror.com && \
     printf '#!/bin/sh\nexec node /opt/wxappUnpacker/wuWxapkg.js "$@"\n' > /usr/local/bin/wxappUnpacker && \
     chmod +x /usr/local/bin/wxappUnpacker && \
-    wxappUnpacker 2>&1 | grep -q "Unpack a wxapkg" || { echo "FATAL: wxappUnpacker 冒烟失败"; exit 1; }
+    wxappUnpacker 2>&1 | grep -q "Unpack a wxapkg" || { echo "FATAL: wxappUnpacker 冒烟失败"; exit 1; }; \
+    git clone --depth 1 https://github.com/ticarpi/jwt_tool /opt/jwt_tool && \
+    if [ "$(git -C /opt/jwt_tool rev-parse HEAD)" != "3bc7407cf2222d6a821dcc19c776e5a1b1cb9a9b" ]; then echo "FATAL: jwt_tool pin 不匹配（v5.6.0 供应链锁定）——人工复核后更新 PIN"; exit 1; fi; \
+    python3 -c "import re; p='/opt/jwt_tool/jwt_tool.py'; s=open(p,encoding='utf-8').read(); s2,n=re.subn(r\"'#[^']*': None,?\\s*\", '', s); open(p,'w',encoding='utf-8').write(s2); print('jwt_tool py3.14 compat patch: removed', n, 'None-comment keys')" && \
+    pip3 install --no-cache-dir --break-system-packages --no-index --find-links=/tmp/jtwheel \
+      setuptools wheel termcolor pycryptodomex ratelimit pyjwt && \
+    printf '#!/bin/sh\ncd /opt/jwt_tool && exec python3 jwt_tool.py "$@"\n' > /usr/local/bin/jwt_tool && \
+    chmod +x /usr/local/bin/jwt_tool && \
+    out=$(jwt_tool 2>&1); \
+    echo "$out" | grep -qi "Traceback" && { echo "FATAL: jwt_tool 冒烟出现 Traceback（依赖缺失）"; exit 1; }; \
+    echo "$out" | grep -qi "jwt" || { echo "FATAL: jwt_tool 冒烟失败（无横幅输出）"; exit 1; }; \
+    python3 -c "import jwt; assert jwt.encode({'a':1},'k',algorithm='HS256')" || { echo "FATAL: PyJWT 冒烟失败（伪造令牌构造依赖）"; exit 1; }
 
 # v2.7.1：nuclei 模板固化（fail-hard）——git 浅克隆主分支（与 nuclei -update-templates 同机制，
 # release zip 自 v10.x 起已停止附带）。校验模板数量，失败即构建失败。替换 v2.6 的 best-effort
 # `-update-templates` 方案（实测代理慢时 420s 超时静默跳过，产出无模板镜像，导致每个项目
 # 开工重复下载且永远失败）。运行时开工预热 project-warmup 仍可增量更新（写入容器可写层）。
+# v5.5.0 重钉复核记录（2026-11-18）：1cb2d50b(v5.2.0) → 9588ad5b，diff --stat 3764 文件，
+# 全部为模板数据（3759 yaml + templates-checksum.txt/cves.json 索引 + .new-additions +
+# .github/dependabot.yml CI 元数据），无 scripts/workflows/hooks 等可执行代码变更 → 通过复核。
+# v5.6.0 模板分发方式升级：钉版本 tarball 随仓库分发（tools-extra/）——构建容器内 github
+# 大仓库克隆经代理不稳定（实测 3 连败），改为宿主一次性下载 + SHA256 供应链锁定 + 构建期
+# 校验解压（确定性、离线可构建）。PIN: 9588ad5b（v5.5.0 复核记录见上）。
+# tarball sha256: e1c87a283fc05faeebdc5253986c1a8a72cb70941836d84004d8ead229669e98
+COPY tools-extra/nuclei-templates-9588ad5b.tar.gz /tmp/nuclei-templates.tar.gz
 RUN set -e; \
     rm -rf /root/nuclei-templates /tmp/tpl; \
-    for i in 1 2 3; do \
-      git clone --depth 1 https://github.com/projectdiscovery/nuclei-templates /tmp/tpl && break || \
-      { echo "template clone attempt $i failed"; rm -rf /tmp/tpl; sleep 10; }; \
-    done; \
-    [ -d /tmp/tpl/http ] || { echo "FATAL: nuclei-templates 克隆失败（网络/代理）"; exit 1; }; \
-    if [ "$(git -C /tmp/tpl rev-parse HEAD)" != "1cb2d50b4f0f5cbdb600165b0afe556b4623f29a" ]; then echo "FATAL: nuclei-templates pin 不匹配（v5.2.0 供应链锁定）——人工复核后更新 PIN"; exit 1; fi; \
-    rm -rf /tmp/tpl/.git && mv /tmp/tpl /root/nuclei-templates; \
-    n=$(find /root/nuclei-templates -name '*.yaml' -o -name '*.yml' | wc -l); \
+    echo "e1c87a283fc05faeebdc5253986c1a8a72cb70941836d84004d8ead229669e98  /tmp/nuclei-templates.tar.gz" | sha256sum -c - || { echo "FATAL: nuclei-templates tarball SHA256 不匹配（供应链锁定）——人工复核后更新"; exit 1; }; \
+    mkdir -p /tmp/tpl && tar xzf /tmp/nuclei-templates.tar.gz -C /tmp/tpl --strip-components=1; \
+    [ -d /tmp/tpl/http ] || { echo "FATAL: nuclei-templates 解包异常"; exit 1; }; \
+    n=$(find /tmp/tpl -name '*.yaml' -o -name '*.yml' | wc -l); \
     echo "nuclei templates baked: $n yaml files"; \
-    [ "$n" -ge 3000 ] || { echo "FATAL: 模板数量异常（$n < 3000），拒绝产出镜像"; exit 1; }
+    [ "$n" -ge 3000 ] || { echo "FATAL: 模板数量异常（$n < 3000），拒绝产出镜像"; exit 1; }; \
+    mv /tmp/tpl /root/nuclei-templates
 
 # v4.4：payload 语料资产（批次2）——PayloadsAllTheThings 本地语料层（对标 BreachWeave，与 nuclei-templates
 # 同一 fail-hard 纪律）+ curated 绕过字典（payload-mutation-algebra §7/ssti-engine-map 配套，403 头族/路径族/SSTI 矩阵）
@@ -198,14 +222,18 @@ RUN chmod +x /opt/tools/browser-kit/*.py /opt/tools/browser-kit/selftest/*.py /o
 # 构建终检（fail-hard）：核心工具与 nuclei 模板必须齐全——杜绝再产出"静默残缺"镜像。
 # 注意：本镜像是"固化基线"，需要联网（apt/npm/git 经构建代理）构建；离线构建将在此明确失败。
 RUN missing=""; \
-    for t in nmap sqlmap gobuster ffuf httpx nuclei subfinder whatweb nikto hydra john \
+    for t in nmap sqlmap gobuster ffuf httpx nuclei subfinder whatweb nikto hydra john hashcat \
              dig jq curl python3 git whois jadx apktool arjun wxappUnpacker interactsh-client \
-             chromium; do \
+             jwt_tool chromium; do \
       command -v $t >/dev/null 2>&1 || missing="$missing $t"; \
     done; \
+    /opt/venv/bin/python -c "import playwright" 2>/dev/null || missing="$missing playwright"; \
+    python3 -c "import jwt" 2>/dev/null || missing="$missing pyjwt"; \
+    python3 -c "import impacket" 2>/dev/null || missing="$missing impacket"; \
+    hashcat --version >/dev/null 2>&1 || missing="$missing hashcat-smoke"; \
+    jwt_tool 2>&1 | grep -qi "Traceback" && missing="$missing jwt-tool-smoke"; \
     [ -d /usr/share/seclists/Discovery/Web-Content ] || missing="$missing seclists"; \
     [ -x /opt/tools/browser-kit/browser_login.py ] || missing="$missing browser-kit"; \
-    /opt/venv/bin/python -c "import playwright" 2>/dev/null || missing="$missing playwright"; \
     tpl=$(find /root/nuclei-templates -name '*.yaml' -o -name '*.yml' 2>/dev/null | wc -l); \
     [ "$tpl" -ge 3000 ] || missing="$missing nuclei-templates(${tpl}个)"; \
     [ -f /opt/tools/wordlists/403-bypass-paths.txt ] || missing="$missing wordlists-403-paths"; \

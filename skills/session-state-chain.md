@@ -43,6 +43,7 @@ tags: 会话,登录,session,cookie,越权,存储型,注入,s4,s5
 | 水平越权 | 双账号 jarA/jarB 互访对象资源；改 ID/改名/改路径三种变体，对照请求留证 |
 | 垂直越权 | 低权账号请求高权端点（从 s1 资产/菜单/JS 提取），关注只读面先证可达再证操作 |
 | 存储型 XSS | 只对测试账号自身注入（多用户系统禁投他人可见载荷），取出重渲染位逐一检查 |
+| **会话生命周期（v5.4.5 必做）** | 会话建立成功即 load_skill session-lifecycle：T1-T9 生命周期矩阵（登出吊销/改密踢会话/refresh 重放/超时/remember-me）——会话怎么死与怎么建同等重要 |
 | 逻辑滥用 | 限购/重放/负数/并发——race-condition 与 logic-purchase-limit 剧本，带态是前提 |
 
 ## 五、D 清理（S7 承接）
@@ -54,3 +55,9 @@ tags: 会话,登录,session,cookie,越权,存储型,注入,s4,s5
 
 - 每步成功判据可复核（响应差异/状态码/内容变化），禁止「应该已登录」类假设推进。
 - 全部带态测试 update_coverage 引用账号标记与 jar 文件名；前提失败走 premise_failed 并注明缺什么（凭据/注册开放/验证码通道）。
+
+## v5.5.0 凭据仓库与带态注入（方案 A 接线）
+
+- 会话基线盘点后：每个采集到的会话（token/cookie）store_credential 入库（identity=会话名，kind=cookie/bearer/header），list_credentials 盘点带态资产；
+- 生命周期矩阵（T1-T9）复放：http_request auth_ref 按行显式引用身份（登出/改密/超时场景切换同一 identity 的不同 session 文件：operator/session-1 与 operator/session-2 分别入库）；
+- 证据纪律：请求/响应凭据自动掩码；明文不入 findings/交付物。

@@ -25,7 +25,7 @@ mkdir -p .async
 
 1. **缺工具**：对 MISSING 项逐个 install_tool（apt 优先）；一次补完再开工，禁止测到一半再补。
 2. **缺模板**：`run_async {"command":"nuclei -update-templates","timeout":600}` 后台下载，期间先做被动侦察。
-3. **缺词表**：`install_tool seclists`（apt）或 `env http_proxy=$TOOL_PROXY https_proxy=$TOOL_PROXY git clone --depth 1 https://github.com/danielmiessler/SecLists /opt/tools/seclists`。
+3. **缺词表**：优先用镜像已装位置 `/usr/share/seclists`（apt 预装，先探测再动手）；确认缺失才补装——`install_tool seclists`（apt），或 `env http_proxy=$TOOL_PROXY https_proxy=$TOOL_PROXY git clone --depth 1 https://github.com/danielmiessler/SecLists /usr/share/seclists`（登记路径以实测为准，禁止臆造未实测路径）。
 4. **无 arjun/interactsh-client**：`install_tool arjun`；interactsh-client 由 apt `interactsh-client` 或 go 安装；都不可用则记入交付物限制（OOB 走公网平台兜底，见下）。
 5. **缺语料（PAT/curated 字典）**：PAT 缺失 → `run_async {"command":"env http_proxy=$TOOL_PROXY https_proxy=$TOOL_PROXY git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings /opt/tools/PayloadsAllTheThings","timeout":600}` 后台补装（期间先做被动侦察），仍失败则记入交付物限制并改用 seclists + web 检索；curated 字典缺失 → 用 load_skill payload-mutation-algebra §7 的表现场构造（不阻塞开工）。语料用法：403 两份字典配合 payload-mutation-algebra §7（路径族×头族组合）；SSTI 矩阵配合 ssti-engine-map。
 

@@ -19,6 +19,9 @@ import (
 //   - 工具定义: {name, description, input_schema}；模型发起工具调用为 content 块 {type:"tool_use",id,name,input}
 //   - 工具结果以 user 消息回传: {type:"tool_result", tool_use_id, content}
 //   - max_tokens 必填；鉴权头 x-api-key + anthropic-version
+//   - extended thinking：响应中的 thinking/redacted_thinking 块被捕获进 Message.ThinkingBlocks，
+//     下一轮按原顺序带签名回传（Anthropic 400 合约：missing thinking block with signature）。
+//     注意：当前客户端不主动开启 thinking 参数；若未来启用需同时满足 temperature=1 等约束
 type anthropicClient struct {
 	baseURL string
 	apiKey  string
@@ -61,6 +64,11 @@ type aBlock struct {
 	// tool_result
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
+
+	// thinking / redacted_thinking（extended thinking 合约：历史块必须原样回传）
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"` // redacted_thinking 加密载荷
 }
 
 type aMessage struct {
@@ -122,6 +130,10 @@ func toWireAnthropic(msgs []Message) (system string, out []aMessage) {
 			flushToolResults(pending)
 			pending = nil
 			am := aMessage{Role: "assistant"}
+			// extended thinking 合约：thinking 块必须在 assistant content 序列最前，按原顺序带签名回传
+			for _, tb := range m.ThinkingBlocks {
+				am.Content = append(am.Content, aBlock{Type: tb.Type, Thinking: tb.Thinking, Signature: tb.Signature, Data: tb.Data})
+			}
 			if strings.TrimSpace(m.Content) != "" {
 				am.Content = append(am.Content, aBlock{Type: "text", Text: m.Content})
 			}
@@ -187,6 +199,9 @@ func (c *anthropicClient) chatOnce(ctx context.Context, body []byte) (Message, U
 		case "tool_use":
 			args, _ := json.Marshal(b.Input)
 			m.ToolCalls = append(m.ToolCalls, ToolCall{ID: b.ID, Name: b.Name, Arguments: string(args)})
+		case "thinking", "redacted_thinking":
+			// 扩展思维块：完整捕获（含签名/加密载荷），供下一轮回传（Anthropic 合约）
+			m.ThinkingBlocks = append(m.ThinkingBlocks, ThinkingBlock{Type: b.Type, Thinking: b.Thinking, Signature: b.Signature, Data: b.Data})
 		}
 	}
 	if len(ar.Content) == 0 {

