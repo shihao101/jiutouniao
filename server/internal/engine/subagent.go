@@ -150,14 +150,19 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 	}()
 	head, ok := o.heads[run.Stage]
 	headName := ""
+	headBody := ""
 	if ok && head != nil {
 		headName = head.Name
+		// v5.8.0（审计 Top#7）：子代理注入完整阶段头正文——此前只有阶段名，复杂任务
+		// 拆给子代理后变成通用扫描（丢失阶段专属操作细节与收口要求）。
+		headBody = head.Body
 	}
 	sys := strings.Join([]string{
 		"[[SUBAGENT:" + run.ID + "]]",
 		o.coreLoop,
 		fmt.Sprintf(subAgentCharter, run.Rounds),
-		"派发你的主头阶段：" + headName,
+		"## 派发你的主头阶段：" + headName + "\n\n" + headBody +
+			"\n\n（以上为所属阶段头的完整步骤与纪律；子代理收口以「结果简报」替代 complete_stage，不触发阶段状态机）",
 	}, "\n\n")
 	msgs := []llm.Message{
 		{Role: "system", Content: sys},
@@ -170,6 +175,19 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 		if ctx.Err() != nil {
 			run.Status = "killed"
 			return
+		}
+		// v5.9.0（方案 P1-4）：子代理与主代理统一预算——每轮前查项目 token 上限，
+		// 超限即停（此前主项目预算熔断后子代理继续烧钱，审计 B5/P1 缺陷）。
+		if tokBudget := p.BudgetTokens; tokBudget > 0 && o.projectTokens(p.ID) >= tokBudget {
+			run.Status = "killed"
+			run.Summary = "项目 token 预算耗尽（与主代理统一熔断口径）"
+			o.log(p, run.Stage, fmt.Sprintf("🧩 子代理 %s 因项目预算耗尽终止", run.ID))
+			return
+		}
+		// v5.9.0（方案 P1-4）：子代理窗口压缩——与主阶段同口径（长任务消息链不再无限增长）
+		if cm, nc := compactMsgs(msgs, o.cfg.Engine.ContextBudgetTokens, o.cfg.Engine.ContextKeepRecent); nc > 0 {
+			msgs = cm
+			o.log(p, run.Stage, fmt.Sprintf("🧹 子代理 %s 上下文压缩：%d 条旧消息存根化", run.ID, nc))
 		}
 		// v5.5.0（修复方案 F）：LLM 瞬时错误有界重试（2s/5s/10s 退避）——
 		// Chat 失败时本轮无 tool_calls 产出，重试不重放任何工具副作用；Kill 不重试。

@@ -1716,7 +1716,7 @@
   {
    "id": "observable-degradation",
    "file": "skills/observable-degradation.md",
-   "title": "\"无账号观测降级轨（身份索取闭环走完仍无登录态时的标准替代观测）\"",
+   "title": "\"无账号观测降级轨（六轨走完仍无登录态时的标准替代观测，不主动询问用户）\"",
    "tags": [
     "无账号",
     "观测降级",

@@ -15,7 +15,7 @@ tags: 会话,登录,session,cookie,越权,存储型,注入,s4,s5
 ├─ 无凭据 + ROE auto_register=allow + 注册开放 → A 注册链
 ├─ 无凭据 + ROE auto_register=deny（v5.1 默认）→ L1 只评估不注册；
 │   其余轨（auth-bypass/重置/默认口令/browser-auth）→ 仍无身份 →
-│   identity-bootstrapping 一a节「身份索取闭环」向客户索要测试账号；
+│   identity-bootstrapping v5.8.0 口径（不主动询问；用户主动提供的凭据经 request_credential 入库）；
 │   拒绝/超时 → update_coverage(premise_failed, notes「ROE 禁自建且客户未提供账号」) 移交，禁止硬磕
 ├─ 无凭据 + 注册关闭 → 先走 auth-bypass（万能密码/重置/默认口令）；仍失败 →
 │   update_coverage(premise_failed, notes「无凭据且注册关闭」) 移交，禁止硬磕

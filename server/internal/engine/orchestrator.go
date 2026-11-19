@@ -56,8 +56,9 @@ type Orchestrator struct {
 	inputMu sync.Mutex
 	inputs  map[string][]string // projectID -> 指挥室指令队列（运行中项目注入执行流）
 
-	loopMu sync.Mutex
-	loops  map[string][]string // projectID -> loopback 请求的回环补跑阶段（F-03 修复：原先仅改状态不重跑）
+	loopMu    sync.Mutex
+	loops     map[string][]string // projectID -> loopback 请求的回环补跑阶段（F-03 修复：原先仅改状态不重跑）
+	loopTotal map[string]int      // v5.9.0：projectID -> 项目级累计回环消费数（不清零，LoopbackMaxRuns 的真实口径）
 
 	liveMu sync.RWMutex
 	liveP  map[string]*store.Project // 运行中项目的活指针（修复：运行中改策略被流水线旧快照回写覆盖）
@@ -554,6 +555,11 @@ func (o *Orchestrator) registrationGate(command string) (bool, string) {
 var urlHostRe = regexp.MustCompile(`https?://([A-Za-z0-9_.:-]+)`)
 var ipLitRe = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
 
+// v5.9.0（方案 P0-1）：裸域名提取——命令中无 scheme 直接出现的域名字面量（如
+// `nmap example.com`）。Go regexp 不支持前瞻，用捕获组捕获域名本体（group 1），
+// 边界字符在 group 2 中匹配但不消费歧义——匹配后取 group 1。要求含点且非纯数字。
+var bareDomainRe = regexp.MustCompile(`[\s'"(;|&=,]([A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+)[\s'"();|&,]?`)
+
 // proxyAssignRe 匹配命令文本中的代理环境变量赋值（export/env http_proxy=… https_proxy=… 等）。
 // 值由部署环境或 TOOL_PROXY 注入，属传输通道配置而非测试目标——v5.7.2 安装通道分流后
 // install_tool 的代理兜底命令携带代理地址（如 docker 网桥 IP），目标匹配前必须剥离，否则
@@ -630,11 +636,53 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 			bad = append(bad, ip[1])
 		}
 	}
+	// v5.9.0（方案 P0-1）：裸域名检查（审计 P1：nmap example.com 漏网）——先剥 URL/IP
+	// 命中段避免重复误报，再按裸域名边界提取
+	stripped := urlHostRe.ReplaceAllString(command, " ")
+	stripped = ipLitRe.ReplaceAllString(stripped, " ")
+	for _, d := range bareDomainRe.FindAllStringSubmatch(stripped, -1) {
+		dom := strings.ToLower(strings.TrimSuffix(d[1], "."))
+		// 白名单域名的子域/自身在 hostAllowed 里处理；此处只拦完全未登记的
+		if !hostAllowed(dom, p.Target, allow) && !allow[dom] {
+			bad = append(bad, dom)
+		}
+	}
 	if len(bad) == 0 {
 		return false, ""
 	}
 	return true, fmt.Sprintf("strict_scope=true：命令引用范围外目标 %v——已确定性拦截。"+
 		"如属授权范围：先 record_asset 登记该资产再重试；OSINT/工具源误拦请在 config guard.scope_allowlist 扩充。", bad)
+}
+
+// writePolicyGate v5.9.0（方案 P0-1）：ROE 写策略确定性门（existence-proof 档）。
+// 命中"写语义"命令模式时拦截——与 profileGate 互补：profile 管违禁动作类别，
+// 本门管 ROE 写影响上限。full 档不走此门。GET/HEAD/OPTIONS 只读请求豁免。
+func (o *Orchestrator) writePolicyGate(p *store.Project, stageID, command, channel string) (bool, string) {
+	lc := strings.ToLower(command)
+	// 只读豁免：GET/HEAD/OPTIONS 类 HTTP（curl -X GET、GET /path、http_request method=GET）
+	readOnly := strings.Contains(lc, "-x get") || strings.Contains(lc, "get http") ||
+		strings.Contains(lc, "curl -s") && !strings.Contains(lc, "-d") && !strings.Contains(lc, "--data") && !strings.Contains(lc, "-x")
+	if readOnly {
+		return false, ""
+	}
+	writePatterns := []string{
+		"-x post", "-x put", "-x delete", "-x patch", "--data", "--data-raw", "--data-binary",
+		"insert into", "delete from", "drop table", "drop database",
+		"> /etc/", ">> /etc/", "useradd", "usermod", "reg add",
+		"sc create", "schtasks /create", "wmic ", "net user ", "net localgroup",
+		"rm -rf", "mkfs", "dd if=", "> /dev/",
+	}
+	for _, wp := range writePatterns {
+		if strings.Contains(lc, wp) {
+			o.log(p, stageID, fmt.Sprintf("⛔ ROE 写策略拦截（existence-proof，%s 通道）：命令含写语义", channel))
+			_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command",
+				Input:  truncateText(command, 200),
+				Output: "被 ROE 写策略门拦截（write_policy=existence-proof：写操作仅做存在性证明）。如目标为隔离靶场请切 isolated_lab 档或调整 ROE write_policy=full。",
+				Risk:   tools.L1Write, ApprovedBy: "roe-write-policy-gate"})
+			return true, fmt.Sprintf("ROE 写策略拦截（write_policy=existence-proof）：该命令含写语义（命中 %s）。写操作仅做存在性证明；如属隔离靶场请切换执行档或调整 ROE。", wp)
+		}
+	}
+	return false, ""
 }
 
 // governanceGates v5.3.1 P0-2：全部命令执行通道的统一确定性门——执行档（profile）+ 注册写 + 范围。
@@ -643,6 +691,14 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 // 并统一留证（证据链可回溯每一条被拦动作）。skipProfile 供 install_tool 使用：
 // 安装 mysqldump 等客户端本身是合规基建动作，profile 约束其「使用」而非「安装」。
 func (o *Orchestrator) governanceGates(p *store.Project, stageID, command, channel string, skipProfile bool) string {
+	// v5.9.0（方案 P0-1）：ROE WritePolicy 确定性写门——existence-proof（默认）档下，
+	// 命令含写语义时在审批前确定性拦截（此前 WritePolicy 只进 Digest 上下文，引擎门
+	// 未消费——审计 P1：审批策略配 all 时被架空）。full 档（靶场/评测）不受此门限制。
+	if o.roe != nil && o.roe.WritePolicy() != "full" {
+		if blocked, msg := o.writePolicyGate(p, stageID, command, channel); blocked {
+			return msg
+		}
+	}
 	if !skipProfile {
 		if blocked, msg := o.profileGate(p, command); blocked {
 			o.log(p, stageID, fmt.Sprintf("⛔ Execution Profile 违禁动作被拦截（v5.3.1 %s 通道）", channel))
@@ -1141,6 +1197,16 @@ func (o *Orchestrator) LogStartupRecovery(p *store.Project) {
 	o.log(p, p.CurrentStage, "⚙ 引擎进程重启，流水线在此处中断（启动恢复：已置为待续跑）。请在「阶段流水线」手动重跑中断阶段继续，或重新启动项目（已完成的阶段会自动跳过）。")
 }
 
+// isRerunRoot v5.8.0：该阶段是否为 loopback 直接目标（非下游连带）。
+func isRerunRoot(rerun []string, stageID string) bool {
+	for _, r := range rerun {
+		if r == stageID {
+			return true
+		}
+	}
+	return false
+}
+
 // allStagesSettled 判断项目全部阶段是否都已终态（done/failed/killed/skipped），
 // 无 pending/running——供手动单阶段重跑后判断能否自动结项。
 func (o *Orchestrator) allStagesSettled(p *store.Project) bool {
@@ -1215,17 +1281,89 @@ func (o *Orchestrator) runPipeline(ctx context.Context, p *store.Project) {
 	// 回环补跑（F-03 修复）：阶段头 loopback 登记的前置阶段在此真正重跑
 	o.loopMu.Lock()
 	rerun := o.loops[p.ID]
+	// v5.9.0（方案 P0-2）：项目级累计回环额度——旧实现消费后清零，上限（默认 3）变成
+	// "每批 3 次"而非全项目 3 次；现保留已消费记录，loopback 登记时按累计值判断超额。
+	// rerun 列表本身仍清空（本轮已展开消费）。
 	o.loops[p.ID] = nil
 	o.loopMu.Unlock()
+	o.loopMu.Lock()
+	if o.loopTotal == nil {
+		o.loopTotal = map[string]int{}
+	}
+	o.loopTotal[p.ID] += len(rerun)
+	o.loopMu.Unlock()
+	// v5.8.0（审计 Top#4）：回环补跑后自动重跑下游阶段——s4 补跑产生的新发现必须
+	// 进入利用（s5）与报告（s8）链，否则新线索静默丢失（审计实证断链）。
+	stageIdx := map[string]int{}
+	for i, sid := range pipeline {
+		stageIdx[sid] = i
+	}
+	// 展开补跑集合：目标阶段 + 流水线顺序中位于其后、且产出链依赖它的下游（s5/s7/s8 等）
+	rerunSet := map[string]bool{}
 	for _, stageID := range rerun {
+		rerunSet[stageID] = true
+		if idx, ok := stageIdx[stageID]; ok {
+			for _, sid := range pipeline[idx+1:] {
+				// spec 头是并列专项不是下游；s7/s8 是全局收口必跟；s5/s6 是利用链
+				if strings.HasPrefix(sid, "spec") {
+					continue
+				}
+				rerunSet[sid] = true
+			}
+		}
+	}
+	// 按流水线顺序重跑（v5.9.0 方案 P0-2：与主流水线完全对齐——postExploitGate、
+	// failed 停跑、paused 停跑三语义统一，此前回放分支绕过门且 paused 被误收 done）
+	for _, stageID := range pipeline {
 		if ctx.Err() != nil {
 			return
 		}
-		if st, ok := p.StageStates[stageID]; !ok || st.Status != "pending" {
-			continue // 已完成或正在跑则不重复
+		if !rerunSet[stageID] {
+			continue
 		}
-		o.log(p, stageID, "↩ 执行回环补跑（新线索触发）")
-		_ = o.runStage(ctx, p, stageID)
+		st, ok := p.StageStates[stageID]
+		if ok && st.Status == "running" {
+			continue // 正在跑则不重复
+		}
+		if st == nil {
+			st = &store.StageState{Status: "pending"}
+			p.StageStates[stageID] = st
+		}
+		if st.Status == "skipped" {
+			continue // skipped（含 postExploit 范围决策）不因回环重开
+		}
+		// v5.9.0：与主流水线同款 s6 勾选门（明确意图优先，但回放不越权打开用户未勾选的 s6）
+		if o.applyPostExploitGate(p, stageID, st) {
+			continue
+		}
+		downstream := stageIdx[stageID] > 0 && !isRerunRoot(rerun, stageID)
+		o.log(p, stageID, "↩ 执行回环补跑（新线索触发"+map[bool]string{true: "·下游连带", false: ""}[downstream]+"）")
+		if err := o.runStage(ctx, p, stageID); err != nil && ctx.Err() == nil {
+			// v5.9.0：与主流水线同款 failed 停跑
+			p.Status = "failed"
+			p.CurrentStage = stageID
+			p.FinishedAt = time.Now().Format(time.RFC3339)
+			_ = o.store.SaveProject(p)
+			o.bus.Publish(p.ID, "project", p)
+			o.log(p, stageID, "⛔ 回环补跑阶段异常中断，流水线停止: "+err.Error())
+			return
+		}
+		// v5.9.0：与主流水线同款 paused 停跑（预算耗尽不假装完成）
+		if st := p.StageStates[stageID]; st != nil && st.Status == "failed" {
+			p.Status = "failed"
+			p.FinishedAt = time.Now().Format(time.RFC3339)
+			_ = o.store.SaveProject(p)
+			o.log(p, stageID, "⛔ 回环补跑阶段未收口，流水线停止")
+			return
+		}
+		if st := p.StageStates[stageID]; st != nil && st.Status == "paused" {
+			p.Status = "paused"
+			p.CurrentStage = stageID
+			_ = o.store.SaveProject(p)
+			o.bus.Publish(p.ID, "project", p)
+			o.log(p, stageID, "⏸ 回环补跑阶段预算耗尽暂停，流水线停止（"+st.Summary+"）")
+			return
+		}
 	}
 	// 结束状态如实：任一阶段 failed → 项目 failed，不再无条件标 done
 	final := "done"
@@ -2144,30 +2282,29 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			// v5.3.1 P0-1：production_safe 下对 Lab Only 高危技能注入禁用横幅（知识面配套强制）
 			return fmt.Sprintf("【技能 %s】%s\n\n%s%s", sk.ID, sk.Title, sk.Body, o.labOnlyBanner(p, sk.ID))
 		}
-		if hits := o.skills.SearchCtx(s("query"), stageID, 5); len(hits) > 0 {
+		// v5.8.0（审计 Top#1 组合检索死路径修复）：主命中后立即扩展 depends_on/handoff_to——
+		// 原 Bundle 只在零命中才触发且用同一查询（永远拿不到主命中之外的展开），
+		// 配套技能实际从未被注入；弱模型因此漏掉 evidence-standard/handoff 等关键链路技能。
+		if hits := o.skills.Bundle(s("query"), stageID, 5); len(hits) > 0 {
 			var b strings.Builder
 			labOnly := false
-			for _, h := range hits {
+			// v5.9.0（方案 P2-5）：主命中与配套的边界由 Bundle 声明（主命中数 = 检索 top-N，
+			// 其后才是 depends_on/handoff_to 扩展）；展开总量上限 10 项防上下文膨胀。
+			mainN := o.skills.LastMainHitCount()
+			for i, h := range hits {
 				if o.skills.LabOnly(h.ID) {
 					labOnly = true
 				}
-				// v5.6.0（审计修复：关键词截断丢尾部补遗）：头 2500 + 尾 1200——技能尾部的
-				// 工具兼容/误报排除/Execution Profile 补遗与正文头部一起保留，中间段省略。
-				b.WriteString(fmt.Sprintf("【技能 %s】%s\n\n%s\n\n---\n", h.ID, h.Title, headTail(h.Body, 2500, 1200)))
+				tag := ""
+				if i >= mainN {
+					tag = "（配套：depends_on/handoff_to 自动扩展）"
+				}
+				b.WriteString(fmt.Sprintf("【技能 %s】%s%s\n\n%s\n\n---\n", h.ID, h.Title, tag, headTail(h.Body, 2500, 1200)))
 			}
 			if labOnly {
 				b.WriteString(labOnlyBannerText())
 			}
-			o.log(p, stageID, fmt.Sprintf("📖 技能检索命中 %d 条", len(hits)))
-			return b.String()
-		}
-		// v5.3.2 P1-3：无直检命中时按组合选择展开配合技能（depends_on/handoff_to）
-		if hits := o.skills.Bundle(s("query"), stageID, 5); len(hits) > 0 {
-			var b strings.Builder
-			for _, h := range hits {
-				b.WriteString(fmt.Sprintf("【技能 %s】%s（组合候选）\n\n%s\n\n---\n", h.ID, h.Title, headTail(h.Body, 2000, 900)))
-			}
-			o.log(p, stageID, fmt.Sprintf("📖 技能组合展开 %d 条", len(hits)))
+			o.log(p, stageID, fmt.Sprintf("📖 技能检索命中 %d 条（含组合扩展 %d 条）", len(hits), len(hits)))
 			return b.String()
 		}
 		return "未找到匹配技能；可用技能索引见项目上下文。"
@@ -2586,7 +2723,9 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		// 超额时状态已改但永远不入补跑队列，形成"看似已回环实则死死角"。
 		o.loopMu.Lock()
 		q := o.loops[p.ID]
-		queued := len(q) < o.cfg.Engine.LoopbackMaxRuns
+		// v5.9.0（方案 P0-2）：项目级累计额度（当前批次 + 历史已消费）
+		total := o.loopTotal[p.ID] + len(q)
+		queued := total < o.cfg.Engine.LoopbackMaxRuns
 		if queued {
 			o.loops[p.ID] = append(q, to)
 		}
@@ -3438,7 +3577,7 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 	// v5.6.0：状态判据从「仅看旧 AuthInfo 字段」升级为 projectHasIdentity（AuthInfo ∪ 凭据仓库 active ∪ verified Loot）——
 	// 审计缺陷：store_credential 入库后 W4 仍当 S0 跑六轨，新机制与旧状态机脱节。
 	if stageID == "s4" && !o.projectHasIdentity(p) && o.loginSurfacePresent(p) {
-		b.WriteString("> 🪪 身份获取编排（v4.8 W4·v5.1 修订）：本项目无凭证——按 identity-bootstrapping 六轨顺序编排（L1 注册面 → L2 泄露面 → L3 默认口令 → L4 验证码逻辑 → L5 令牌伪造 → L6 会话构造），逐轨尝试并 record_vt（title 前缀 [W4-L1]..[W4-L6]，不适用轨也登记并在 start_conditions 注明「无对应面」）；**L1 为评估轨：按 ROE identity.auto_register（默认 deny）只做注册面存在性评估与流程还原，不执行注册、命中不建会话（发现本身 record_finding）**；L2-L6 任一轨取得身份（verified loot 或 store_credential 入库）即 load_skill session-state-chain 建会话；验证码轨走 captcha-ocr「取码→识别→立即提交」单会话闭环，失败降级人工读码/browser-auth；凭据面预言机探针分流（browser_oracle 无验证码面直连 / SimCaptcha 类面走会话）。全部轨未命中（或 L1 被 ROE 关闭且其余轨未命中）时：先执行 identity-bootstrapping 一a节**身份索取闭环**（request_credential 专用通道向客户索要低权+高权测试账号——回答原文不落明文），客户拒绝/超时后才六轨 VT 全量登记并按 S4-7 三行报告口径移交——禁止跳过索取直接放弃。\n\n")
+		b.WriteString("> 🪪 身份获取编排（v4.8 W4·v5.1 修订）：本项目无凭证——按 identity-bootstrapping 六轨顺序编排（L1 注册面 → L2 泄露面 → L3 默认口令 → L4 验证码逻辑 → L5 令牌伪造 → L6 会话构造），逐轨尝试并 record_vt（title 前缀 [W4-L1]..[W4-L6]，不适用轨也登记并在 start_conditions 注明「无对应面」）；**L1 为评估轨：按 ROE identity.auto_register（默认 deny）只做注册面存在性评估与流程还原，不执行注册、命中不建会话（发现本身 record_finding）**；L2-L6 任一轨取得身份（verified loot 或 store_credential 入库）即 load_skill session-state-chain 建会话；验证码轨走 captcha-ocr「取码→识别→立即提交」单会话闭环，失败降级人工读码/browser-auth；凭据面预言机探针分流（browser_oracle 无验证码面直连 / SimCaptcha 类面走会话）。全部轨未命中（或 L1 被 ROE 关闭且其余轨未命中）时：按 v5.8.0 口径直接六轨 VT 全量登记并按 S4-7 三行报告口径移交（不主动向用户询问身份——有则用、无则默认无；用户中途主动提供凭据时经 request_credential 入库即转带态测试）。\n\n")
 	}
 	// v5.6.0 凭证状态三态上下文（通用型：所有阶段按 S0/S1/S2 差异化注入，审计④-13）
 	b.WriteString(o.credentialStateBlock(p))
@@ -3451,7 +3590,7 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 		// 此前 Digest 仅 YAML 路径注入，auto_register/write_policy 运行时含义不可见。
 		b.WriteString("### ROE 运行时默认口径（项目未配置 YAML Profile，按平台默认从严执行）\n")
 		b.WriteString("- write_policy=existence-proof → 写操作仅做存在性证明（截图/计数/哈希），禁止业务数据修改\n")
-		b.WriteString("- identity.auto_register=deny（平台默认） → 注册面只评估不注册，身份向客户索取（identity-bootstrapping 一a节）\n")
+		b.WriteString("- identity.auto_register=deny（平台默认） → 注册面只评估不注册（v5.8.0：不主动向用户询问身份——有则用、无则默认无）\n")
 		b.WriteString("- 数据边界 → 生产数据只做存在性证明；自建数据一律只登记移交、不执行删除（v5.1.3 用户政策）\n\n")
 	}
 	// v3.4.0 组织级教训（跨项目脱敏）——避免重蹈覆辙的第一道注入点
@@ -3734,7 +3873,7 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 		{Name: "request_approval", Description: "向人工发起专项审批（写操作/RCE/横向等高风险动作）。", Parameters: obj(map[string]any{
 			"action": str("请求批准的动作描述"),
 		}, "action")},
-		{Name: "complete_stage", Description: "本阶段完成，提交收口。必须提供阶段摘要与交付物清单；s4/s5 还必须在调用参数中提供顶层字段 ready_but_unexecuted 与 l2_approved_unused（JSON 数组，无内容传空数组 []，不要只写进 summary 文本）。若收口提示存在 quality-pending 复核标记：先复核相关阶段交付物，确认无缺口后重新调用并传 \"confirm_quality_review\": true（引擎清除标记并继续收口）。", Parameters: obj(map[string]any{
+		{Name: "complete_stage", Description: "本阶段完成，提交收口。必须提供阶段摘要与交付物清单——摘要按结构化格式：`[测试范围] 已测端点/类 → [关键结果] 每条含 endpoint、假设、阳性/阴性信号、当前状态、下个动作`（v5.8.0 结构化摘要，供下游阶段与报告直接消费）；s4/s5 还必须在调用参数中提供顶层字段 ready_but_unexecuted 与 l2_approved_unused（JSON 数组，无内容传空数组 []，不要只写进 summary 文本）。若收口提示存在 quality-pending 复核标记：先复核相关阶段交付物，确认无缺口后重新调用并传 \"confirm_quality_review\": true（引擎清除标记并继续收口）。", Parameters: obj(map[string]any{
 			"summary": str("阶段摘要"), "deliverables": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "交付物清单"},
 			"ready_but_unexecuted":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：有就绪脚本/PoC 而未投递的待验证项（每条含就绪资产路径与启动条件）；无内容传空数组 []"},
 			"l2_approved_unused":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5 必填：已批准但未使用的 L2 审批工单；无内容传空数组 []"},
@@ -4161,6 +4300,11 @@ func (o *Orchestrator) deliverablesText(projectID string) string {
 
 // ---------- v4.8 批2 确定性门（M2 筛查矩阵判定表 / M4 交付物时间窗） ----------
 
+// evidenceRefRe v5.9.0（方案 P1-3）：结构化证据引用——evidence/ 路径、EV- 编号、
+// 或 "POC: " 前缀（record_finding poc 参数登记时的约定标记）。禁止裸子串（"POC 未执行"
+// 曾骗过子串匹配）。
+var evidenceRefRe = regexp.MustCompile(`evidence/[A-Za-z0-9_\-./]+|\bEV-[0-9A-Za-z\-]+|(?i)poc\s*[:：]`)
+
 // matrixClassRe 筛查矩阵判定表行首列：C-<两位编号>（C-01..C-27）。
 var matrixClassRe = regexp.MustCompile(`^\|\s*(C-\d{2})\s*\|`)
 
@@ -4201,6 +4345,45 @@ func (o *Orchestrator) matrixTableIssues(p *store.Project) []string {
 	}
 	if noVerdict > 0 {
 		return []string{fmt.Sprintf("v4.8 M2：判定表 %d 行无三态判定格（判定列应为 | 假设 | / | 不适用 | / | 待判定 | 之一）——补判定后重新收口", noVerdict)}
+	}
+	// v5.9.0（方案 P1-3 执行卡机械校验）：判定=假设 的行必须附执行卡五要素
+	// （入口定位 / 首探针 / 阳性信号 / 阴性信号 / 停止阈值）——从"查留痕"升级为"查语义结构"。
+	// 五要素允许同行或紧随的续行（执行卡子表/缩进块）；标记词可中文或英文。
+	cardMarkers := []string{"入口", "探针", "阳性", "阴性", "停止"}
+	lines := strings.Split(raw, "\n")
+	hypoCtx := map[string][]string{} // C-编号 -> 该行与其后 3 行上下文
+	lastID := ""
+	for _, line := range lines {
+		if m := matrixClassRe.FindStringSubmatch(line); m != nil {
+			lastID = m[1]
+			hypoCtx[lastID] = []string{line}
+			continue
+		}
+		if lastID != "" && strings.TrimSpace(line) != "" && len(hypoCtx[lastID]) < 4 {
+			hypoCtx[lastID] = append(hypoCtx[lastID], line)
+		}
+	}
+	var missingCards []string
+	for id, ctxLines := range hypoCtx {
+		joined := strings.Join(ctxLines, "\n")
+		isHypo := matrixVerdictRe.FindStringSubmatch(joined) != nil &&
+			strings.Contains(joined, "假设")
+		if !isHypo {
+			continue
+		}
+		hit := 0
+		for _, mk := range cardMarkers {
+			if strings.Contains(joined, mk) {
+				hit++
+			}
+		}
+		if hit < 3 { // 至少 3/5 标记（大小写/别名的宽容下限），不足=执行卡缺失
+			missingCards = append(missingCards, id)
+		}
+	}
+	if len(missingCards) > 0 {
+		return []string{fmt.Sprintf("v5.9.0 执行卡门：判定=假设 的 %d 行缺执行卡要素（%s）——每条假设附一行式执行卡（入口定位→首探针→阳性信号→阴性信号→停止阈值≤6 请求/候选），s4 按卡直接投递",
+			len(missingCards), truncateText(strings.Join(missingCards, ","), 120))}
 	}
 	return nil
 }
@@ -4270,6 +4453,79 @@ func (o *Orchestrator) deliverableDateIssues(p *store.Project) []string {
 	if raw, err := o.exec.ReadFile(p.ID, "report.md"); err == nil {
 		scanText("report.md", raw)
 	}
+	return issues
+}
+
+// idorCandidateIssues v5.9.0（方案 P1-3）：IDOR candidate 禁直升——
+// 覆盖矩阵中存在 candidate_idor_anonomous/needs_follow_up 的 IDOR 候选端点时，
+// 同端点的「确证」IDOR 发现降级为疑似（对象归属二次确认前置：owner-grep 采集/
+// 双账号差分/业务预期核对三选一后才可确证）。
+func (o *Orchestrator) idorCandidateIssues(p *store.Project) []string {
+	cov, _ := o.store.ListCoverage(p.ID)
+	candEndpoints := map[string]bool{}
+	for _, c := range cov {
+		if c.Status == "needs_follow_up" && strings.Contains(strings.ToLower(c.Notes), "candidate") {
+			candEndpoints[c.Endpoint] = true
+		}
+	}
+	if len(candEndpoints) == 0 {
+		return nil
+	}
+	findings, _ := o.store.ListFindings(p.ID)
+	var issues []string
+	for _, f := range findings {
+		if f.Stage == "s4" && f.Confidence == "确证" &&
+			(strings.Contains(f.Title, "IDOR") || strings.Contains(f.Title, "越权") || strings.Contains(strings.ToLower(f.Title), "idor")) {
+			for ep := range candEndpoints {
+				if strings.Contains(f.Detail, ep) {
+					f.Confidence = "疑似"
+					_ = o.store.UpdateFinding(f)
+					issues = append(issues, fmt.Sprintf("发现 %s（%s）降级疑似：其端点在覆盖矩阵为 IDOR 候选（缺对象归属二次确认）——owner-grep/双账号差分/业务核对三选一后 update_finding 升级", f.ID, truncateText(f.Title, 50)))
+					break
+				}
+			}
+		}
+	}
+	return issues
+}
+
+// vulnerableEvidenceIssues v5.8.0（审计 Top#9）：覆盖矩阵 vulnerable/no_issue_found 条目
+// 必须能关联证据（notes 引用 evidence/ 路径或 POC/判据字样）——"留痕齐全、测试不充分"的
+// 格式过门被升级为语义检查：无证据支撑的结论条目在收口时列拦截项。
+func (o *Orchestrator) vulnerableEvidenceIssues(p *store.Project, stageID string) []string {
+	cov, _ := o.store.ListCoverage(p.ID)
+	evs, _ := o.store.ListEvidence(p.ID)
+	var issues []string
+	checked := 0
+	for _, c := range cov {
+		if c.Status != "vulnerable" && c.Status != "no_issue_found" {
+			continue
+		}
+		checked++
+		// v5.9.0（方案 P1-3）：去子串化——"POC 未执行"类文字曾骗过子串匹配。
+		// 结构化三选一：①evidence/ 路径引用 ②EV- 编号引用 ③POC: 前缀（记录时登记）。
+		notes := c.Notes
+		hasRef := evidenceRefRe.MatchString(notes)
+		if hasRef {
+			continue
+		}
+		// 证据库兜底：该 endpoint 出现在任一 evidence Input/Output 中
+		linked := false
+		for _, e := range evs {
+			if e.ProjectID == p.ID && (strings.Contains(e.Input, c.Endpoint) || strings.Contains(e.Output, c.Endpoint)) {
+				linked = true
+				break
+			}
+		}
+		if !linked {
+			issues = append(issues, fmt.Sprintf("覆盖条目 [%s] %s × %s 结论无证据关联（notes 缺 evidence/POC/判据引用，证据库也无该端点记录）——补测留证或改判 needs_follow_up 后重新收口",
+				c.Status, truncateText(c.Endpoint, 60), truncateText(c.VulnClass, 30)))
+			if len(issues) >= 12 {
+				break
+			}
+		}
+	}
+	_ = checked
 	return issues
 }
 
@@ -4453,6 +4709,10 @@ func (o *Orchestrator) deterministicGate(p *store.Project, stageID string) []str
 		}
 		// v4.4 批次4 反思门判据抽查：高危确证未引用 evidence-standard 判据 → 引擎直接降级疑似（evidenceCriteriaIssues 内部变更并留痕）
 		issues = append(issues, o.evidenceCriteriaIssues(p, stageID)...)
+		issues = append(issues, o.vulnerableEvidenceIssues(p, stageID)...) // v5.8.0 Top#9 语义门
+		// v5.9.0（方案 P1-3）：IDOR candidate 禁直升——覆盖矩阵存在 candidate_idor_anonomous
+		// 候选时，对应端点的 IDOR「确证」发现降级疑似（对象归属二次确认前置）。
+		issues = append(issues, o.idorCandidateIssues(p)...)
 		// v4.4 批次6 S4 分段收口对账（方向二E）：多目标且 ≥2 个目标已被真实覆盖（说明按目标推进过）时，
 		// 未覆盖且未列入待续清单/档案目标的目标 → 拦截；分组产出约定 deliverables/s4-<目标或组名>.md。
 		// matched<2 不拦（整目标零覆盖是另一类失败模式，由提示词纪律与轮次止损兜底，mock 演示亦不触发）。

@@ -51,3 +51,18 @@ seq 10 | xargs -P10 -I{} curl -sk -X POST -b cookies.txt https://目标/api/clai
 ### 补遗
 
 目标点位补：邀请/推荐/注册奖励类（invite_accept/referral_claim）。限频绕过竞态：限频=逐请求 check-then-increment 计数器时，N 发并发一波 vs N 发顺序对比——并发波内超限通过/锁死不触发（登录爆破接口同理）。多步流水线竞态（beat the pipeline）：`create→pay→confirm` 流程 confirm 未与 pay 密码学绑定时，两并行流水线 A 放弃 pay、B 完成 confirm → 未支付标记已付。白盒 TOCTOU 指纹：`balance = SELECT...; if balance >= amount: UPDATE...`（非原子）；分层缺陷表（应用 flag/ORM 无分布式锁/DB 缺 FOR UPDATE/网关限频 check-then-increment）；UNIQUE 约束与幂等键常整类消除——测热路径是否真强制。工具补：JavanXD/Raceocat、h2spacex、Burp Repeater Send group (parallel)；Turbo 参数补 pipeline=False/engine=THREADED/maxRetriesPerRequest=0。
+
+## v5.8.0 竞态状态读回 Harness（Top#10：脚本化状态核验）
+
+并发竞态的确证必须做**前后状态核验**（HTTP 判据只产候选）：
+
+```
+# 状态读回三步（tools-extra 现有 logic-invariant.py 思路的竞态版）
+1) 前置态：并发前读回目标对象状态（GET 详情/余额/计数），存 evidence/
+2) 并发窗口：race-condition 并发请求 N 连发（参数同 v5.4 节）
+3) 后置态：读回状态并 diff——服务端状态变化超出幂等预期（如余额多扣、计数超发、
+   订单重复创建）= 确证；仅 HTTP 200 无状态变化 = 前端假放行（candidate）
+```
+
+- 每次竞态验证必须产出：前置态证据 + 并发请求留证 + 后置态证据（三件齐才 record_finding）
+- 幂等预期判定：对幂等接口（GET/幂等 PUT）状态不变属正常；对非幂等动作（支付/计数/兑换）状态多变为漏洞

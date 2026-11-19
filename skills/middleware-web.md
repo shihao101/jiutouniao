@@ -10,7 +10,7 @@ tags: tomcat,nacos,jenkins,中间件,redis,s4
 ## Tomcat
 ```bash
 curl -sk -o /dev/null -w "manager %{http_code}\n" https://目标/manager/html
-curl -sk -X PUT "https://目标/1.txt/" -d probe --max-time 8   # PUT 写探针（readonly 检测）
+curl -sk -X PUT "https://目标/1.txt/" -d probe --max-time 8   # PUT 写探针（L1 写操作：需审批，非只读；唯一标记 1.txt，写入即登记四元组移交不删除）
 # 弱口令面 → weak-cred-bruteforce；manager.war 部署 → S5
 ```
 

@@ -16,13 +16,13 @@ tags: api,idor,bola,越权,接口
 
 ## 角色矩阵（BFLA 机械化 · v5.4.5）
 
-- **硬门（有身份项目）**：取得 ≥2 个角色会话（客户双角色账号 / L2-L6 命中+高权索取）后，对端点表全量执行**角色矩阵**——`python3 /opt/tools/authz-matrix-roles.py --base <t> --endpoints <端点表> --role anon: --role low:"Authorization: Bearer X" --role high:"Authorization: Bearer Y"`；
+- **硬门（有身份项目）**：取得 ≥2 个角色会话（客户双角色账号 / L2-L6 命中 / 用户主动提供）后，对端点表全量执行**角色矩阵**——`python3 /opt/tools/authz-matrix-roles.py --base <t> --endpoints <端点表> --role anon: --role low:"Authorization: Bearer X" --role high:"Authorization: Bearer Y"`；
 - 分类处置：OPEN-200（全角色同 200）→ 转 authz-diff 匿名 finding；**EQUAL-200（低权=高权同响应）→ BFLA 候选**，admin_path=Y 行强信号——同族复查确认端点本应高权专属后 record_finding（CWE-863）；TIERED/GATED=negative_valid；UND=needs_follow_up（不得 ruled_out）；
 - 记账：`role_matrix diffed=N/total`（与 authz-diff `diffed/total` 双硬门并列）；字段级细化接 load_skill api-field-exposure（EQUAL-200 行先于字段 diff）；
 - ROE：矩阵为只读 GET 复放；写端点只测门控存在性（authz-diff 第四节同口径）。
 
 ## 限量拉取（API4）
-- 分页 size=99999、page 快速遍历（限速）。
+- 分页探测：size 参数改大（如 size=500）观察分页上限校验缺失——**只记录"分页上限可被放大"这一结论与单页样例，不做全量翻页拉取**（数据最小化；全量遍历仅在 isolated_lab 且客户书面同意时执行，限速）。
 
 ## SSRF（API7）
 - Webhook/URL 预览/头像导入点：`http://169.254.169.254/latest/meta-data/`（云元数据，只取存在性）、`file:///etc/passwd`、内网 `http://127.0.0.1:port`。
@@ -32,7 +32,7 @@ tags: api,idor,bola,越权,接口
 - 时间戳+nonce 是否参与签名；重放同一请求两次观察幂等。
 
 ## 产出纪律
-- 每个接口×参数×漏洞类 = 一个覆盖单元；发现确证必须有 A/B 双账号响应证据（账号来自客户提供/索取闭环——水平越权按**同角色两个账号**供给；无凭据时 `idor-baseline.py` 匿名差分可确证 idor_anonymous 形态，需第二身份的单元按 v4.8 W6 路由 record_vt 移交，禁止静默跳过）。
+- 每个接口×参数×漏洞类 = 一个覆盖单元；发现确证必须有 A/B 双账号响应证据（账号来自客户提供——水平越权按**同角色两个账号**供给；无凭据时 `idor-baseline.py` 匿名差分可确证 idor_anonymous 形态，需第二身份的单元按 v4.8 W6 路由 record_vt 移交，禁止静默跳过）。
 
 ## ORM filter 注入与跨功能对象搬运
 

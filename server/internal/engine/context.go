@@ -16,6 +16,11 @@ func estimateTokens(msgs []llm.Message) int {
 	total := 0
 	for _, m := range msgs {
 		total += 12 + estStringTokens(m.Content)
+		// v5.9.0（方案 P1-4）：ToolCalls 参数计入估算——此前只算 Content，带大参数的
+		// 工具调用轮（write_file 长内容/store_credential）实际 token 远超估算，压缩触发过晚。
+		for _, tc := range m.ToolCalls {
+			total += 24 + estStringTokens(tc.Arguments)
+		}
 	}
 	return total
 }

@@ -75,7 +75,7 @@ func (o *Orchestrator) credentialStateBlock(p *store.Project) string {
 	if !o.projectHasIdentity(p) {
 		// S0 无凭证
 		b.WriteString("- **当前状态 S0（无凭证）**：最大化匿名面测试（anon-attack-surface 全清单）+ 按六轨编排身份获取（identity-bootstrapping）；发现登录面必须登记资产。\n")
-		b.WriteString("- 向用户索取凭据**必须用 request_credential 专用通道**（原文不落明文）；伪造尝试（JWT/签名/会话构造）是 S0 轨道的一部分，成功即 store_credential 入库（origin=forged）。\n")
+		b.WriteString("- 用户**主动提供**凭据时经 request_credential 专用通道接收入库（原文不落明文；v5.9.0：智能体不主动发起询问）；伪造尝试（JWT/签名/会话构造）是 S0 轨道的一部分，成功即 store_credential 入库（origin=forged）。\n")
 		b.WriteString("- 全轨未命中且用户未提供 → 按 observable-degradation 四通道降级移交，不静默跳过认证面。\n\n")
 		return b.String()
 	}
@@ -163,8 +163,9 @@ func (o *Orchestrator) resolveCredential(p *store.Project, ref string) (string, 
 	return "", nil, nil, fmt.Errorf("credential_ref 格式非法（应为 cred-<id> 或 identity:<身份名>）")
 }
 
-// toolRequestCredential v5.6.0 凭据专用索取通道（request_credential，审计修复高危#1）：
-// 向人工索取凭据 → 回答原文只经内存通道 → 直接入加密仓库 → AskRecord/工具回执只含掩码。
+// toolRequestCredential v5.6.0 凭据专用接收通道（request_credential，审计修复高危#1）：
+// 接收用户主动提供的凭据 → 回答原文只经内存通道 → 直接入加密仓库 → AskRecord/工具回执只含掩码。
+// v5.9.0 口径：智能体不主动发起索取。
 // 全链路明文不落任何持久化介质（对照普通 request_user_input：答案会明文落 AskRecord）。
 func (o *Orchestrator) toolRequestCredential(ctx context.Context, p *store.Project, stageID string, args map[string]any) string {
 	get := func(k string) string { v, _ := args[k].(string); return strings.TrimSpace(v) }
@@ -241,7 +242,7 @@ func (o *Orchestrator) toolRequestCredential(ctx context.Context, p *store.Proje
 func (o *Orchestrator) toolStoreCredential(p *store.Project, stageID string, args map[string]any) string {
 	get := func(k string) string { v, _ := args[k].(string); return strings.TrimSpace(v) }
 	if !o.credToolsEnabled() {
-		return "错误: 凭据仓库未启用（需设置环境变量 CREDENTIALS_MASTER_KEY 后重启引擎）。向用户索取凭据请改用 request_credential 专用通道；向人工索取请在用户配置主密钥后进行，不得粘贴到普通对话。"
+		return "错误: 凭据仓库未启用（需设置环境变量 CREDENTIALS_MASTER_KEY 后重启引擎）。用户主动提供凭据时请配置主密钥后用 request_credential 通道接收，不得粘贴到普通对话。"
 	}
 	origin := strings.ToLower(get("origin"))
 	if origin == "" {

@@ -116,7 +116,7 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 已获会话（客户账号/L2-L6 命中，测"会话怎么死"） | session-lifecycle | jwt-crypto / session-state-chain |
 | 分享面（share/sign/expires/keyId/分享二维码） | share-link-abuse | capability-primitive-search / crypto-offensive |
 | 组织/团队/成员管理功能（邀请/角色/层级） | org-member-abuse | api-idor / instance-diff |
-| 登录态不可得（身份索取闭环走完仍无账号） | observable-degradation | session-state-chain |
+| 登录态不可得（六轨走完仍无账号） | observable-degradation | session-state-chain |
 
 ## 二、按症状
 
@@ -143,7 +143,7 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 验证码/改绑/限购/支付逻辑存疑 | logic-sms-otp-matrix + logic-purchase-limit（六路径/五变体互备） |
 | payload 被拦截/过滤/403/改了没差异 | payload-mutation-algebra（先指纹 12 探针再按七步链变异）+ waf-fingerprint |
 | 疑似高危待确证（record_finding 定级前） | evidence-standard（逐类判据+反例）+ hypothesis-0day |
-| 无凭证且认证后项待测 | identity-bootstrapping（L1 评估轨→L6 决策树；L2-L6 命中即 session-state-chain；全轨未命中走一a身份索取闭环） |
+| 无凭证且认证后项待测 | identity-bootstrapping（L1 评估轨→L6 决策树；L2-L6 命中即 session-state-chain；全轨未命中按无凭证口径移交，不主动询问用户） |
 | 代理配置后工具怎么走代理（$TOOL_PROXY/$JT_EXIT_POOL/工具旗标） | proxy-channels（v5.0 代理通道手册） | exit-pool / rate-limit-playbook |
 | s3 威胁建模（筛查矩阵判定/假设三态判定表） | hypothesis-matrix（K3 假设模式库：27 类×三态判定+判定表规范） | industry-templates / framework-priors |
 | 行业目标（医疗/金融/教育/政务/企业/互联网）优先级升格与数据类具象 | industry-templates（K1 行业模板六件） | hypothesis-matrix |

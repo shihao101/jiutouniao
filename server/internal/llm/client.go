@@ -166,12 +166,18 @@ type wireResp struct {
 }
 
 // withRetry 请求级重试：网络错误/5xx/429 退避重试（LLM 网关偶发抖动）；4xx 参数错误不重试。
+// v5.7.5 扩展重试跨度（实证事故）：VM 出口 UDP DNS 丢包/直连 TCP 抖动窗口为分钟级，此前
+// 3 次尝试（退避 2s/4s）总跨度 ~40s 全部落在窗口内——s1 正常收口后 s2 首个 LLM 调用即
+// lookup i/o timeout×3 阶段失败项目终止。扩至 5 次尝试（退避 2s/5s/10s/20s，累计等待 37s，
+// 连同请求耗时总跨度 ~2min）覆盖典型抖动窗口；retryable 仅网络/5xx/429 类，
+// 真失败（4xx 参数错误）仍首轮即返不受影响。
 func withRetry(ctx context.Context, fn func() (Message, Usage, error)) (Message, Usage, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	backoffs := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second}
+	for attempt := 0; attempt < len(backoffs)+1; attempt++ {
 		if attempt > 0 {
 			select {
-			case <-time.After(time.Duration(attempt*2) * time.Second):
+			case <-time.After(backoffs[attempt-1]):
 			case <-ctx.Done():
 				return Message{}, Usage{}, ctx.Err()
 			}

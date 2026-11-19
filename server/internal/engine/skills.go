@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // Skill 技能库单元（移植自 strix skills/ 双通道注入 + PentesterFlow SKILL.md 约定）：
@@ -52,6 +53,12 @@ type SkillRegistry struct {
 	skills   map[string]*Skill
 	manifest map[string]*SkillMeta // manifest.json 元数据（缺失/失配时降级 markdown-only，启动日志告警）
 	mOK      bool
+	lastMain atomic.Int64 // v5.9.0：最近一次检索主命中数（Bundle 标签判定用）
+}
+
+// LastMainHitCount v5.9.0：最近一次 searchScored/Bundle 的主命中数。
+func (r *SkillRegistry) LastMainHitCount() int {
+	return int(r.lastMain.Load())
 }
 
 // LoadSkills 从目录加载技能（markdown + frontmatter：id/title/tags）。
@@ -216,14 +223,19 @@ func (r *SkillRegistry) Search(query string, n int) []*Skill {
 // SearchCtx 上下文感知检索：在 Search 基础上按当前阶段（s1..s8/specA/B1/B2）与 manifest
 // stage_fit/tags 匹配加分（+3）——同分情况下优先返回适用当前阶段的技能。
 func (r *SkillRegistry) SearchCtx(query, stage string, n int) []*Skill {
-	return r.searchScored(query, stage, n).hits
+	hits := r.searchScored(query, stage, n)
+	r.lastMain.Store(int64(len(hits.hits)))
+	return hits.hits
 }
 
 // Bundle 组合选择：top 命中技能按 manifest depends_on/handoff_to 展开配合技能（去重、
 // 只展开存在项），返回 [主命中..., 配合...] 有序清单——阶段头一次拿到可直接组合的技能集。
+// lastMain 记录最近一次检索的主命中数（v5.9.0 标签判定；并发下近似值即可）。
 func (r *SkillRegistry) Bundle(query, stage string, n int) []*Skill {
 	sc := r.searchScored(query, stage, n)
 	out := sc.hits
+	// v5.9.0（方案 P2-5）：记录主命中数供标签判定（主命中 vs depends_on/handoff_to 扩展）
+	r.lastMain.Store(int64(len(sc.hits)))
 	seen := map[string]bool{}
 	for _, h := range sc.hits {
 		seen[h.ID] = true

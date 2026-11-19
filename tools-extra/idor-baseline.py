@@ -17,6 +17,9 @@
 合规：采样仅读对象 ID 邻域（存在性证明）；量化只报计数不导出数据；匿名差分仅 1 次重放。
 """
 import argparse, hashlib, json, re, statistics, time
+import os as _os
+_os.environ.setdefault("NO_PROXY", "*")
+_os.environ.setdefault("no_proxy", "*")  # 本地 canned 服务与内网目标直连（v5.6.1 实证：env 代理把 127.0.0.1 转发致 502）
 import urllib.request, urllib.error
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 idor-baseline/1.0"
@@ -83,8 +86,14 @@ def run(url_tpl, start, count, cookies=None, owner_grep=None, anonymous=True):
                  "range_size": max(oids_ok) - min(oids_ok) + 1,
                  "note": "区间为采样可见范围外推上界，仅用于影响量化（不导出数据）"}
     if anon_hits:
-        verdict = {"verdict": "idor_anonymous", "access": "anonymous"}
-        verdict["next"] = "匿名可读他人对象——record_finding（水平越权/未授权访问，impact_rank=3 候选）+ 采样→差分证据落 evidence/"
+        # v5.8.0（审计 Top#6 语义判据）：匿名 200 非空 ≠ 他人对象——无 owner 证据时降级候选，
+        # 要求对象归属确认（owner-grep 命中他人标识 / 双账号差分 / 业务预期核对）后才可 record_finding。
+        if owner_grep and owner_set:
+            verdict = {"verdict": "idor_anonymous", "access": "anonymous"}
+            verdict["next"] = "匿名可读他人对象（owner 证据已采集）——record_finding（水平越权，impact_rank=3 候选）+ 采样→差分证据落 evidence/"
+        else:
+            verdict = {"verdict": "candidate_idor_anonymous", "access": "anonymous"}
+            verdict["next"] = "候选：匿名 200 非空但缺对象归属证据——须 owner-grep 采集他人标识 / 双账号差分 / 业务预期核对三选一后才能 record_finding（公开资源匿名可读是正常态，非漏洞）"
     elif predictable and owner_set and len(owner_set) > 1:
         verdict = {"verdict": "idor_predictable_only", "access": "pre-auth"}
         verdict["next"] = "ID 可预测但匿名不可读——双账号差分（低权会话读他人对象）走 authz-diff 矩阵确认"

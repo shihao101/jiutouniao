@@ -15,6 +15,30 @@
 // 版本规则（遇十进一）：末位递增，末位满 10 进位到前一位（如 2.9 的下一版是 3.0）。
 // 每次发版（含 Bug 修复）必须：递增 server/internal/version/version.go 的 App 常量 + 在此补记录。
 const CHANGELOG = [
+  { v: 'v5.9.0', date: '2026-11-19', items: [
+    '增强（统一执行治理·架构方案 P0-1）：ROE WritePolicy 确定性写门接入 governanceGates——existence-proof 档下命令含写语义（-X POST/PUT/DELETE/PATCH、--data、SQL 写、系统写等模式）在审批前确定性拦截并留证（此前 WritePolicy 只进上下文摘要，审批策略配 all 时被架空）；GET/HEAD/OPTIONS 只读豁免；范围门新增裸域名提取（nmap example.com 形态不再漏网，URL/IP 剥离后按域名边界二次扫描）',
+    '增强（统一阶段状态机·架构方案 P0-2）：回环补跑与主流水线完全对齐——s6 勾选门（applyPostExploitGate）、failed 停跑、paused 停跑三语义统一（此前回放分支绕过门且 paused 项目可能被误收 done）；回环额度改项目级累计（消费不清零，LoopbackMaxRuns 成为真实全项目口径而非每批口径）',
+    '增强（语义门结构化·架构方案 P1-3）：①执行卡机械校验——s3 筛查矩阵「假设」行必须附执行卡要素（入口/探针/阳性/阴性/停止，≥3/5 标记下限）否则收口拦截；②IDOR candidate 禁直升——覆盖矩阵存在 IDOR 候选（缺对象归属二次确认）时同端点「确证」发现自动降级疑似；③证据门去子串化——结构化三选一（evidence/ 路径引用、EV- 编号、POC: 前缀），「POC 未执行」类文字不再骗过匹配',
+    '增强（主代理与子代理统一·架构方案 P1-4）：子代理每轮前检查项目 token 预算（与主代理统一熔断口径，主预算耗尽子代理即停）；子代理消息链接入窗口压缩（与主阶段同口径）；estimateTokens 计入 ToolCalls 参数（带大参数工具调用的实际 token 不再低估）',
+    '增强（编排与口径收敛·架构方案 P2-5）：specA 编排裁决落地（混合模式——specA 是 s4/s5 的专项扩展层而非替换，通用骨架保留与 Pipeline 追加语义一致）；身份口径残留清扫（request_credential 工具描述/凭据状态块改为「接收用户主动提供」）；README 版本对齐；组合检索标签修复（主命中与配套由主命中数边界判定，i>0 主命中不再被误标「配套」）',
+    '修复（logic-invariant 代理环境自测假失败）：显式直连 opener（env 代理把 127.0.0.1 canned 服务转发致 502 的 selftest 假失败，代理与无代理环境双验证通过）',
+  ]},
+  { v: 'v5.8.0', date: '2026-11-19', items: [
+    '修复（技能组合检索死路径·审计 Top#1）：load_skill 主命中后自动扩展 depends_on/handoff_to 配套技能（标注「配套」来源）——原 Bundle 只在零命中才触发且同一查询拿不到展开，配套技能实际从未注入，弱模型因此漏掉 evidence-standard 等关键链路技能',
+    '修复（回环下游断链·审计 Top#4）：loopback 补跑按流水线顺序展开下游连带（s4 补跑 → s5/s6/s7/s8 自动重跑）——新发现不再静默丢失在利用与报告链之外',
+    '增强（身份口径统一·用户决策）：v5.8.0 全链路「有则用、无则默认无、不主动询问」——移除身份索取闭环（loop-core/s4/s5/router/roe/三态块/技能 8 处收敛），认证后项无身份即按三行口径移交；用户主动提供的凭据经 request_credential 入库即转带态测试',
+    '增强（子代理注入阶段头·审计 Top#7）：子代理系统消息携带所属阶段头完整步骤与纪律——复杂任务派发不再退化为通用扫描',
+    '增强（执行卡驱动·审计 Top#2）：s3 筛查矩阵「假设」行强制附一行式执行卡（入口定位→首探针→阳性信号→阴性信号→停止阈值≤6 请求/候选）；s4 按执行卡直接投递，不从零推理',
+    '增强（结构化阶段摘要·审计 Top#8）：complete_stage 摘要格式升级为「测试范围→关键结果（endpoint/假设/阴阳信号/状态/下个动作）」——下游阶段与报告直接消费，弱模型不再从标题重建上下文',
+    '增强（IDOR 语义判据·审计 Top#6）：idor-baseline 匿名 200 非空且缺对象归属证据时降级 candidate_idor_anonymous（owner-grep 采集/双账号差分/业务核对三选一后才能 record_finding）——公开资源匿名可读不再误报',
+    '增强（收口门证据语义检查·审计 Top#9）：deterministicGate 新增 vulnerableEvidenceIssues——覆盖矩阵 vulnerable/no_issue_found 条目必须关联证据（notes 引用 evidence/POC/判据或证据库含该端点），「留痕齐全测试不充分」升级为确定性拦截',
+    '新增（AI/竞态 Harness·审计 Top#10）：llm-top10 Canary 五处标准注入位模板（系统提示/RAG/工具描述/用户历史/输出过滤器，grep 级判定零模型推理）+ 多轮行为对照流程；race-condition 状态读回三步模板（前置态→并发窗口→后置态 diff，三件齐才确证）',
+    '修复（logic-invariant 代理环境假失败）：显式直连 opener——env 代理把 127.0.0.1 canned 服务转发致 502 的 selftest 假失败（实证）',
+  ]},
+  { v: 'v5.7.5', date: '2026-11-19', items: [
+    '修复（LLM 重试跨度不足·实证事故）：VM 出口 UDP DNS 丢包窗口为分钟级，此前 LLM 请求级重试仅 3 次尝试（退避 2s/4s，总跨度 ~40s）——s1 正常收口后 s2 首个 LLM 调用撞上窗口，lookup i/o timeout 三连败阶段失败项目终止；扩至 5 次尝试（退避 2s/5s/10s/20s，累计等待 37s，连同请求耗时总跨度 ~2min）覆盖典型抖动窗口。retryable 仅网络/5xx/429 类不变——真失败（4xx 参数错误）首轮即返，不拖慢确定性失败',
+    '增强（容器 DNS 绕行·部署环境层）：compose dns: 直查公共 DNS（223.5.5.5/119.29.29.29）——LLM 直连依赖容器 DNS（127.0.0.11→宿主 stub→上游三级转发），跳过宿主 stub 链路减少一整级 UDP 丢包面；钉 IP 方案评估后否决（deepseek 为 EdgeOne CDN，两日实测轮换三个源站 IP——钉死会在 CDN 轮换后静默失效，比 DNS 超时更难排查），理由与再评估条件随部署注释留痕',
+  ]},
   { v: 'v5.7.4', date: '2026-11-18', items: [
     '增强（前端 API 响应守卫·实证事故）：api 统一封装的 r.json() 裸解析——服务端老版本对新增路由回纯文本 404（「404 page not found」）、网关/代理回 HTML 错误页时，JSON SyntaxError 原文（Unexpected non-whitespace character after JSON at position 4）被直接抛给用户，看不出根因（实证：v5.4.0 新增的模型测试/拉取路由打到半升级部署的老服务端——前端有按钮、服务端无路由）。改为先 text 后 JSON.parse：解析失败抛出含 HTTP 状态码与响应片段的友好提示，明确指向「前端与服务端版本不一致（请升级服务端）或网关拦截」',
   ]},

@@ -130,7 +130,7 @@ func (r *ROEProfile) Digest() string {
 	}
 	if v, ok := r.Values["identity.auto_register"]; ok {
 		lines = append(lines, "- identity.auto_register="+v+" → "+map[string]string{
-			"deny":  "注册面只评估不注册（身份向客户索取，identity-bootstrapping 一a节）",
+			"deny":  "注册面只评估不注册（v5.8.0：不主动向用户询问身份，有则用无则默认无）",
 			"allow": "可自建测试账号（唯一标记+S7 清理登记）",
 		}[v])
 	}

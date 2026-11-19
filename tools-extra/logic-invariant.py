@@ -32,7 +32,10 @@ def post_json(url, body, cookies=None, timeout=15):
     if cookies:
         req.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        # v5.8.0：显式直连（不遵循 env 代理）——127.0.0.1 canned 服务/内网目标经 env 代理
+        # 转发会 502，实证 selftest 在代理环境下假失败；目标真实出网需求走 run_async 自带通道。
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        resp = opener.open(req, timeout=timeout)
         return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")

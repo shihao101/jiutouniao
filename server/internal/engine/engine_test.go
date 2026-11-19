@@ -403,8 +403,9 @@ func TestChecklistCoverageGate(t *testing.T) {
 		t.Fatalf("3 条未覆盖条目应全部拦截，实际 %d: %v", got, issues)
 	}
 	// C1：覆盖登记 Notes 引用条目文本；C3：Hint 路径被 Endpoint 包含 → 均归账
-	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/sql/number.php", Param: "id", VulnClass: "SQLI", Status: "vulnerable", Notes: "数字型注入 延时确证"})
-	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/dir/dirlist.php", Param: "-", VulnClass: "穿越", Status: "no_issue_found", Notes: "基线正常"})
+	// v5.8.0 证据语义门：结论条目 Notes 需 evidence/POC/判据/请求响应 引用
+	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/sql/number.php", Param: "id", VulnClass: "SQLI", Status: "vulnerable", Notes: "数字型注入延时确证，POC 见 evidence/s4/sqli.txt"})
+	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/dir/dirlist.php", Param: "-", VulnClass: "穿越", Status: "no_issue_found", Notes: "基线请求响应正常（负对照留证 evidence/s4/dir.txt）"})
 	issues = o.deterministicGate(&store.Project{ID: "PC"}, "s4")
 	if got := countContains(issues, "无覆盖登记"); got != 1 {
 		t.Fatalf("C1/C3 归账后应仅剩 C2 未覆盖，实际 %d: %v", got, issues)

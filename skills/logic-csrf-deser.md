@@ -82,7 +82,7 @@ curl -s -b "$CK" http://target/api/state | grep -o "gASV" | head -1
 
 ## 四、越权矩阵（与 api-idor 手册配合）
 
-1. **建矩阵**：角色 × 资源 × 操作（读/写/删），用**客户提供的**两个测试账号（水平越权=两个同权账号；垂直越权=低权+高权各一，经身份索取闭环获得——identity-bootstrapping 一a）分别持有会话；**禁止自动注册（ROE identity.auto_register 默认 deny）**；无凭据时本矩阵整体按无凭证三态路由移交。
+1. **建矩阵**：角色 × 资源 × 操作（读/写/删），用**客户提供的**两个测试账号（水平越权=两个同权账号；垂直越权=低权+高权各一，来自创建页认证会话字段或用户主动提供——identity-bootstrapping v5.8.0 口径）分别持有会话；**禁止自动注册（ROE identity.auto_register 默认 deny）**；无凭据时本矩阵整体按无凭证三态路由移交。
 2. **水平**：A 的会话逐个替换请求中的 `uid/order_id/user_id` 为 B 的资源 ID（遍历 1..N），记录哪些返回 B 的数据。
 3. **垂直**：普通用户会话直接请求管理员功能端点（/admin/*、role 参数改写、Mass Assignment：注册/资料更新时附加 `role=admin` 字段——**注册位 mass assignment 仅 ROE allow 执行；deny 下转 record_vt，同 identity-bootstrapping 一节**）。
 4. **无对象级授权判据**：返回他人数据 200 + 内容可区分 = 确证；仅状态码相同无内容差异不算。

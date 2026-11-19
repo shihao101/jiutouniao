@@ -52,6 +52,9 @@ func matrixTableFixture(omitVerdict map[int]bool, drop []int) string {
 		}
 		if omitVerdict[i] {
 			b.WriteString(fmt.Sprintf("| C-%02d | 触发面摘要 |  | 证据指针 | TH-01 |\n", i))
+		} else if verdict == "假设" {
+			// v5.9.0 执行卡门：假设行附五要素标记（入口/探针/阳性/阴性/停止）
+			b.WriteString(fmt.Sprintf("| C-%02d | 入口: /e%d 首探针: GET?x=probe 阳性: 差异 阴性: 无差异 停止: ≤6 请求 | %s | 证据指针 | TH-01 |\n", i, i, verdict))
 		} else {
 			b.WriteString(fmt.Sprintf("| C-%02d | 触发面摘要 | %s | 证据指针 | TH-01 |\n", i, verdict))
 		}
@@ -322,8 +325,8 @@ func TestV48W4ContextHint(t *testing.T) {
 	if !strings.Contains(out, "身份获取编排（v4.8 W4·v5.1 修订）") || !strings.Contains(out, "[W4-L1]") {
 		t.Fatalf("无凭证+登录面应注入 W4 编排提示")
 	}
-	if !strings.Contains(out, "L1 为评估轨") || !strings.Contains(out, "身份索取闭环") {
-		t.Fatalf("W4 编排提示应含 v5.1 L1 评估轨与索取闭环语义: %s", out[:min(len(out), 600)])
+	if !strings.Contains(out, "L1 为评估轨") || strings.Contains(out, "身份索取闭环") {
+		t.Fatalf("W4 编排提示应含 L1 评估轨且不含索取闭环（v5.8.0 不询问口径）: %s", out[:min(len(out), 600)])
 	}
 	out5 := o.buildContextPack(p, "s5")
 	if strings.Contains(out5, "身份获取编排（v4.8 W4）") {
