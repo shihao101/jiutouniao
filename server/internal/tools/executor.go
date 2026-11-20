@@ -448,10 +448,18 @@ func (e *Executor) Run(ctx context.Context, projectID, command string, timeoutSe
 	// ① Setpgid 独立进程组；② ctx 到期时 Cancel 杀整组（孙进程一并终止）；
 	// ③ WaitDelay=10s 强制 Wait 返回（即使仍有逃逸进程握住管道）。
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// v5.9.1 race 修复：Cancel 闭包此前直接读 cmd.Process——该字段由 os/exec Cmd.Start()
+	// 在 Run() 主 goroutine 中写入，与空闲看门狗 goroutine 并发读构成 data race
+	//（TestV46IdleTimeout race detector 实证）。改为 atomic 容器：Start 后主 goroutine
+	// 填充 pid，看门狗/Cancel 只读原子值。
+	var runPid atomic.Int64
+	killRunGroup := func() {
+		if pid := runPid.Load(); pid > 0 {
+			_ = syscall.Kill(-int(pid), syscall.SIGKILL)
 		}
+	}
+	cmd.Cancel = func() error {
+		killRunGroup()
 		return nil
 	}
 	cmd.WaitDelay = 10 * time.Second
@@ -477,7 +485,7 @@ func (e *Executor) Run(ctx context.Context, projectID, command string, timeoutSe
 	// 实证：某历史任务 searchsploit 更新网络挂死 300s 超时改 91 分钟空转——超时护栏只封上限，
 	// 不封"慢烧"；空闲护栏封"静默慢烧"。长静默任务应走 run_async（后台任务不启用空闲护栏）。
 	var lastActivity int64 = time.Now().UnixNano()
-	idleFired := false
+	var idleFired atomic.Bool // v5.9.1 race 修复：看门狗 goroutine 写 / 主 goroutine 读，改原子
 	if e.idleTimeout > 0 {
 		last := &lastActivity
 		fired := &idleFired
@@ -495,10 +503,8 @@ func (e *Executor) Run(ctx context.Context, projectID, command string, timeoutSe
 					return
 				case <-tick.C:
 					if time.Since(time.Unix(0, atomic.LoadInt64(last))) > e.idleTimeout {
-						if c := cmd.Cancel; c != nil {
-							_ = c() // 杀整组（与 ctx 超时同路径）
-						}
-						*fired = true
+						killRunGroup() // 杀整组（与 ctx 超时同路径；v5.9.1 直连原子 pid，不经 cmd.Cancel）
+						fired.Store(true)
 						return
 					}
 				}
@@ -507,11 +513,17 @@ func (e *Executor) Run(ctx context.Context, projectID, command string, timeoutSe
 	} else {
 		cmd.Stdout, cmd.Stderr = &outBuf, &errBuf
 	}
-	runErr := cmd.Run()
+	// v5.9.1 race 修复：拆分 Start/Wait——Start 后主 goroutine 填充 runPid（atomic），
+	// 看门狗 killRunGroup 只读原子值，与 Start 的写入不再并发。
+	if err := cmd.Start(); err != nil {
+		return &Result{}, err
+	}
+	runPid.Store(int64(cmd.Process.Pid))
+	runErr := cmd.Wait()
 	out := outBuf.Bytes()
 	res := &Result{Stdout: truncate(string(out), e.maxOut), Stderr: truncate(errBuf.String(), min(e.maxOut, 8192))}
 	err := runErr
-	if idleFired {
+	if idleFired.Load() {
 		return res, fmt.Errorf("命令空闲超时（连续 %s 无输出，进程组已终止）——长静默任务请改用 run_async 后台执行", e.idleTimeout)
 	}
 	if ctx.Err() != nil {

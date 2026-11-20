@@ -301,6 +301,26 @@ func (o *Orchestrator) lastStageEnd(p *store.Project) *time.Time {
 	return max
 }
 
+// beginStageRun v5.9.3：阶段进入（首跑/重跑同口径）统一时间语义——
+// StartedAt 首启保护（v5.9.1：重入/断点续跑不覆盖，耗时图反映真实起点）；
+// 重入即清残留 EndedAt（旧收口时间对本次运行无效——不清则首页对账把旧区间重复计入）；
+// LastActiveAt 刷新为本段起点。
+func beginStageRun(state *store.StageState) {
+	now := time.Now()
+	if state.StartedAt == "" {
+		state.StartedAt = now.Format(time.RFC3339)
+	}
+	state.EndedAt = ""
+	state.LastActiveAt = now.Format(time.RFC3339)
+}
+
+// endStageRun v5.9.3：阶段离开 running（done/paused/failed/killed 统一口径）必须落收口时间。
+// 此前 failed/killed 路径从不写 EndedAt——该阶段在首页阶段耗时图与总时长对账中永远缺角。
+func endStageRun(state *store.StageState) {
+	state.EndedAt = time.Now().Format(time.RFC3339)
+	state.LastActiveAt = state.EndedAt
+}
+
 // clientFor 按项目选择模型：项目指定 > 默认 > 兜底。
 func (o *Orchestrator) clientFor(p *store.Project) (llm.Client, string) {
 	// v2.7 A8：项目级故障切换覆盖优先（风控/拒绝后由接管模型继续，直至项目结束）
@@ -447,6 +467,34 @@ func (o *Orchestrator) SetAutoApprove(projectID, policy string) error {
 		}
 	}
 	o.log(p, "", fmt.Sprintf("审批策略已更新：%s", policy))
+	o.bus.Publish(p.ID, "project", p)
+	return nil
+}
+
+// SetPreApproved v6.0.0（用户决策③）：项目预批准档切换（与 SetExecutionProfile 同构——活指针同步防旧快照回写）。
+// none（默认人工）/all（全通过——含提权/横向及后续新增类别）/类别逗号列表（privesc,lateral,persistence）。
+// 切到 all 时联动放行存量待批工单（与 SetAutoApprove→all 同语义，避免执行循环卡死在审批屏障）。
+func (o *Orchestrator) SetPreApproved(projectID, mode string) error {
+	mode = store.NormalizePreApproved(mode) // none=显式关闭预批（合法档）；全无效值也归 none（fail-closed）
+	p, err := o.store.GetProject(projectID)
+	if err != nil {
+		return err
+	}
+	p.PreApproved = mode
+	if err := o.store.SaveProject(p); err != nil {
+		return err
+	}
+	o.liveMu.Lock()
+	if lp, ok := o.liveP[projectID]; ok {
+		lp.PreApproved = mode
+	}
+	o.liveMu.Unlock()
+	if mode == "all" {
+		if n := o.approver.ApprovePending(projectID, "pre-approved-policy-change"); n > 0 {
+			o.log(p, "", fmt.Sprintf("⚙ 预批准已切换为全通过；联动放行 %d 个存量待批工单", n))
+		}
+	}
+	o.log(p, "", fmt.Sprintf("预批准档已更新：%s（仅自动签人工核签环节；治理门照常前置）", mode))
 	o.bus.Publish(p.ID, "project", p)
 	return nil
 }
@@ -650,8 +698,180 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 	if len(bad) == 0 {
 		return false, ""
 	}
+	// v6.0.0（用户决策①）expansion 接线——发现驱动授权扩展，替代「范围外一律静默放弃」：
+	//   deny（默认）       → 维持硬拦（原口径不变）；
+	//   auto               → 立足点已发现的目标直接放行并留痕；
+	//   auto-with-approval → 立足点已发现的目标生成《授权扩展工单》，批准即登记资产放行。
+	//   未发现目标在任何非 deny 档下维持硬拦——范围门不因 expansion 变橡皮章。
+	mode := o.expansionMode(p)
+	if mode != "deny" {
+		discovered := o.filterDiscoveredTargets(p, bad)
+		if len(discovered) > 0 {
+			unknown := subsetDiff(bad, discovered)
+			if mode == "auto" {
+				o.log(p, "", fmt.Sprintf("🔓 范围外目标放行（ROE expansion=auto，留痕）：%v", discovered))
+				if len(unknown) > 0 {
+					return true, fmt.Sprintf("strict_scope=true：范围外且未发现目标 %v 已拦截；已发现目标 %v 按 expansion=auto 放行——请拆分命令只含放行目标后重试。", unknown, discovered)
+				}
+				return false, ""
+			}
+			ticketID := o.ensureScopeExtensionTickets(p, discovered)
+			if len(unknown) > 0 {
+				return true, fmt.Sprintf("strict_scope=true：范围外目标 %v 属立足点发现（expansion=auto-with-approval）——授权扩展工单 %s 已生成/在批，批准后自动登记资产并放行，请先继续其他动作；未发现目标 %v 维持拦截。", discovered, ticketID, unknown)
+			}
+			return true, fmt.Sprintf("strict_scope=true：范围外目标 %v 属立足点发现（expansion=auto-with-approval）——授权扩展工单 %s 已生成/在批，批准后自动登记资产并放行，请先继续其他动作。", discovered, ticketID)
+		}
+	}
 	return true, fmt.Sprintf("strict_scope=true：命令引用范围外目标 %v——已确定性拦截。"+
 		"如属授权范围：先 record_asset 登记该资产再重试；OSINT/工具源误拦请在 config guard.scope_allowlist 扩充。", bad)
+}
+
+// effectiveWritePolicy v6.0.0（通用型三层治理参数）：写策略生效值。
+// ① 部署级 ROE YAML（roe_profile_path 配置时）最高——部署 owner 显式选择，全项目生效（⚠ 混合
+//    生产/靶场部署慎用 full：会波及 production_safe 项目）；
+// ② 未配置 YAML 时按项目执行档派生：isolated_lab→full（快照回滚保障，零配置实战可用）；
+//    production_safe→"unset"（写门不武装——生产写操作按审批矩阵管控，与 v5.9.0 前历史行为一致，
+//    不因升级给生产项目新增确定性拦截面）；
+// ③ 未知档 → unset（fail-safe：不新增拦截面）。"unset" 时 governanceGates 跳过写门。
+func (o *Orchestrator) effectiveWritePolicy(p *store.Project) string {
+	if o.roe != nil {
+		return o.roe.WritePolicy()
+	}
+	if o.profileOf(p) == ProfileIsolatedLab {
+		return "full"
+	}
+	return "unset"
+}
+
+// expansionMode v6.0.0（通用型三层治理参数）：范围扩展语义生效值。roe.go schema 于 v4.6 定义了
+// auto / auto-with-approval / deny 三档，此前从未被消费（死参数）——本函数接线。
+// ① 部署级 YAML 配置了 expansion → 全项目按该值生效；
+// ② YAML 未配置 expansion → 未发现目标维持硬拦的 deny；YAML 配置但值非法 → deny；
+// ③ 未配置部署级 YAML → 按执行档派生：isolated_lab→auto-with-approval（授权跟着发现走，实战型）、
+//    production_safe→deny（生产缺省收紧）。未发现目标在任何档下维持硬拦。
+func (o *Orchestrator) expansionMode(p *store.Project) string {
+	if o.roe != nil {
+		m := strings.ToLower(strings.TrimSpace(o.roe.Values["expansion"]))
+		if m == "auto" || m == "auto-with-approval" {
+			return m
+		}
+		return "deny"
+	}
+	if o.profileOf(p) == ProfileIsolatedLab {
+		return "auto-with-approval"
+	}
+	return "deny"
+}
+
+// filterDiscoveredTargets v6.0.0：判定范围外目标是否属「立足点发现」——在证据链/发现库/时间线
+// 文本中出现过的 host/IP 才可走 expansion 通道（授权跟着发现走；凭空目标不可申请扩展）。
+func (o *Orchestrator) filterDiscoveredTargets(p *store.Project, targets []string) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	var sb strings.Builder
+	if evs, err := o.store.ListEvidence(p.ID); err == nil {
+		for i, e := range evs {
+			if i >= 400 {
+				break // 扫描上限：防超大证据链拖慢逐命令校验
+			}
+			sb.WriteString(e.Input + "\n" + e.Output + "\n")
+		}
+	}
+	if fs, err := o.store.ListFindings(p.ID); err == nil {
+		for _, f := range fs {
+			sb.WriteString(f.Title + "\n" + f.Detail + "\n")
+		}
+	}
+	if tls, err := o.store.ListTimeline(p.ID); err == nil {
+		for i, t := range tls {
+			if i >= 400 {
+				break
+			}
+			sb.WriteString(t.Event + "\n")
+		}
+	}
+	hay := strings.ToLower(sb.String())
+	out := []string{}
+	for _, t := range targets {
+		if t != "" && strings.Contains(hay, strings.ToLower(t)) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// subsetDiff 返回 targets 中不在 subset 里的项（保持原序）。
+func subsetDiff(targets, subset []string) []string {
+	m := map[string]bool{}
+	for _, s := range subset {
+		m[s] = true
+	}
+	out := []string{}
+	for _, t := range targets {
+		if !m[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ensureScopeExtensionTickets v6.0.0：为目标生成《授权扩展工单》（每目标一张，幂等——已有
+// pending 工单直接复用）。批准回调 ApplyScopeExtension 登记资产 → scopeGate 白名单自动纳入。
+func (o *Orchestrator) ensureScopeExtensionTickets(p *store.Project, targets []string) string {
+	first := ""
+	for _, t := range targets {
+		dup := false
+		if aps, err := o.store.ListApprovals(p.ID); err == nil {
+			for _, ap := range aps {
+				if ap.Kind == "scope_extension" && ap.Target == t && ap.Status == "pending" {
+					dup = true
+					break
+				}
+			}
+		}
+		if dup {
+			continue
+		}
+		ap := &store.Approval{
+			ProjectID: p.ID, Stage: "s6", Risk: "L2", Status: "pending", Mode: "manual",
+			Kind: "scope_extension", Target: t,
+			Action: fmt.Sprintf("【授权扩展】允许访问范围外目标 %s（expansion=auto-with-approval；该目标已在立足点发现证据中出现）。批准即登记资产并放行后续访问；拒绝则该目标维持「只记录不访问」。", t),
+		}
+		if id, err := o.store.AddApproval(ap); err == nil {
+			o.bus.Publish(p.ID, "approval", ap)
+			o.log(p, "", fmt.Sprintf("🎫 已生成授权扩展工单 %s：目标 %s（批准后自动登记资产放行）", id, t))
+			if first == "" {
+				first = id
+			}
+		}
+	}
+	if first == "" {
+		first = "(已有在批工单)"
+	}
+	return first
+}
+
+// ApplyScopeExtension v6.0.0：授权扩展工单批准回调——目标登记资产台账（scopeGate 白名单
+// 自动纳入 ListAssets），时间线留痕；重复登记无害（Asset 为追加式台账）。
+func (o *Orchestrator) ApplyScopeExtension(projectID, target string) error {
+	p, err := o.store.GetProject(projectID)
+	if err != nil {
+		return err
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("扩展目标为空")
+	}
+	if _, err := o.store.AddAsset(&store.Asset{
+		ProjectID: projectID, Stage: "s6", Type: "scope-extension", Value: target,
+		Detail: "v6.0.0 授权扩展工单批准登记——scopeGate 白名单自动纳入",
+	}); err != nil {
+		return err
+	}
+	o.log(p, "", fmt.Sprintf("🔓 授权扩展生效：目标 %s 已登记资产，后续访问不再被范围门拦截", target))
+	o.bus.Publish(p.ID, "project", p)
+	return nil
 }
 
 // writePolicyGate v5.9.0（方案 P0-1）：ROE 写策略确定性门（existence-proof 档）。
@@ -674,12 +894,12 @@ func (o *Orchestrator) writePolicyGate(p *store.Project, stageID, command, chann
 	}
 	for _, wp := range writePatterns {
 		if strings.Contains(lc, wp) {
-			o.log(p, stageID, fmt.Sprintf("⛔ ROE 写策略拦截（existence-proof，%s 通道）：命令含写语义", channel))
+			o.log(p, stageID, fmt.Sprintf("⛔ ROE 写策略拦截（write_policy=existence-proof，%s 通道）：命令含写语义", channel))
 			_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command",
 				Input:  truncateText(command, 200),
-				Output: "被 ROE 写策略门拦截（write_policy=existence-proof：写操作仅做存在性证明）。如目标为隔离靶场请切 isolated_lab 档或调整 ROE write_policy=full。",
+				Output: "被 ROE 写策略门拦截（write_policy=existence-proof：写操作仅做存在性证明）。isolated_lab 档自动获得 full 写策略（v6.0.0 派生）；部署级 YAML 可显式覆盖。",
 				Risk:   tools.L1Write, ApprovedBy: "roe-write-policy-gate"})
-			return true, fmt.Sprintf("ROE 写策略拦截（write_policy=existence-proof）：该命令含写语义（命中 %s）。写操作仅做存在性证明；如属隔离靶场请切换执行档或调整 ROE。", wp)
+			return true, fmt.Sprintf("ROE 写策略拦截（write_policy=existence-proof）：该命令含写语义（命中 %s）。写操作仅做存在性证明；如属隔离靶场请切换执行档（isolated_lab 自动获得 full 写策略），或由部署级 ROE YAML 显式覆盖。", wp)
 		}
 	}
 	return false, ""
@@ -691,10 +911,11 @@ func (o *Orchestrator) writePolicyGate(p *store.Project, stageID, command, chann
 // 并统一留证（证据链可回溯每一条被拦动作）。skipProfile 供 install_tool 使用：
 // 安装 mysqldump 等客户端本身是合规基建动作，profile 约束其「使用」而非「安装」。
 func (o *Orchestrator) governanceGates(p *store.Project, stageID, command, channel string, skipProfile bool) string {
-	// v5.9.0（方案 P0-1）：ROE WritePolicy 确定性写门——existence-proof（默认）档下，
-	// 命令含写语义时在审批前确定性拦截（此前 WritePolicy 只进 Digest 上下文，引擎门
-	// 未消费——审计 P1：审批策略配 all 时被架空）。full 档（靶场/评测）不受此门限制。
-	if o.roe != nil && o.roe.WritePolicy() != "full" {
+	// v5.9.0（方案 P0-1）/ v6.0.0（通用型三层治理参数）：ROE WritePolicy 确定性写门——
+	// 生效值取 effectiveWritePolicy（部署级 YAML > 执行档派生 > unset）。existence-proof 档下
+	// 命令含写语义时在审批前确定性拦截（审批策略配 all 时不再被架空）；full/unset 档不走此门
+	// （unset=未注册部署级写策略，生产写操作按审批矩阵管控，历史行为不变）。
+	if wpEff := o.effectiveWritePolicy(p); wpEff != "full" && wpEff != "unset" {
 		if blocked, msg := o.writePolicyGate(p, stageID, command, channel); blocked {
 			return msg
 		}
@@ -1006,6 +1227,7 @@ func (o *Orchestrator) CreateProject(in *store.Project) (*store.Project, error) 
 		Contact: in.Contact, SuccessCriteria: in.SuccessCriteria,
 		AuthInfo: in.AuthInfo, StrictScope: in.StrictScope, BudgetTokens: in.BudgetTokens,
 		Authorized: in.Authorized, AutoApprove: in.AutoApprove,
+		PreApproved: in.PreApproved, // v6.0.0：预批准档随项目持久化（store 层归一化，缺省 none）
 		// v5.4.0 修复：ModelID 此前被漏拷——创建页选择模型静默失效（32/32 项目 model_id 全空，
 		// 全部回退默认模型），clientFor 读到空值不报错，用户无从察觉。补上即修复。
 		ModelID:          in.ModelID,
@@ -1041,6 +1263,7 @@ func (o *Orchestrator) StartProject(projectID string) error {
 	o.mu.Unlock()
 
 	p.Status = "running"
+	p.FinishedAt = "" // v5.9.3：重跑/续跑清残留终态时间（实证：finished_at 残留上次收口，首页总时长被冻结成 36m14s 且误显示 ⏱）
 	if p.StartedAt == "" {
 		p.StartedAt = time.Now().Format(time.RFC3339) // v2.6：首次启动时间（断点续跑保留，仪表盘运行时长基准）
 	}
@@ -1093,6 +1316,7 @@ func (o *Orchestrator) RunStage(projectID, stageID string) error {
 	o.running[projectID] = cancel
 	o.mu.Unlock()
 	p.Status = "running"
+	p.FinishedAt = "" // v5.9.3：手动重跑同样清残留终态时间（与 Start 同口径）
 	if p.StartedAt == "" {
 		p.StartedAt = time.Now().Format(time.RFC3339) // v2.6：首次启动时间（手动重跑同样记录）
 	}
@@ -1419,7 +1643,8 @@ func (o *Orchestrator) applyPostExploitGate(p *store.Project, stageID string, st
 	}
 	state.Status = "skipped"
 	state.Summary = "后渗透未勾选（创建时用户决策）：提权/横向/权限维持/云逃逸/存量排查整段跳过；如需执行可在阶段流水线手动重跑 s6"
-	state.EndedAt = time.Now().Format(time.RFC3339)
+	// v5.9.1：skipped 不赋 StartedAt/EndedAt——跳过不是运行（此前 ended 有值 started 为空，
+	// 首页阶段耗时图对该阶段显示 0/NaN）。
 	_ = o.store.SaveProject(p)
 	o.bus.Publish(p.ID, "project", p)
 	o.log(p, stageID, "⏭ s6 后渗透跳过（创建时未勾选 post_exploit）——范围决策非漏测")
@@ -1439,7 +1664,9 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 	state.Status = "running"
 	state.Iterations = 0
 	state.Summary = "" // 清空上次（失败）残留摘要
-	state.StartedAt = time.Now().Format(time.RFC3339)
+	// v5.9.1 首启保护 + v5.9.3 重跑清残留收口时间（beginStageRun 统一口径：StartedAt 不覆盖，
+	// 旧 EndedAt 即刻作废——否则重跑期间阶段带旧收口时间，首页对账把旧区间重复计入）。
+	beginStageRun(state)
 	_ = o.store.SaveProject(p)
 	o.bus.Publish(p.ID, "stage", map[string]any{"stage": stageID, "status": "running"})
 	o.log(p, stageID, fmt.Sprintf("▶ 阶段[%s] %s 启动", stageID, head.Name))
@@ -1468,6 +1695,7 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 	for iter := 0; iter < budget; iter++ {
 		if ctx.Err() != nil {
 			state.Status = "killed"
+			endStageRun(state) // v5.9.3：熔断收口时间落盘（此前 killed 无 EndedAt，首页对账缺角）
 			_ = o.store.SaveProject(p)
 			return ctx.Err()
 		}
@@ -1479,6 +1707,7 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 		if tokBudget > 0 && o.projectTokens(p.ID) >= tokBudget {
 			state.Status = "failed"
 			state.Summary = "token 预算耗尽（max_project_tokens）"
+			endStageRun(state) // v5.9.3：失败收口时间落盘（此前 failed 无 EndedAt，首页对账缺角）
 			_ = o.store.SaveProject(p)
 			o.log(p, stageID, "⛔ token 预算耗尽，阶段中止（预算护栏）")
 			return fmt.Errorf("token 预算耗尽")
@@ -1559,11 +1788,13 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 			if ctx.Err() != nil {
 				state.Status = "killed"
 				state.Summary = "项目已熔断（一键熔断/外部中止）"
+				endStageRun(state) // v5.9.3
 				_ = o.store.SaveProject(p)
 				return ctx.Err()
 			}
 			state.Status = "failed"
 			state.Summary = "LLM 调用失败: " + err.Error()
+			endStageRun(state) // v5.9.3
 			_ = o.store.SaveProject(p)
 			o.log(p, stageID, "LLM 调用失败: "+err.Error())
 			log.Printf("[stage %s] LLM 调用失败: %v", stageID, err) // stdout 留痕（docker logs 可查）
@@ -1642,6 +1873,7 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 	//（S8 收口门强制复核，不无声放行；如需深化仍可手动重跑本阶段）。
 	if ctx.Err() != nil {
 		state.Status = "killed"
+		endStageRun(state) // v5.9.3
 		_ = o.store.SaveProject(p)
 		return ctx.Err()
 	}
@@ -1660,6 +1892,7 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 	}
 	if ctx.Err() != nil {
 		state.Status = "killed"
+		endStageRun(state) // v5.9.3
 		_ = o.store.SaveProject(p)
 		return ctx.Err()
 	}
@@ -1680,7 +1913,7 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 	if o.cfg.Engine.BudgetExhaustedPolicy != "auto_close" {
 		state.Status = "paused"
 		state.PauseReason = "token/迭代预算耗尽（可提升 max_stage_iterations 或项目 budget_tokens 后重跑续接）"
-		state.EndedAt = time.Now().Format(time.RFC3339)
+		endStageRun(state)
 		if len(readyItems) > 0 || len(l2Items) > 0 {
 			state.Summary = fmt.Sprintf("迭代轮次耗尽，阶段暂停（paused）等待续跑：已收割在途产出（就绪未投递 %d 项、已批未用 %d 项已登记台账），未完成部分不标记完成", len(readyItems), len(l2Items))
 		} else {
@@ -2699,7 +2932,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 				state.Deliverables = append(state.Deliverables, r7File)
 			}
 		}
-		state.EndedAt = time.Now().Format(time.RFC3339)
+		endStageRun(state)
 		_ = o.store.SaveProject(p)
 		o.bus.Publish(p.ID, "stage", map[string]any{"stage": stageID, "status": "done", "summary": state.Summary, "deliverables": state.Deliverables})
 		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "stage", Input: "阶段收口", Output: state.Summary + "\n产出文件: " + strings.Join(freshPaths(fresh), ", "), ApprovedBy: "auto"})
@@ -3581,15 +3814,46 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 	}
 	// v5.6.0 凭证状态三态上下文（通用型：所有阶段按 S0/S1/S2 差异化注入，审计④-13）
 	b.WriteString(o.credentialStateBlock(p))
+	// v6.0.0（用户决策④）治理口径贯通：注入项目实际执行档与范围扩展语义。此前引擎知道
+	// p.ExecutionProfile 而上下文从未携带——模型按 loop-core「默认 production_safe」自我设限
+	// （实证：两个 isolated_lab 项目全程自称 production_safe、把允许动作标「禁止」、s6 提权 0 次
+	// 评估级）。注入后模型行为与引擎门同源；引擎门照旧逐动作强制，本块只是消除信息差，不是放松限制。
+	prof := o.profileOf(p)
+	var wpNote string
+	switch o.effectiveWritePolicy(p) {
+	case "full":
+		wpNote = "写操作允许（受控；审批与留证照常，收尾快照恢复）"
+	case "existence-proof":
+		wpNote = "写操作仅做存在性证明（截图/计数/哈希），禁止业务数据修改"
+	default:
+		wpNote = "未注册部署级写策略 → 写操作按审批矩阵管控（L1/L2 逐项审批留痕；FORBIDDEN 拒绝）"
+	}
+	switch prof {
+	case ProfileIsolatedLab:
+		b.WriteString("### 治理口径（引擎实际生效·v6.0.0——模型行为以此为准，勿自我设限）\n")
+		b.WriteString("- execution_profile=**isolated_lab**（项目创建时显式声明）→ 本项目允许完整 PoC 链与受控写操作（收尾以快照恢复为准）；仅禁向公网分发测试产物与接触生产数据。loop-core 规则 6 与各头「默认 production_safe」的保守口径在本项目**不适用**——不要把允许的动作标成「禁止」或只做评估级推演。\n")
+	default:
+		b.WriteString("### 治理口径（引擎实际生效·v6.0.0——模型行为以此为准）\n")
+		b.WriteString("- execution_profile=**production_safe** → 生产口径：只做存在性证明（无害回显/随机标记/受控 OOB）；植入/持久化/隧道/新增账号/上传可执行/批量导出/数据修改在全部通道被引擎逐动作确定性拦截。\n")
+	}
+	b.WriteString(fmt.Sprintf("- write_policy=**%s** → %s（v6.0.0 三层治理参数：部署级 YAML > 执行档派生 > unset 缺省）\n", o.effectiveWritePolicy(p), wpNote))
+	switch o.expansionMode(p) {
+	case "auto":
+		b.WriteString("- expansion=auto → 范围外但立足点已发现的目标：可直接访问，引擎留痕；未发现目标仍拦截\n")
+	case "auto-with-approval":
+		b.WriteString("- expansion=auto-with-approval → 范围外但立足点已发现的目标：命令被拦时引擎自动生成《授权扩展工单》，批准后自动登记资产放行——**不要**把这类目标直接标记「范围外放弃」，按工单流程推进\n")
+	default:
+		b.WriteString("- expansion=deny（默认） → 范围外目标只记录不访问（三态处置登记移交）\n")
+	}
+	b.WriteString("\n")
 	// v4.6 T3/H：ROE Profile 运行时含义注入（治理参数化）
 	if o.roe != nil {
 		b.WriteString("### ROE Profile（运行时治理参数，v4.6 §3——引擎已加载的许可口径）\n")
 		b.WriteString(o.roe.Digest() + "\n\n")
 	} else {
-		// v5.1.3 修复⑥：项目未配置 YAML Profile（UI 文本 ROE）时注入默认从严口径——
-		// 此前 Digest 仅 YAML 路径注入，auto_register/write_policy 运行时含义不可见。
-		b.WriteString("### ROE 运行时默认口径（项目未配置 YAML Profile，按平台默认从严执行）\n")
-		b.WriteString("- write_policy=existence-proof → 写操作仅做存在性证明（截图/计数/哈希），禁止业务数据修改\n")
+		// v6.0.0：未配置部署级 YAML——write_policy/expansion 已在上方治理口径块按执行档派生注入
+		// （v5.1.3 修复⑥的 write_policy 行上移）；此处仅补 identity.auto_register 平台默认与数据边界。
+		b.WriteString("### ROE 运行时默认（未配置部署级 YAML Profile）\n")
 		b.WriteString("- identity.auto_register=deny（平台默认） → 注册面只评估不注册（v5.8.0：不主动向用户询问身份——有则用、无则默认无）\n")
 		b.WriteString("- 数据边界 → 生产数据只做存在性证明；自建数据一律只登记移交、不执行删除（v5.1.3 用户政策）\n\n")
 	}

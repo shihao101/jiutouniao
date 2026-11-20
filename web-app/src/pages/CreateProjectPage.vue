@@ -15,8 +15,8 @@
         <input v-model="f.name" placeholder="如：XX 系统 Web 渗透测试">
         <label class="fld">目标（每行一个）*</label>
         <textarea v-model="f.target" rows="3" placeholder="demo.example.com&#10;10.70.160.234&#10;https://chat.example.com（LLM 应用入口）"></textarea>
-        <label class="fld">授权范围（一句话写清目标与边界即可）<button class="small ghost" style="margin-left:8px" @click="resetScope">重置</button></label>
-        <textarea v-model="f.scope" rows="2" placeholder="如：授权 test.example.com 全部子域与 80/443 端口；第三方组件与生产数据库除外"></textarea>
+        <label class="fld">授权范围（一句话写清目标与边界即可；v6.0.0 支持授权语义——内网资产不必事先枚举）<button class="small ghost" style="margin-left:8px" @click="resetScope">重置</button></label>
+        <textarea v-model="f.scope" rows="2" placeholder="如：授权 test.example.com 全部子域与 80/443 端口，含立足点可达内网资产的受控横向（逐项审批）；第三方组件与生产数据库除外"></textarea>
         <label class="fld">测试规则 ROE（一句话写清禁区与纪律即可）<button class="small ghost" style="margin-left:8px" @click="resetRoe">重置</button></label>
         <textarea v-model="f.roe" rows="3"></textarea>
         <label class="fld">测试目的 / 成功标准（一句话即可）<button class="small ghost" style="margin-left:8px" @click="resetSuccess">重置</button></label>
@@ -66,6 +66,7 @@
           </div>
         </div>
         <label v-if="f.profile==='isolated_lab'" class="checkline"><input type="checkbox" v-model="f.labAck" style="width:auto">隔离靶场确认（可快照回滚，收尾以快照恢复为准）</label>
+        <label v-if="f.profile==='isolated_lab'" class="checkline" title="v6.0.0 预批准全通过：提权/横向等全部审批工单自动通过（含后续新增类别）；执行档/写门/范围门等确定性治理门照常前置，一个都绕不过。仅限授权充分的隔离靶场。"><input type="checkbox" v-model="f.preAll" style="width:auto">预批准全通过（靶场提权/横向免逐单审批）</label>
         <label class="checkline" title="S6：提权 / 横向 / 权限维持演示 / 云容器逃逸 / 存量排查；默认不执行，不勾选则 S5 后直接收尾报告（s6 标记范围决策跳过，可手动重跑）"><input type="checkbox" v-model="f.postExploit" style="width:auto">后渗透阶段 S6（默认不执行）</label>
         <label class="checkline" title="只测给定目标，范围外线索只记录不访问"><input type="checkbox" v-model="f.strict" style="width:auto">严格限定范围</label>
         <label class="checkline" title="九头按序自动推进"><input type="checkbox" v-model="f.autostart" style="width:auto">创建后立即启动</label>
@@ -113,7 +114,7 @@ function resetScope() { f.scope = DEFAULT_SCOPE }
 function resetRoe() { f.roe = DEFAULT_ROE }
 function resetSuccess() { f.success = DEFAULT_SUCCESS }
 
-const f = reactive({ name: '', target: '', scope: '', roe: DEFAULT_ROE, success: '', auth: '', testType: '黑盒', specs: new Set(), modelId: '', policy: 'manual', profile: 'production_safe', labAck: false, postExploit: false, strict: true, autostart: true, authorized: false })
+const f = reactive({ name: '', target: '', scope: '', roe: DEFAULT_ROE, success: '', auth: '', testType: '黑盒', specs: new Set(), modelId: '', policy: 'manual', profile: 'production_safe', labAck: false, preAll: false, postExploit: false, strict: true, autostart: true, authorized: false })
 const models = reactive([])
 const creating = ref(false) // 创建进行中防重复提交（双击会产出两个同内容项目并双双自动开工）
 
@@ -136,6 +137,7 @@ async function create() {
       name: f.name.trim(), target: f.target.trim(), scope: f.scope, roe: f.roe,
       success_criteria: f.success, test_type: f.testType, auth_info: f.auth,
       strict_scope: f.strict, model_id: f.modelId, auto_approve: f.policy,
+      pre_approved: (f.profile === 'isolated_lab' && f.preAll) ? 'all' : 'none', // 切档后残留勾选不外泄（安全边界）
       execution_profile: f.profile,
       post_exploit: f.postExploit,
       authorized: f.authorized, specializations: [...f.specs]

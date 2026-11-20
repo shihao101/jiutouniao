@@ -61,6 +61,7 @@ type Project struct {
 	Authorized       bool                   `json:"authorized"`        // 创建时勾选授权确认（视为已授权开工）
 	ModelID          string                 `json:"model_id"`          // 本项目使用的模型（空=默认模型）
 	AutoApprove      string                 `json:"auto_approve"`      // 审批策略：manual（默认，全部人工）/l1（仅 L1 自动）/all（L1+L2 自动）；空=全局配置
+	PreApproved      string                 `json:"pre_approved"`      // v6.0.0：预批准档 none（默认人工）/all（全通过——含提权/横向及后续新增类别）/逗号类别（privesc,lateral,persistence）；仅自动签人工核签环节，治理门照常前置
 	Specializations  []string               `json:"specializations"`   // A / B1 / B2
 	Status           string                 `json:"status"`            // created/running/paused/killed/done
 	CurrentStage     string                 `json:"current_stage"`
@@ -87,6 +88,9 @@ type StageState struct {
 	// v5.5.0：预算耗尽暂停语义（budget_exhausted_policy=pause 时）——阶段可续跑而非被代收口为 done。
 	// PauseReason 记录暂停原因，人工提升预算或手动重跑该阶段后从 pending 继续。
 	PauseReason string `json:"pause_reason,omitempty"`
+	// v5.9.1：最后活动时间（每次 runStage 进入刷新；StartedAt 保持首次进入——
+	// 重入/断点续跑不覆盖，阶段耗时图反映真实起点）。
+	LastActiveAt string `json:"last_active_at,omitempty"`
 }
 
 // FindingClaim v4.6 E1：结论-证据判据串（断言与所引文件内容的机械绑定）。
@@ -148,13 +152,15 @@ type Approval struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"project_id"`
 	Stage       string     `json:"stage"`
-	Action      string     `json:"action"` // 待批动作描述（含命令/文件）
-	Risk        string     `json:"risk"`   // L1/L2
-	Mode        string     `json:"mode"`   // 决策路径：manual（人工批准）/auto（策略自动批准）
-	Status      string     `json:"status"` // pending/approved/rejected/cancelled
+	Action      string     `json:"action"`               // 待批动作描述（含命令/文件）
+	Risk        string     `json:"risk"`                 // L1/L2
+	Mode        string     `json:"mode"`                 // 决策路径：manual（人工批准）/auto（策略自动批准）
+	Status      string     `json:"status"`               // pending/approved/rejected/cancelled
+	Kind        string     `json:"kind,omitempty"`       // v6.0.0：scope_extension=授权扩展工单（批准即登记资产放行，scopeGate 白名单自动纳入）
+	Target      string     `json:"target,omitempty"`     // v6.0.0：scope_extension 工单的扩展目标（host/IP）
 	RequestedAt time.Time  `json:"requested_at"`
 	DecidedAt   *time.Time `json:"decided_at,omitempty"`
-	DecidedBy   string     `json:"decided_by,omitempty"` // web-operator / auto-policy
+	DecidedBy   string     `json:"decided_by,omitempty"` // web-operator / auto-policy / pre-approved(...)
 }
 
 // EvidenceRecord 证据链单条记录（对应贯穿线一：全程记录）。
@@ -314,10 +320,37 @@ func (s *Store) CreateProject(p *Project) error {
 	if p.ExecutionProfile != "isolated_lab" {
 		p.ExecutionProfile = "production_safe"
 	}
+	// v6.0.0：预批准档缺省 none（fail-closed——空/无效值一律回退人工审批，绝不静默放行）
+	p.PreApproved = NormalizePreApproved(p.PreApproved)
 	if p.StageStates == nil {
 		p.StageStates = map[string]*StageState{}
 	}
 	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketProjects, p.ID, p) })
+}
+
+// PreApprovedCategories v6.0.0：预批准类别白名单（"all"=全通过，天然覆盖提权/横向及后续新增类别）。
+var preApprovedValid = map[string]bool{"privesc": true, "lateral": true, "persistence": true}
+
+// NormalizePreApproved 归一化预批准档：none（默认）/all/类别逗号列表；无效项剔除，全无效回 none。
+func NormalizePreApproved(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" || v == "none" {
+		return "none"
+	}
+	if v == "all" {
+		return "all"
+	}
+	out := []string{}
+	for _, c := range strings.Split(v, ",") {
+		c = strings.TrimSpace(c)
+		if preApprovedValid[c] {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return "none"
+	}
+	return strings.Join(out, ",")
 }
 
 func (s *Store) SaveProject(p *Project) error {

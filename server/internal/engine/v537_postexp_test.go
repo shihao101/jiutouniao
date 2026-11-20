@@ -18,7 +18,8 @@ func TestV537PostExploitGate(t *testing.T) {
 	if !o.applyPostExploitGate(p, "s6", state) {
 		t.Fatal("未勾选时 s6 应被跳过")
 	}
-	if state.Status != "skipped" || !strings.Contains(state.Summary, "未勾选") || state.EndedAt == "" {
+	// v5.9.1：skipped 无 StartedAt/EndedAt（跳过不是运行）——断言同步
+	if state.Status != "skipped" || !strings.Contains(state.Summary, "未勾选") || state.EndedAt != "" {
 		t.Fatalf("skipped 状态/留痕不完整: %+v", state)
 	}
 	got, _ := st.GetProject(p.ID)

@@ -20,7 +20,8 @@
     "spill_bytes": 16384,
     "context_budget_tokens": 100000,
     "context_keep_recent": 10,
-    "barrier_timeout_sec": 1800
+    "barrier_timeout_sec": 1800,
+    "roe_profile_path": ""
   },
   "auth_token": "",
   "admin_user": "admin",

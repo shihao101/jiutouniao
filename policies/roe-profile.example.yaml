@@ -1,0 +1,32 @@
+# v6.0.0（用户决策②·通用型三层治理参数）：部署级 ROE Profile 可选覆盖模板。
+# ── 三层语义（server/internal/engine/orchestrator.go effectiveWritePolicy/expansionMode）──
+#   第 1 层（本文件，最高）：部署 owner 显式配置 roe_profile_path 后全项目生效——⚠ 混合生产/靶场
+#       部署慎用 full：会波及 production_safe 项目；
+#   第 2 层（默认生效，零配置）：按项目执行档自动派生——isolated_lab → write_policy=full +
+#       expansion=auto-with-approval；production_safe → existence-proof + deny；
+#   第 3 层（兜底）：未知/非法值一律回 existence-proof + deny（fail-closed）。
+# ── 启用方式：config.json → engine.roe_profile_path 设为 "policies/roe-profile.yaml"
+#    （把本文件复制为该路径后按部署环境修改），重启生效；非法 YAML 启动即失败（fail-fast）。
+# ── schema：server/internal/engine/roe.go roeLeafSchema（必填六节 profile/write_policy/scope/
+#    waf_policy/identity/outbound；值正则校验，非法即启动失败）。
+profile: isolated_lab
+
+write_policy: full            # full=写操作允许（仍受清理铁律与取证纪律约束）；引擎写门按此放行
+
+scope:                        # 必填节；引擎范围仍由 strict_scope + 资产台账 + guard.scope_allowlist 决定
+  note: "按部署环境填写授权资产概述（仅语义描述，范围门不消费本值）"
+
+expansion: auto-with-approval # 范围外但立足点已发现的目标 → 自动生成《授权扩展工单》，批准即登记资产放行
+                              # （auto=直接放行留痕 / deny=只记录不访问；未发现目标在任何档下维持硬拦）
+
+waf_policy:
+  offline_challenge: deny     # 瑞数类离线挑战未授权，走对策阶梯上级
+
+identity:
+  auto_register: allow        # 靶场允许自建测试账号（唯一标记 + S7 清理登记）；生产部署建议 deny
+  cred_attack:
+    dict_size: 100000         # 弱口令字典上限
+
+outbound:
+  oob_callback: allow         # 受控 OOB 回连（interactsh）
+  residential_proxy: deny     # 单出口策略

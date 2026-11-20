@@ -3,4 +3,4 @@
 package version
 
 // App 当前版本号。每次发版（含 Bug 修复）必须递增，并同步补充 Web「更新记录」页。
-const App = "5.9.0"
+const App = "6.0.0"

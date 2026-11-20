@@ -81,12 +81,28 @@ function fmtDur(ms) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60
   return (h ? h + 'h' : '') + m + 'm' + ss + 's'
 }
+// v5.9.3：阶段耗时统一口径——首页总时长、「阶段耗时（分钟）」图、阶段列表右侧耗时共用本函数，
+// 三处严格对账。阶段区间 = started_at →（ended_at || status=running ? now : last_active_at）；
+// 未运行阶段（skipped/未跑）计 0；failed/killed 收口时间由引擎 v5.9.3 起统一落盘（endStageRun）。
+function stageMs(st, at) {
+  if (!st.started_at) return 0
+  const a = new Date(st.started_at).getTime()
+  let b
+  if (st.ended_at) b = new Date(st.ended_at).getTime()
+  else if (st.status === 'running') b = at
+  else b = st.last_active_at ? new Date(st.last_active_at).getTime() : a
+  return Math.max(0, b - a)
+}
 const runtime = computed(() => {
   const p = projects.detail?.project
   if (!p || (!p.started_at && !p.created_at)) return null
-  const a = new Date(p.started_at || p.created_at).getTime()
-  const b = p.finished_at ? new Date(p.finished_at).getTime() : now.value
-  return { text: fmtDur(b - a), done: !!p.finished_at }
+  // v5.9.3：总时长 = 各阶段耗时之和（与「阶段耗时」图同一口径，不再显示第二个「纯工作」时间）；
+  // done 判定以项目状态为准——重跑残留 finished_at 的历史项目不再被冻结
+  // （实证：光宇游戏项目 status=running 而 finished_at 残留上次收口，首页显示 36m14s 且真实已跑 2h+）。
+  let ms = 0
+  for (const [, st] of projects.stageEntries) ms += stageMs(st, now.value)
+  if (ms <= 0) return null
+  return { text: fmtDur(ms), done: ['done', 'failed', 'killed'].includes(p.status) }
 })
 
 const statList = computed(() => {
@@ -151,9 +167,9 @@ const stageChart = computed(() => {
   const nowMs = now.value
   const items = projects.stageEntries.map(([sid, st]) => {
     if (!st.started_at) return null
-    const a = new Date(st.started_at).getTime()
-    const b = st.ended_at ? new Date(st.ended_at).getTime() : nowMs
-    const m = Math.max(1, Math.round((b - a) / 60000))
+    // v5.9.4：与总时长同口径（stageMs）；1 位小数分钟（0.1 分=6000ms）——条形求和可与总时长精确对账
+    // （v5.9.3 误写 ms/100/10 得到的是秒，图上数值放大 60 倍：9.5 分钟显示成 570 分）
+    const m = Math.max(0.1, Math.round(stageMs(st, nowMs) / 6000) / 10)
     return { name: (STAGE_NAMES[sid] || sid), value: m, running: st.status === 'running' }
   }).filter(Boolean)
   if (!items.length) return null
@@ -174,8 +190,7 @@ function rows(c, colors) {
 }
 function dur(st) {
   if (!st.started_at) return '—'
-  const a = new Date(st.started_at), b = st.ended_at ? new Date(st.ended_at) : new Date()
-  const m = Math.round((b - a) / 60000)
+  const m = Math.round(stageMs(st, now.value) / 60000) // v5.9.3：与总时长/图表同口径
   return m >= 60 ? `${Math.floor(m / 60)}h${m % 60}m` : m + 'm'
 }
 </script>

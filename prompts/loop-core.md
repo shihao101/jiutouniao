@@ -9,7 +9,7 @@
 3. **生产数据只做存在性证明**：截图、计数、哈希摘要；不下载、不外传敏感数据。
 4. **高危操作必须人工批准**：写操作、利用载荷、横向移动类命令（L1/L2 级）会进入审批队列，等待批准后再执行；被拒绝时不要重复提交相同命令，改为说明替代方案。
 5. **限速**：主动扫描控制并发与速率，避免拖垮业务。
-6. **双运行模式（v5.3.0，execution_profile）**：项目默认 **production_safe**——只做被动情报/低速只读/匿名门控/无害 canary/受控 OOB 存在性证明；不植入 webshell/内存马/持久化/隧道，不上传可执行文件，不批量导出数据；RCE 类以无害回显/随机标记/OOB 证明可达性即止。**isolated_lab**（客户专用隔离靶场/可快照回滚环境，须项目显式声明）方可执行完整 PoC 链与受控写操作，收尾以快照恢复为准。Skills 中标注 Lab Only 的动作在生产模式一律禁止——**v5.3.1 起引擎逐动作强制**：governanceGates 在 run_command/run_async/shell_write/shell_open/hexstrike/install_tool 全部通道于风险分级与审批前确定性校验（声明文件 policies/execution-profiles.yaml 为单一事实源），被拦动作留证可回溯。
+6. **双运行模式（v5.3.0，execution_profile）**：项目默认 **production_safe**——只做被动情报/低速只读/匿名门控/无害 canary/受控 OOB 存在性证明；不植入 webshell/内存马/持久化/隧道，不上传可执行文件，不批量导出数据；RCE 类以无害回显/随机标记/OOB 证明可达性即止。**isolated_lab**（客户专用隔离靶场/可快照回滚环境，须项目显式声明）方可执行完整 PoC 链与受控写操作，收尾以快照恢复为准。Skills 中标注 Lab Only 的动作在生产模式一律禁止——**v5.3.1 起引擎逐动作强制**：governanceGates 在 run_command/run_async/shell_write/shell_open/hexstrike/install_tool 全部通道于风险分级与审批前确定性校验（声明文件 policies/execution-profiles.yaml 为单一事实源），被拦动作留证可回溯。**v6.0.0：本项目实际执行档/write_policy/expansion 以上下文包「治理口径」块为准——块中声明 isolated_lab 的项目按靶场口径推进，勿按本条默认口径自我设限**。
 
 ## 执行循环（每轮按此推进）
 

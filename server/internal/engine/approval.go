@@ -70,6 +70,36 @@ func autoOK(policy, risk string) bool {
 	return false
 }
 
+// preApprovedFor 取项目预批准档（v6.0.0）：读项目字段并归一化（store 层已归一，此处防御性再校验——
+// 运行中旧快照/异常输入一律回 none，fail-closed）。
+func (a *Approver) preApprovedFor(projectID string) string {
+	if p, err := a.store.GetProject(projectID); err == nil {
+		if v := store.NormalizePreApproved(p.PreApproved); v != "" {
+			return v
+		}
+	}
+	return "none"
+}
+
+// preApprovedCategoryMatch 类别档匹配：工单动作文本命中类别关键词即视为该类动作。
+// 仅类别档（逗号列表）使用；"all" 在调用处短路，天然覆盖后续新增类别，无需登记关键词。
+func preApprovedCategoryMatch(pa, action string) bool {
+	lc := strings.ToLower(action)
+	kw := map[string][]string{
+		"privesc":     {"提权", "权限提升", "privesc", "suid", "sudo", "逃逸"},
+		"lateral":     {"横向", "内网", "lateral", "pivot", "凭据复用", "pass-the"},
+		"persistence": {"持久化", "persistence", "驻留", "权限维持"},
+	}
+	for _, c := range strings.Split(pa, ",") {
+		for _, k := range kw[strings.TrimSpace(c)] {
+			if strings.Contains(lc, strings.ToLower(k)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Request 提交审批并按策略决策。返回 "approved"（人工批准）/"auto-approved"（自动批准）/"rejected" / error。
 // L0 只读操作即时自动放行并留痕（工单 mode=auto）；L1/L2 按审批策略走人工或自动路径。
 // 全部操作（L0/L1/L2）均在 approvals 桶留痕，人工路径阻塞等待 Web 决策。
@@ -99,6 +129,28 @@ func (a *Approver) Request(ctx context.Context, projectID, stage, action, risk s
 		}
 		a.bus.Publish(projectID, "approval", ap)
 		return "auto-approved", nil
+	}
+
+	// v6.0.0（用户决策③）：预批准路径——none（默认）/all（全通过：含提权/横向及后续新增类别）/类别列表。
+	// 语义边界：预批只自动签「人工核签」环节；governanceGates（执行档/ROE 写门/范围门）在本函数
+	// 被调用之前已确定性执行——被门拦下的动作到不了审批，预批一个都绕不过。
+	if pa := a.preApprovedFor(projectID); pa != "none" {
+		if pa == "all" || preApprovedCategoryMatch(pa, action) {
+			now := time.Now()
+			ap.Mode = "auto"
+			ap.Status = "approved"
+			ap.DecidedAt = &now
+			ap.DecidedBy = "pre-approved(" + pa + ")"
+			if err := a.store.SaveApproval(ap); err != nil {
+				return "", err
+			}
+			a.bus.Publish(projectID, "approval", ap)
+			a.bus.Publish(projectID, "log", map[string]string{
+				"level": "info", "stage": stage,
+				"text": fmt.Sprintf("⚙ 预批准自动通过 [%s]（pre_approved=%s）：%s", risk, pa, firstLineText(action)),
+			})
+			return "auto-approved", nil
+		}
 	}
 
 	// 自动批准路径：命中策略即时放行，工单落痕（mode=auto）后直接返回。

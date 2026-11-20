@@ -15,6 +15,27 @@
 // 版本规则（遇十进一）：末位递增，末位满 10 进位到前一位（如 2.9 的下一版是 3.0）。
 // 每次发版（含 Bug 修复）必须：递增 server/internal/version/version.go 的 App 常量 + 在此补记录。
 const CHANGELOG = [
+  { v: 'v6.0.0', date: '2026-11-20', items: [
+    '增强（治理口径贯通·用户决策）：buildContextPack 新增「治理口径」块，注入项目实际 execution_profile/write_policy/expansion 生效值——此前引擎知道执行档而模型上下文从未携带，模型按「默认 production_safe」自我设限（实证：两个 isolated_lab 项目全程自称 production_safe、把允许动作标「禁止」、s6 提权 0 次评估级）；loop-core 规则 6 与 s5/s6 头同步加「实际档位以上下文包为准」指针，提示词与引擎两层口径同源；引擎门照旧逐动作强制，只消除信息差不是放松限制',
+    '增强（三层治理参数）：新增 effectiveWritePolicy/expansionMode——部署级 YAML（roe_profile_path）＞执行档派生（isolated_lab→full+auto-with-approval 零配置实战可用；production_safe→unset+deny，写操作按审批矩阵管控历史行为不变）＞未知/非法值 fail-closed 兜底；v4.6 定义但从未被消费的 ROE expansion 死参数接线；写门生效值改走 effectiveWritePolicy',
+    '增强（发现驱动授权扩展）：scopeGate 接 expansion——范围外但立足点已发现的目标（证据链/发现库/时间线文本命中）不再静默放弃：auto-with-approval 自动生成《授权扩展工单》（Approval 新增 kind/target 字段，幂等每目标一张），批准即登记资产、scopeGate 白名单自动纳入放行；auto 直接放行留痕；未发现目标在任何档维持硬拦（范围门不因 expansion 变橡皮章）；创建页授权范围文案升级「授权语义」口径，内网资产不必事先枚举',
+    '新增（预批准）：项目级 pre_approved 三档——none（默认）/all（全通过，含提权/横向及后续新增类别）/类别逗号列表（privesc/lateral/persistence 关键词匹配）；命中即自动批准并落库留痕（DecidedBy=pre-approved），切 all 联动放行存量待批工单（同 SetAutoApprove→all 语义防审批屏障卡死）；治理门在审批之前照常前置，预批只自动签人工核签环节一个都绕不过；创建页新增「预批准全通过」勾选（仅 isolated_lab 显示）+ policy 接口增加 pre_approved 参数；创建时归一化 fail-closed（空/无效值回 none）',
+    '变更（结构化 ROE 注册）：policies/roe-profile.example.yaml 随包分发（部署级可选覆盖模板+三层语义+启用说明）；config.json roe_profile_path 缺省空串=派生模式（本部署历史含真实生产目标项目，不默认全局 full——通用型安全边界）；本地 compose override 新增 ./policies 卷挂载（策略文件热生效免重建镜像）；config.example.json 补 roe_profile_path 空缺省',
+  ]},
+  { v: 'v5.9.4', date: '2026-11-20', items: [
+    '修复（阶段耗时图单位错标·部署实测）：DashboardPage 阶段耗时条形换算误写 round(ms/100)/10——得到的是秒而非「1 位小数分钟」，图上数值放大 60 倍（实证：9.5 分钟的 s1 显示成 570 分，条形求和 22.9"小时"与运行时长 22m52s 严重偏离）；改为 round(ms/6000)/10（0.1 分=6000ms），条形求和与「运行时长」恢复精确对账。底层 stageMs/运行时长/阶段进度列表口径此前即正确，仅图表这一处换算受影响',
+  ]},
+  { v: 'v5.9.3', date: '2026-11-19', items: [
+    '修复（首页总时长冻结失真·用户实证）：Start/RunStage 进入 running 时清除残留 FinishedAt——此前完成/熔断过的项目重跑后 status=running 而 finished_at 残留上次收口时间，首页总时长被冻结（实证：真实已跑 2h16m 的项目显示 36m14s 且误标 ⏱）；前端 done 判定同步改以项目状态为准（done/failed/killed）',
+    '修复（阶段耗时对账缺角/重影）：新增 beginStageRun/endStageRun 统一阶段进出时间口径——重跑进入即清残留 EndedAt（旧区间不再被重复计入）；failed/killed 共 6 处收口路径补落 EndedAt（此前失败/熔断阶段在阶段耗时图与总时长对账中永远缺角）；前端首页总时长改为与「阶段耗时」图同一 stageMs 口径推导（条形保留 1 位小数分钟可精确对账），移除「纯工作」第二时间',
+  ]},
+  { v: 'v5.9.2', date: '2026-11-19', items: [
+    '修复（空闲护栏 data race·race detector 实证）：Run 同步通道的空闲看门狗与命令执行存在两处并发竞争——①cmd.Cancel 闭包直接读 cmd.Process（os/exec Start 在主 goroutine 写入，看门狗并发读）；②idleFired 普通 bool 跨 goroutine 读写。改为拆分 Start/Wait（Start 后原子填充 runPid）+ atomic pid 容器 + atomic.Bool——看门狗触发直接 killRunGroup 不再经 cmd.Cancel；TestV46IdleTimeout race detector 通过，全仓 -count=1 强制重跑 6 包全绿',
+  ]},
+  { v: 'v5.9.1', date: '2026-11-19', items: [
+    '修复（阶段时间轴失真·用户实证）：runStage 首启保护——StartedAt 仅首次进入写入，重入/断点续跑不再覆盖（实证：s4 三次重入后 started_at 只剩最后一次，首页阶段耗时图 94 分钟真实工作被显示成 3 分 39 秒、且与前一阶段间呈现 90 分钟假空档）；新增 StageState.LastActiveAt 随每次进入刷新（「最近一段」耗时语义）',
+    '修复（skipped 阶段时间语义不完整）：applyPostExploitGate 的 s6 skipped 不再赋 EndedAt（此前 started=None 而 ended 有值，首页阶段耗时图显示 0/NaN）；跳过不是运行——无起止时间，前端 dur() 既有守卫显示「—」',
+  ]},
   { v: 'v5.9.0', date: '2026-11-19', items: [
     '增强（统一执行治理·架构方案 P0-1）：ROE WritePolicy 确定性写门接入 governanceGates——existence-proof 档下命令含写语义（-X POST/PUT/DELETE/PATCH、--data、SQL 写、系统写等模式）在审批前确定性拦截并留证（此前 WritePolicy 只进上下文摘要，审批策略配 all 时被架空）；GET/HEAD/OPTIONS 只读豁免；范围门新增裸域名提取（nmap example.com 形态不再漏网，URL/IP 剥离后按域名边界二次扫描）',
     '增强（统一阶段状态机·架构方案 P0-2）：回环补跑与主流水线完全对齐——s6 勾选门（applyPostExploitGate）、failed 停跑、paused 停跑三语义统一（此前回放分支绕过门且 paused 项目可能被误收 done）；回环额度改项目级累计（消费不清零，LoopbackMaxRuns 成为真实全项目口径而非每批口径）',
