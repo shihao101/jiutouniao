@@ -67,6 +67,11 @@ type Orchestrator struct {
 	projModel map[string]string // v2.7 A8：projectID -> 故障切换后接管的项目模型 id
 	modelWarn map[string]bool   // v5.4.0：projectID -> 回退默认模型告警已记（去重防刷日志）
 
+	// v6.0.1 C30（fix-plan 20261122 P7）：模型生效记录/漂移告警去重
+	//（key = project|stage|model|source 或 project|stage|drift|req|actual；防 1500 次调用刷屏）
+	modelSelMu sync.Mutex
+	modelSel   map[string]bool
+
 	chatMu      sync.Mutex                    // v3.4.0：对话轮取消注册表
 	chatCancels map[string]context.CancelFunc // v3.4.0：projectID -> 在途对话轮 cancel
 
@@ -187,9 +192,10 @@ func (o *Orchestrator) TryStartFromChat(projectID, msg string) (bool, string) {
 var parallelizableTool = map[string]bool{
 	"run_command": true, "hexstrike_command": true, "write_file": true, "read_file": true,
 	"list_files": true, "load_skill": true, "search_memory": true,
-	"run_async": true, "poll_async": true, "install_tool": true,
+	"run_async": true, "poll_async": true, "install_tool": true, "run_batch": true, // v6.0.1 P2
 	"record_asset": true, "record_finding": true, "record_timeline": true, "update_finding": true,
 	"record_vt": true, "update_vt": true,
+	"record_candidate": true, "update_candidate": true, // v6.0.1 P5
 	"update_coverage": true, "update_subtask": true,
 	"upsert_fact": true, "record_loot": true, "shell_open": true, // v3.3.0 黑板/战利品/会话（bbolt 事务串行化，天然并发安全）
 	"spawn_subagent": true, "poll_subagents": true, // v3.6.0 并行扇出
@@ -396,8 +402,14 @@ func (o *Orchestrator) setModelOverride(projectID, modelID string) {
 // 切换供应商即恢复。接管模型经 setModelOverride 锁定到项目结束，全量留痕。
 func (o *Orchestrator) chatFailover(ctx context.Context, p *store.Project, stageID string, msgs []llm.Message, tools []llm.ToolDef) (llm.Message, llm.Usage, error) {
 	cli, model := o.clientFor(p)
+	// v6.0.1 C30：生效模型记录（同阶段同模型只记一次；配置声明值/项目覆盖/failover 接管均为合法路径，标注来源）
+	o.recordModelSel(p, stageID, model, "clientFor")
 	resp, usage, err := cli.Chat(ctx, model, msgs, tools, o.cfg.LLM.Temperature, o.cfg.LLM.MaxTokens)
 	if err == nil || ctx.Err() != nil {
+		if err == nil {
+			// v6.0.1 C30：网关回报模型与请求模型不一致 → 漂移告警（warn-only，留痕不阻断）
+			o.checkModelDrift(p, stageID, model, usage)
+		}
 		return resp, usage, err
 	}
 	es := err.Error()
@@ -425,6 +437,9 @@ func (o *Orchestrator) chatFailover(ctx context.Context, p *store.Project, stage
 		r2, u2, e2 := c.Chat(ctx, mname, msgs, tools, o.cfg.LLM.Temperature, o.cfg.LLM.MaxTokens)
 		if e2 == nil {
 			o.setModelOverride(p.ID, id)
+			// v6.0.1 C30：failover 接管是合法切换路径——记录来源与前后模型
+			o.recordModelSel(p, stageID, mname, "failover-takeover")
+			o.checkModelDrift(p, stageID, mname, u2)
 			o.accountUsage(p, stageID, u2)
 			o.log(p, stageID, fmt.Sprintf("✔ 模型 [%s] 接管本阶段，后续轮次继续使用（项目结束自动还原）", id))
 			return r2, u2, nil
@@ -2498,6 +2513,54 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		o.log(p, stageID, fmt.Sprintf("🧾 VT 处置 %s → %s", vid, st))
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: "VT 处置", Detail: vid + " → " + st + " " + truncateText(reason, 80)})
 		return "已处置 " + vid + " → " + st
+	case "record_candidate": // v6.0.1 P5 C28：未定性候选登记——「待评估/未定性」线索必须入账本，禁止只写交付物文本
+		c := &store.Candidate{ProjectID: p.ID, Stage: stageID,
+			Title: s("title"), Target: s("target"), EvidenceRef: s("evidence_ref")}
+		if strings.TrimSpace(c.Title) == "" {
+			return "错误: title 必填（候选一句话描述）"
+		}
+		id, cerr := o.store.AddCandidate(c)
+		if cerr != nil {
+			return "错误: " + cerr.Error()
+		}
+		o.log(p, stageID, fmt.Sprintf("🧾 候选登记[open] %s", c.Title))
+		return "已登记候选 " + id + "（status=open；S4/S5 收口前必须 update_candidate 三选一归位：finding/vt/excluded，禁止「待评估」悬空进报告）"
+	case "update_candidate": // v6.0.1 P5 C28：候选归位流转
+		cid := s("id")
+		if cid == "" {
+			return "错误: id 必填（record_candidate 返回的 CD- 编号）"
+		}
+		cand, cerr := o.store.GetCandidate(cid)
+		if cerr != nil || cand.ProjectID != p.ID {
+			return "错误: 未找到候选 " + cid
+		}
+		disp := s("disposition")
+		ref := strings.TrimSpace(s("disposition_ref"))
+		reason := strings.TrimSpace(s("reason"))
+		switch disp {
+		case "finding":
+			if ref == "" {
+				return "错误: disposition=finding 必须附 disposition_ref（record_finding 返回的 F- 编号）"
+			}
+		case "vt":
+			if ref == "" {
+				return "错误: disposition=vt 必须附 disposition_ref（record_vt 返回的 VT- 编号，启动条件写复测前提）"
+			}
+		case "excluded":
+			if ref == "" || reason == "" {
+				return "错误: disposition=excluded 必须附 disposition_ref（证据文件/EV- 编号）与 reason（排除理由）——无证据的排除不算闭环"
+			}
+		default:
+			return "错误: disposition 仅允许 finding / vt / excluded（open 只能由 record_candidate 创建）"
+		}
+		cand.Disposition, cand.DispositionRef, cand.Reason = disp, ref, reason
+		if err := o.store.SaveCandidate(cand); err != nil {
+			return "错误: " + err.Error()
+		}
+		o.log(p, stageID, fmt.Sprintf("🧾 候选归位 %s → %s", cid, disp))
+		return "候选已归位 " + cid + " → " + disp
+	case "run_batch": // v6.0.1 P2：批量任务逐目标隔离（模板 {{TARGET}} 拆分，单目标失败不取消其余）
+		return o.toolRunBatch(ctx, p, stageID, s("command"), s("targets"), s("timeout"), s("reason"))
 	case "record_asset":
 		a := &store.Asset{ProjectID: p.ID, Stage: stageID, Type: s("type"), Value: s("value"), Detail: s("detail")}
 		id, err := o.store.AddAsset(a)
@@ -3378,6 +3441,96 @@ func (o *Orchestrator) toolRunAsync(ctx context.Context, p *store.Project, stage
 	return fmt.Sprintf("后台任务已启动 job=%s log=%s（超时 %ds）。\n立即用 poll_async 收结果而非同步等待；期间继续其他子任务。收口前必须确认其已结束（引擎会在流水线结束时强制清理）。", job.ID, job.LogPath, int(job.Timeout.Seconds()))
 }
 
+// batchRiskRank 风险序（用于批量拆分前后风险一致性校验：Forbidden > L2 > L1 > L0）。
+func batchRiskRank(r string) int {
+	switch r {
+	case tools.Forbidden:
+		return 3
+	case "L2":
+		return 2
+	case "L1":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// toolRunBatch v6.0.1 P2（fix-plan 20261122）：批量任务逐目标隔离投递。
+// 治理语义：模板与每个 {{TARGET}} 拆分实例都过 ClassifyRisk——任一实例风险升级即拒绝整批
+//（要求逐目标单独投递）；模板整体走与 run_async 相同的治理门/预算器/审批链，一次批准覆盖本批
+//（工单描述列出目标数），拆分不绕过任何校验。每目标独立进程组/超时/日志，fail-continue。
+func (o *Orchestrator) toolRunBatch(ctx context.Context, p *store.Project, stageID, command, targetsStr, timeoutStr, reason string) string {
+	if strings.TrimSpace(command) == "" {
+		return "错误: command（含 {{TARGET}} 占位符的模板）为空"
+	}
+	var targets []string
+	for _, t := range strings.Split(targetsStr, "\n") {
+		if t = strings.TrimSpace(t); t != "" {
+			targets = append(targets, t)
+		}
+	}
+	if len(targets) == 0 {
+		return "错误: targets 为空（每行一个目标，单批上限 100）"
+	}
+	// v4.8 W5 行为预算器：整批计一次批量动作（对目标流量本质相同，不得因拆分绕过配额）
+	if note := o.batchBudgetGate(p, stageID, command); note != "" {
+		return note
+	}
+	// v5.3.1 P0-2：治理门统一接线（与 run_async 同级，不因拆分绕过）
+	if msg := o.governanceGates(p, stageID, command, "run_async", false); msg != "" {
+		return msg
+	}
+	timeoutSec := 0
+	if n, err := strconv.Atoi(strings.TrimSpace(timeoutStr)); err == nil {
+		timeoutSec = n
+	}
+	// 模板与逐目标实例风险一致性：仅目标 token 替换不得改变风险分级
+	templateRisk := o.exec.ClassifyRisk(command)
+	if templateRisk == tools.Forbidden {
+		o.log(p, stageID, "⛔ 拒绝破坏性批量模板（红线，批量通道同样适用）: "+truncateText(command, 120))
+		return "拒绝执行：该批量模板命中破坏性操作禁令。请改用最小影响方式。"
+	}
+	for _, t := range targets {
+		inst := strings.ReplaceAll(command, "{{TARGET}}", "'"+strings.ReplaceAll(t, "'", `'\''`)+"'")
+		if instRisk := o.exec.ClassifyRisk(inst); batchRiskRank(instRisk) > batchRiskRank(templateRisk) {
+			o.log(p, stageID, fmt.Sprintf("⛔ 批量拆分风险升级（目标 %s: %s > 模板 %s）——拒绝整批", t, instRisk, templateRisk))
+			return fmt.Sprintf("拒绝整批：目标 %s 的拆分实例风险升级（%s > 模板 %s）——该目标可能命中敏感模式，请把它从本批移除并单独走 run_command 审批投递（不许借批量绕过分级）。", t, instRisk, templateRisk)
+		}
+	}
+	desc := fmt.Sprintf("批量后台执行（%d 目标，逐目标隔离）: %s\n原因: %s", len(targets), maskSensitiveText(command), maskSensitiveText(reason))
+	decision, err := o.approver.Request(ctx, p.ID, stageID, desc, templateRisk)
+	if err != nil {
+		return "审批异常: " + err.Error()
+	}
+	if decision != "approved" && decision != "auto-approved" {
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command",
+			Input: "[batch] " + maskSensitiveText(command), Output: "人工拒绝（" + strconv.Itoa(len(targets)) + " 目标）", Risk: templateRisk, ApprovedBy: "human-rejected"})
+		return "人工审批拒绝该批量任务。请说明替代方案或收口本阶段。"
+	}
+	approvedBy := "auto"
+	if decision == "approved" {
+		approvedBy = "human"
+		o.log(p, stageID, fmt.Sprintf("✔ 人工批准批量执行（%d 目标）", len(targets)))
+	}
+	batch, err := o.exec.StartBatch(p.ID, command, targets, timeoutSec)
+	if err != nil {
+		return "错误: 批量启动失败 " + err.Error()
+	}
+	var ids []string
+	startFail := 0
+	for _, tr := range batch.Targets {
+		if tr.Err != "" {
+			startFail++
+			continue
+		}
+		ids = append(ids, tr.JobID)
+	}
+	_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command",
+		Input: "[batch] " + maskSensitiveText(command), Output: fmt.Sprintf("batch=%s targets=%d jobs=%v started_fail=%d", batch.ID, len(batch.Targets), ids, startFail), Risk: templateRisk, ApprovedBy: approvedBy})
+	o.log(p, stageID, fmt.Sprintf("🚀 批量任务 %s 已启动（%d/%d 目标，逐目标隔离超时 %ds）", batch.ID, len(ids), len(batch.Targets), batch.PerTargetTimeout))
+	return fmt.Sprintf("批量任务已启动 batch=%s（%d/%d 目标成功派发，逐目标独立超时 %ds；启动失败 %d 个已记录）。\n逐 job 用 poll_async 收结果（job id 见 batch-%s sidecar/证据记录）；单目标失败/超时不影响其余。poll 结果零产出或 killed 时必须 record_vt 登记（title 含 job id），不得写阴性结论。", batch.ID, len(ids), len(batch.Targets), batch.PerTargetTimeout, startFail, batch.ID)
+}
+
 // ---------- v4.8 W5 行为预算器（批量动作配额 + 空壳即停 + 冷却协议 + 基线自检提醒） ----------
 
 // batchCmdRe 批量动作识别：批量枚举/扫描/爆破工具（M6「先 probe 后 batch」的工具域一致）。
@@ -3467,26 +3620,41 @@ func (o *Orchestrator) batchResultFeedback(p *store.Project, stageID, command, o
 }
 
 // toolPollAsync v2.6 查询后台任务：状态 + 退出码 + 输出尾部（不整量回传）。
+// v6.0.1 P4：新增 log_bytes/last_output_at 实时观测（区分「运行中无输出」与「日志损坏」）；
+// v6.0.1 P2：killed/零产出时强制 VT/coverage 留痕提示（收口由 C31 门机械对账）。
 func (o *Orchestrator) toolPollAsync(p *store.Project, stageID, jobID string) string {
 	jobID = strings.TrimSpace(jobID)
 	state, out, code, elapsed, ok := o.exec.PollAsync(p.ID, jobID)
 	if !ok {
-		return "错误: 未知 job id（应为 run_async 返回的 id）"
+		return "错误: 未知 job id（应为 run_async/run_batch 返回的 id）"
 	}
+	logBytes, lastOut, _ := o.exec.AsyncLogStats(p.ID, jobID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "job=%s 状态=%s 已运行=%s", jobID, state, elapsed)
 	if state != "running" {
 		fmt.Fprintf(&b, " 退出码=%d", code)
 	}
+	fmt.Fprintf(&b, " log_bytes=%d", logBytes)
+	if lastOut != "" {
+		fmt.Fprintf(&b, " last_output=%s", lastOut)
+	}
 	b.WriteString("\n---输出尾部---\n")
 	b.WriteString(out)
 	switch state {
 	case "running":
-		b.WriteString("\n（仍在运行：继续其他子任务，稍后再 poll_async；不要同步等待）")
+		if logBytes == 0 && elapsed > 90*time.Second {
+			b.WriteString("\n🧯 [P4 观测] 运行超 90s 且日志零字节——检查命令是否被管道缓冲（如 `| tail` 会缓冲到结束才落盘，改用 tee 或去掉管道）；任务本身仍在运行，不要同步等待。")
+		} else {
+			b.WriteString("\n（仍在运行：继续其他子任务，稍后再 poll_async；不要同步等待）")
+		}
 	case "killed":
-		b.WriteString("\n（因超时被终止：基于已有输出继续分析，或降规模重新规划，不要原样重跑）")
+		b.WriteString("\n⚠ [P2 对账] 因超时被终止——产出不完整：必须 record_vt 登记（title 含本 job id，启动条件写复测前提），覆盖单元不得写 ruled_out/no_issue_found；收口时 C31 门会机械核对 job id 留痕。")
 	case "finished":
-		b.WriteString("\n（已结束：解析输出、record_* 入库、update_coverage 登记；日志全文在 " + "projects/" + p.ID + "/" + " 对应 .async/ 文件）")
+		if logBytes < 32 {
+			b.WriteString("\n⚠ [P2 对账] 已结束但近零产出——若属批量扫描器结果，必须 record_vt 登记（title 含本 job id）并 update_coverage 用 needs_follow_up 登记未完成面，不得写阴性结论；收口时 C31 门会机械核对 job id 留痕。")
+		} else {
+			b.WriteString("\n（已结束：解析输出、record_* 入库、update_coverage 登记；日志全文在 " + "projects/" + p.ID + "/" + " 对应 .async/ 文件）")
+		}
 	}
 	return b.String()
 }
@@ -4093,9 +4261,15 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"command": str("要后台执行的 shell 命令（输出重定向不必写，自动落 .async/job-<id>.log）"), "reason": str("执行原因（展示给审批人）"),
 			"timeout": str("超时秒数，可空（默认 3600，上限 7200）"),
 		}, "command", "reason")},
-		{Name: "poll_async", Description: "查询后台任务：返回 running/finished/killed、退出码与输出尾部。仍在运行时继续其他工作，不要同步等待。", Parameters: obj(map[string]any{
-			"job": str("run_async 返回的 job id"),
+		{Name: "poll_async", Description: "查询后台任务：返回 running/finished/killed、退出码、log_bytes 实时日志字节数与输出尾部。仍在运行时继续其他工作，不要同步等待。killed/零产出时必须按提示 record_vt 留痕（C31 收口对账）。", Parameters: obj(map[string]any{
+			"job": str("run_async/run_batch 返回的 job id"),
 		}, "job")},
+		{Name: "run_batch", Description: "v6.0.1 P2 批量任务逐目标隔离：command 为含 {{TARGET}} 占位符的模板，targets 每行一个目标；引擎拆成逐目标独立进程组/超时/日志（单目标失败/超时不影响其余），一次审批覆盖本批（模板与逐目标实例风险一致性校验，升级即拒整批）。多主机 nuclei/httpx/ffuf 类扫描必须用本工具而非单进程循环——防单个挂起主机拖死整批（实证事故）。零产出/killed 须 record_vt 留痕。", Parameters: obj(map[string]any{
+			"command": str("含 {{TARGET}} 占位符的命令模板（引擎逐目标替换并单引号安全引用）"),
+			"targets": str("目标清单，换行分隔（单批上限 100）"),
+			"timeout": str("每目标超时秒数，可空（默认同 run_async）"),
+			"reason":  str("执行原因（展示给审批人）"),
+		}, "command", "targets")},
 		{Name: "write_file", Description: "在项目工作区写入文件（PoC 脚本、笔记、报告等）。", Parameters: obj(map[string]any{
 			"path": str("相对工作区路径"), "content": str("文件内容"),
 		}, "path", "content")},
@@ -4131,6 +4305,14 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"id": str("record_vt 返回的 VT- 编号"), "status": str("executed/closed-roe/deferred"),
 			"result_ref": str("结果/证据/移交位置"), "note": str("处置理由"),
 		}, "id", "status")},
+		{Name: "record_candidate", Description: "v6.0.1 C28 未定性候选登记：任何「待评估/未定性」线索（如可批量取码的验证码端点、契约未还原的接口、被 WAF 拦截待窗口的注入面）必须登记本账本——禁止只写进交付物文本（实证：GetCaptchaImg「待评估」悬空成三不管，收口无人负责）。登记后 S4/S5 收口前必须 update_candidate 三选一归位。", Parameters: obj(map[string]any{
+			"title": str("候选一句话描述"), "target": str("相关目标/端点"),
+			"evidence_ref": str("证据位置（evidence/… 或 EV- 编号）"),
+		}, "title")},
+		{Name: "update_candidate", Description: "v6.0.1 C28 候选归位：finding（附 F- 编号）/ vt（附 VT- 编号+启动条件）/ excluded（附证据+理由）三选一；open 候选会拦截 S4/S5 收口。", Parameters: obj(map[string]any{
+			"id": str("record_candidate 返回的 CD- 编号"), "disposition": str("finding/vt/excluded"),
+			"disposition_ref": str("F-/VT- 编号或排除证据文件"), "reason": str("归位理由（excluded 强制）"),
+		}, "id", "disposition")},
 		{Name: "record_timeline", Description: "记录攻击时间线事件。", Parameters: obj(map[string]any{
 			"event": str("事件名"), "detail": str("详情"),
 		}, "event")},
@@ -4966,6 +5148,10 @@ func (o *Orchestrator) deterministicGate(p *store.Project, stageID string) []str
 				}
 			}
 		}
+		// v6.0.1 C29 覆盖边界门（fix-plan 20261122 P6）：报告必须含结构化《覆盖边界》章节
+		//（边界项/量化分母/解锁条件/来源），防"已全面覆盖"式误导（实证：认证后 0%、
+		// 10 站不可达等边界散落 5+ 份交付物，报告层无从核对）。
+		issues = append(issues, o.coverageBoundaryIssues(p)...)
 	}
 	if stageID == "s4" || stageID == "s5" {
 		if cov, _ := o.store.ListCoverage(p.ID); len(cov) == 0 && stageFindings == 0 {
@@ -5013,6 +5199,15 @@ func (o *Orchestrator) deterministicGate(p *store.Project, stageID string) []str
 		if stageID == "s4" {
 			issues = append(issues, o.identityTrackIssues(p, stageID)...)
 		}
+		// v6.0.1（fix-plan 20261122）三个新门：类级处置（C27）/候选归档（C28）/零产出对账（C31）
+		issues = append(issues, o.classDispositionIssues(p, stageID)...)
+		issues = append(issues, o.openCandidateIssues(p)...)
+		issues = append(issues, o.incompleteBatchIssues(p)...)
+	}
+	// v6.0.1 C27 收口件（s6）：存在判定表的项目必须已产出《27类收口对账表》且 27 行有处置态
+	if stageID == "s6" {
+		issues = append(issues, o.reconciliationTableIssues(p)...)
+		issues = append(issues, o.openCandidateIssues(p)...) // open 候选同样不得带进 S6
 	}
 	// v3.7.4 s8 报告-发现一致性（某真实任务 实测缺陷：报告定级 4 条，findings 导出仅 3 条
 	// 且缺传输层/配置类入库——SARIF/findings.json 是平台导入数据源，缺项=交付缺项）：
@@ -5363,6 +5558,10 @@ func (o *Orchestrator) ReconciliationPublic(projectID string) map[string]any {
 	}
 	out["beyond"] = beyond
 	out["findingsTotal"] = len(findings)
+	// v6.0.1 C29：覆盖边界初稿（引擎统计待人工确认）——供操作者/模型写 report.md《覆盖边界》章节
+	if p, perr := o.store.GetProject(projectID); perr == nil {
+		out["coverage_boundary_draft"] = o.coverageBoundaryDraft(p)
+	}
 	return out
 }
 

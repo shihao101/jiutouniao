@@ -39,6 +39,16 @@ type LLMConfig struct {
 	Mock        bool    `json:"mock"` // true 时使用内置 Mock 客户端（无 Key 也可跑通全流程）
 	Temperature float32 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
+
+	// v6.0.1 P1（fix-plan 20261122）：LLM 请求时限与重试参数化。
+	// 实证事故：原 900s 硬编码总超时下，网关静默 911s 时项目主循环冻结 15 分钟
+	// （msgs=234 大上下文请求，两处阶段切换被延误）；该值此前既不可配置也无请求级
+	// deadline 观测。默认 300s 显著低于旧硬编码值，大上下文项目可显式调高。
+	RequestTimeoutSec int   `json:"request_timeout_sec"` // 单次 LLM 请求总预算秒数（默认 300；<=0 视为默认）
+	MaxRetries        int   `json:"max_retries"`         // 可重试错误（网络/5xx/429/超时）的重试次数（默认 4，总尝试 5 次）
+	RetryBaseSec      int   `json:"retry_base_sec"`      // 重试指数退避基值秒数（默认 2）
+	RetryMaxSec       int   `json:"retry_max_sec"`       // 重试退避上限秒数（默认 20）
+	ResponseMaxBytes  int64 `json:"response_max_bytes"`  // 响应体读取上限字节（默认 32MiB；防异常超大响应拖垮内存）
 }
 
 // EngineConfig 执行循环与并发控制。
@@ -200,6 +210,23 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LLM.MaxTokens == 0 {
 		c.LLM.MaxTokens = 4096
+	}
+	// v6.0.1 P1：LLM 时限/重试默认值（fix-plan 默认参数表：300s/4 次/2s/20s/32MiB）。
+	// 配置无效或缺失时取安全默认并继续——不得退化为无限等待（fail-safe 而非 fail-open）。
+	if c.LLM.RequestTimeoutSec <= 0 {
+		c.LLM.RequestTimeoutSec = 300
+	}
+	if c.LLM.MaxRetries <= 0 {
+		c.LLM.MaxRetries = 4
+	}
+	if c.LLM.RetryBaseSec <= 0 {
+		c.LLM.RetryBaseSec = 2
+	}
+	if c.LLM.RetryMaxSec <= 0 {
+		c.LLM.RetryMaxSec = 20
+	}
+	if c.LLM.ResponseMaxBytes <= 0 {
+		c.LLM.ResponseMaxBytes = 32 << 20
 	}
 	if c.Engine.MaxStageIterations == 0 {
 		c.Engine.MaxStageIterations = 40

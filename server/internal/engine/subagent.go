@@ -140,12 +140,14 @@ func (o *Orchestrator) spawnSubAgent(ctx context.Context, p *store.Project, stag
 
 // runSubAgent 子代理执行循环（独立消息链，复用主头 dispatch——审批/留证/限流全部同权）。
 func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *SubAgentRun) {
+	// v6.0.1（连带修复，race detector 实证）：终态字段写入原在锁外（Lock/Unlock 空临界区），
+	// 与 pollSubAgents 持锁读 run.Status/reported 构成数据竞争。写入移入锁内。
 	defer func() {
+		o.subMu.Lock()
 		run.EndedAt = time.Now()
 		if run.Status == "running" {
 			run.Status = "finished"
 		}
-		o.subMu.Lock()
 		o.subMu.Unlock()
 	}()
 	head, ok := o.heads[run.Stage]

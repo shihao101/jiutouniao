@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"strings"
@@ -100,9 +101,10 @@ type ToolDef struct {
 }
 
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	ProviderModel    string `json:"provider_model,omitempty"` // v6.0.1 P7：网关回传的实际模型标识（未回报时为空，调用方记 unreported，不得伪称一致）
 }
 
 // Client 统一对话接口。
@@ -113,32 +115,116 @@ type Client interface {
 
 // ---------- OpenAI 兼容客户端 ----------
 
-type openaiCompat struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+// Options LLM 客户端运行参数（v6.0.1 P1，fix-plan 20261122）：
+// 原 900s 总超时 / 890s 响应头超时 / 固定退避全部硬编码且不可配置——实证网关静默 911s
+// 时主循环冻结 15 分钟。参数化后默认 300s（显著低于旧值），大上下文项目经 config 显式调高。
+// 零值字段自动取默认（fail-safe：配置缺失不退化为无限等待）。
+type Options struct {
+	RequestTimeoutSec int   // 单次请求（连接到响应体读完）总预算秒数，默认 300
+	MaxRetries        int   // 可重试错误的重试次数，默认 4（总尝试 = MaxRetries+1）
+	RetryBaseSec      int   // 指数退避基值秒数，默认 2
+	RetryMaxSec       int   // 退避上限秒数，默认 20
+	ResponseMaxBytes  int64 // 响应体读取上限字节，默认 32MiB
 }
 
-func NewOpenAI(baseURL, apiKey string) Client {
+// DefaultOptions 生产默认值（与 config.applyDefaults 的 LLM 默认值保持同一套口径）。
+func DefaultOptions() Options { return Options{} } // 零值即默认——withDefaults 统一填充
+
+func (o Options) withDefaults() Options {
+	if o.RequestTimeoutSec <= 0 {
+		o.RequestTimeoutSec = 300
+	}
+	if o.MaxRetries < 0 {
+		o.MaxRetries = 0 // 显式负值=禁用重试（单次尝试；测试/专用场景）
+	} else if o.MaxRetries == 0 {
+		o.MaxRetries = 4
+	}
+	if o.RetryBaseSec <= 0 {
+		o.RetryBaseSec = 2
+	}
+	if o.RetryMaxSec <= 0 {
+		o.RetryMaxSec = 20
+	}
+	if o.ResponseMaxBytes <= 0 {
+		o.ResponseMaxBytes = 32 << 20
+	}
+	return o
+}
+
+// retrySpec 内部重试规格（由 Options 派生）。
+type retrySpec struct {
+	attempts       int
+	base, max      time.Duration
+	requestTimeout time.Duration
+}
+
+func newRetrySpec(o Options) retrySpec {
+	// 注意：o 必须已经过 withDefaults（构造方负责）——此处二次默认化会把
+	// MaxRetries=0（负值禁用重试的归一化结果）重新拉回 4，破坏单次尝试语义。
+	return retrySpec{
+		attempts:       o.MaxRetries + 1,
+		base:           time.Duration(o.RetryBaseSec) * time.Second,
+		max:            time.Duration(o.RetryMaxSec) * time.Second,
+		requestTimeout: time.Duration(o.RequestTimeoutSec) * time.Second,
+	}
+}
+
+// backoff 指数退避（base<<attempt）封顶 max，±20% 抖动防雷群同步重试。
+func (s retrySpec) backoff(attempt int) time.Duration {
+	d := s.base << attempt
+	if d <= 0 || d > s.max {
+		d = s.max
+	}
+	j := 0.8 + 0.4*rand.Float64() // [0.8, 1.2)
+	return time.Duration(float64(d) * j)
+}
+
+func newHTTPTransport(requestTimeout time.Duration) *http.Transport {
 	// 自定义 Transport：IPv4 优先（规避容器内 IPv6 路由导致的 TLS 握手挂起）+ 快速回退 + 代理感知
 	dialer := &net.Dialer{
 		Timeout:       15 * time.Second,
 		KeepAlive:     30 * time.Second,
 		FallbackDelay: 300 * time.Millisecond, // Happy Eyeballs 快速回退
 	}
-	transport := &http.Transport{
+	// 响应头等待跟随请求预算（预留 10s 给响应体传输），不再独立硬编码 890s。
+	headerTimeout := requestTimeout - 10*time.Second
+	if headerTimeout < 15*time.Second {
+		headerTimeout = 15 * time.Second
+	}
+	return &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     false, // 强制 HTTP/1.1：规避个别网关 h2 流挂起
 		MaxIdleConns:          20,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   20 * time.Second,
-		ResponseHeaderTimeout: 890 * time.Second, // 推理模型生成可能远超 5 分钟
+		ResponseHeaderTimeout: headerTimeout,
 	}
+}
+
+type openaiCompat struct {
+	baseURL string
+	apiKey  string
+	http    *http.Client
+	opts    Options
+	spec    retrySpec
+}
+
+// NewOpenAI 兼容入口：默认参数（300s 预算 / 5 次尝试 / 2s 起指数退避封顶 20s / 32MiB）。
+func NewOpenAI(baseURL, apiKey string) Client {
+	return NewOpenAIWithOptions(baseURL, apiKey, DefaultOptions())
+}
+
+// NewOpenAIWithOptions 参数化构造（v6.0.1 P1）：调用方从 config.LLMConfig 注入实际值。
+func NewOpenAIWithOptions(baseURL, apiKey string, o Options) Client {
+	o = o.withDefaults()
+	timeout := time.Duration(o.RequestTimeoutSec) * time.Second
 	return &openaiCompat{
 		baseURL: baseURL,
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 900 * time.Second, Transport: transport},
+		http:    &http.Client{Timeout: timeout, Transport: newHTTPTransport(timeout)},
+		opts:    o,
+		spec:    newRetrySpec(o),
 	}
 }
 
@@ -156,6 +242,7 @@ type wireTool struct {
 }
 
 type wireResp struct {
+	Model   string `json:"model"` // 网关实际服务的模型标识（v6.0.1 P7 漂移检测数据源）
 	Choices []struct {
 		Message wireMessage `json:"message"`
 	} `json:"choices"`
@@ -168,31 +255,48 @@ type wireResp struct {
 // withRetry 请求级重试：网络错误/5xx/429 退避重试（LLM 网关偶发抖动）；4xx 参数错误不重试。
 // v5.7.5 扩展重试跨度（实证事故）：VM 出口 UDP DNS 丢包/直连 TCP 抖动窗口为分钟级，此前
 // 3 次尝试（退避 2s/4s）总跨度 ~40s 全部落在窗口内——s1 正常收口后 s2 首个 LLM 调用即
-// lookup i/o timeout×3 阶段失败项目终止。扩至 5 次尝试（退避 2s/5s/10s/20s，累计等待 37s，
-// 连同请求耗时总跨度 ~2min）覆盖典型抖动窗口；retryable 仅网络/5xx/429 类，
-// 真失败（4xx 参数错误）仍首轮即返不受影响。
-func withRetry(ctx context.Context, fn func() (Message, Usage, error)) (Message, Usage, error) {
+// lookup i/o timeout×3 阶段失败项目终止。扩至 5 次尝试覆盖典型抖动窗口。
+// v6.0.1 P1（fix-plan 20261122）两处硬伤修复：
+//  1. **每次 attempt 独立 deadline**（context.WithTimeout 包住 attemptCtx）——原实现 fn 直接
+//     复用调用方 context，单次请求无请求级预算，网关静默时 goroutine 依赖 Client.Timeout
+//     兜底（原 900s 硬编码，实证冻结主循环 15 分钟）；
+//  2. 退避时长/次数参数化（retrySpec）并加 ±20% 抖动，防多项目同时超时后雷群同步重试。
+// 语义不变：retryable 仅网络/5xx/429/超时类，真失败（4xx 参数错误）首轮即返；
+// 调用方取消（ctx.Err() != nil）立即退出，不再发起后续尝试。
+func withRetry(ctx context.Context, spec retrySpec, fn func(attemptCtx context.Context) (Message, Usage, error)) (Message, Usage, error) {
 	var lastErr error
-	backoffs := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second}
-	for attempt := 0; attempt < len(backoffs)+1; attempt++ {
+	for attempt := 0; attempt < spec.attempts; attempt++ {
 		if attempt > 0 {
-			select {
-			case <-time.After(backoffs[attempt-1]):
-			case <-ctx.Done():
-				return Message{}, Usage{}, ctx.Err()
+			if err := waitBackoff(ctx, spec.backoff(attempt-1)); err != nil {
+				return Message{}, Usage{}, err
 			}
 		}
-		msg, usage, err := fn()
+		// attempt 级 deadline：宁可误杀（超时后走阶段失败→人工重跑恢复），不可挂死（P1 降级纪律）
+		attemptCtx, cancel := context.WithTimeout(ctx, spec.requestTimeout)
+		msg, usage, err := fn(attemptCtx)
+		cancel()
 		if err == nil {
 			return msg, usage, nil
 		}
 		lastErr = err
-		if !retryable(err) {
+		if !retryable(err) || ctx.Err() != nil {
 			return Message{}, Usage{}, err
 		}
-		log.Printf("[llm] 请求失败（第 %d 次，将重试）: %v", attempt+1, err)
+		log.Printf("[llm] 请求失败（第 %d/%d 次尝试，将重试）: %v", attempt+1, spec.attempts, err)
 	}
 	return Message{}, Usage{}, lastErr
+}
+
+// waitBackoff 退避等待，遵循父 context 取消（调用方中断立即退出，不吞取消信号）。
+func waitBackoff(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func retryable(err error) bool {
@@ -202,6 +306,7 @@ func retryable(err error) bool {
 		return true
 	}
 	return strings.Contains(s, "timeout") || strings.Contains(s, "TLS handshake") ||
+		strings.Contains(s, "context deadline exceeded") || strings.Contains(s, "Client.Timeout") ||
 		strings.Contains(s, "connection reset") || strings.Contains(s, "EOF") ||
 		strings.Contains(s, "broken pipe") || strings.Contains(s, "502") ||
 		strings.Contains(s, "503") || strings.Contains(s, "504") || strings.Contains(s, "429") ||
@@ -221,7 +326,9 @@ func (c *openaiCompat) Chat(ctx context.Context, model string, messages []Messag
 	body, _ := json.Marshal(out)
 	log.Printf("[llm-openai] 请求开始: model=%s msgs=%d tools=%d", model, len(messages), len(tools))
 	start := time.Now()
-	msg, usage, err := withRetry(ctx, func() (Message, Usage, error) { return c.chatOnce(ctx, body) })
+	msg, usage, err := withRetry(ctx, c.spec, func(attemptCtx context.Context) (Message, Usage, error) {
+		return c.chatOnce(attemptCtx, body)
+	})
 	log.Printf("[llm-openai] 请求结束: 耗时=%.1fs tokens=%d err=%v", time.Since(start).Seconds(), usage.TotalTokens, err)
 	return msg, usage, err
 }
@@ -240,7 +347,12 @@ func (c *openaiCompat) chatOnce(ctx context.Context, body []byte) (Message, Usag
 		return Message{}, Usage{}, fmt.Errorf("LLM 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, c.opts.ResponseMaxBytes))
+	if rerr != nil {
+		// v6.0.1 P1：响应体读取失败（含总预算截断）如实上抛——原实现吞错后把半截数据
+		// 送解析，超时被伪装成"响应解析失败"（实证：慢 body 测试 8.9s 五连重试）。
+		return Message{}, Usage{}, fmt.Errorf("LLM 响应读取失败: %w", rerr)
+	}
 	if resp.StatusCode >= 300 {
 		return Message{}, Usage{}, fmt.Errorf("LLM 返回 %d: %s", resp.StatusCode, truncate(string(raw), 512))
 	}
@@ -254,6 +366,8 @@ func (c *openaiCompat) chatOnce(ctx context.Context, body []byte) (Message, Usag
 	if len(wr.Choices) == 0 {
 		return Message{}, Usage{}, fmt.Errorf("LLM 空回复")
 	}
+	// v6.0.1 P7：网关回传的实际模型标识随 Usage 上报；网关未回报时字段为空（调用方记 unreported）
+	wr.Usage.ProviderModel = wr.Model
 	return fromWireOpenAI(wr.Choices[0].Message), wr.Usage, nil
 }
 

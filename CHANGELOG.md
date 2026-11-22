@@ -6,6 +6,29 @@
 >
 > 注：v3.5 之前的版本为本项目内部迭代史（能力以 v3.5+ 描述为准）；开源首发版本为 **v5.3.8**。
 
+## v6.0.3 · 2026-11-22
+
+- 修复（LLM 时限参数化·部署实证两次挂死）：900s 硬编码超时不可配置，网关静默 911s 冻结主循环 15 分钟；新增 llm.request_timeout_sec 等 5 配置键（默认 300s/4 次重试），attempt 级独立 deadline + 抖动退避，body 读取错误如实上抛
+- 修复（异步作业日志可观测·0 字节实证）：countingWriter 实时计数 + sidecar log_bytes/last_output_at + poll_async 双字段 + 管道缓冲提示；realOutputBytes 剥离 [JT-JOB-END] 标记防零产出误判
+- 新增（run_batch 批量逐目标隔离）：{{TARGET}} 模板逐目标独立进程组/超时/日志，单目标挂起不拖死整批（nuclei 整批失效实证）；风险一致性校验+一次审批覆盖本批；C31 门对账 killed/零产出作业
+- 新增（C27 类级处置门）：判定表假设/待判定类收口必须三选一留痕（coverage/VT 引 C 编号或对账表处置词）——18 假设类 6 类静默跳过实证；S6 强制《27类收口对账表》
+- 新增（C28 候选归档门）：record_candidate/update_candidate + candidates 账本，「待评估」悬空禁止进报告（GetCaptchaImg 案）；S4/S5/S6 收口无 open 候选
+- 新增（C29 覆盖边界门）：S8 强制《覆盖边界》四要素章节（无量化分母即拦截）；coverage_boundary_draft 自动初稿（/reconciliation API）
+- 新增（C30 模型生效记录与漂移告警）：生效模型记录（去重）+ Usage.ProviderModel 回报比对，不一致告警（warn-only），未回报记 unreported
+- 修复（子代理终态 data race）：runSubAgent 终态写入移入锁内（race detector 实证空临界区竞争）
+
+## v6.0.2 · 2026-11-20
+
+- 增强（专项A 方法论基线·调研报告落地）：specA 重基线为 OWASP LLM Top 10 (2026) + Agentic Applications Top 10 (2026) 双映射 + MITRE ATLAS 数据版本 2026.10——旧编号交叉表保留（历史报告可比性），2026 新增/扩展条目 T0135-T0145 逐项映射到 A1-A14；A3 更名「系统提示与隐藏上下文提取」（记录口径增加敏感性分级）；A4/A5 判定改以「对后续授权与工具行为的实际影响」为准（不以模型复述恶意内容为成功判据）；A7 对齐 Agentic Top10 ASI 条目（工具身份/委托权限/工具返回可信度/错误传播/人工审批）；A9-A11 按 Agent 循环资源观察、MCP Server 供应链、防护验证扩展（工具 schema/出站连接/网关策略/遥测/自适应多轮）逐项扩容；新增 A12 Agent 协议与委托信任边界（MCP/A2A）、A13 Agent 记忆与目标完整性、A14 LLM 网关与策略链；工具建议补 PyRIT/garak 锁版本探针集
+- 增强（专项B1 方法论基线·同报告落地）：标准基线升级 MASVS 2.1.0（新增 PRIVACY 控制组）+ MASTG 2.0.0（机器可读结构）+ MASWE 交叉索引（旧版 checklist 不再作唯一索引）；新增「版本基线」节——工具矩阵 jadx 1.5.6/Apktool 3.0.3/Frida 17.27.4/objection 1.12.5/MobSF 4.6.4 + 平台核验项（Play Integrity/App Attest 服务端决策、Android Developer Verification 分地区时间线、SDK Sandbox 状态、Apple Privacy Manifest）；D1-D6 逐项扩展（服务端完整性信号使用验证/代理 pinning/签名新鲜度/结构化授权证据/本地隐私暴露面/三类结论分开记录）；新增 D7 平台应用完整性与服务端判定、D8 隐私清单与 SDK 数据行为
+- 增强（专项B2 方法论基线·同报告落地）：W1 解包口径更新——wxappUnpacker/unveilr 均已停更，改多实现交叉确认（活跃 fork/Gwxapkg 等）固定来源哈希，记录包型/加密状态/子包覆盖率/解析失败项；W2 扩展云凭据/OAuth/环境隔离并明确 AppID 非秘密；W4 补平台登录授权码交换/身份绑定/会话轮换；W5 分清客户端规则与云函数/服务端 SDK/管理面权限（规则通过≠云函数受保护）；新增 W7 平台登录态与身份绑定、W8 宿主能力与跨小程序隔离、W9 云资源身份与部署边界、W10 备案隐私披露与 SDK 治理证据；前置契约补 ROE 平台边界（平台基础设施及其他租户不因目标授权自动纳入范围）
+- 变更（配套编号接线同步）：README 模块映射表（A1-A14/W1-W10 + 框架名 2026）、docs/方法论文档映射.md（P11/P13）、heads/s4.md S4-5 的 LLM01-10 列表更新为 2026 版顺序、skills/llm-top10.md 加 2026 重编号基线注（历史 vuln_class 编号含义不回改）、skills/rag-attack.md 编号双标注（2025 LLM08/2026 LLM09）、skills/app-dynamic-audit.md 动态链改 D1-D8；依据 docs/调研报告_三大专项_20261120.md（GPT-6-Luna max 档联网调研，52 组参考来源）
+
+## v6.0.1 · 2026-11-20
+
+- 修复（对话空回复误判挂起·用户实证）：对话链连续 7 轮「轮次达到上限」假挂起、挂起/续跑空转——挂起链退化为纯 user 堆叠（0 assistant/0 tool 消息），根因是思维型模型（glm-5.3-flash 等）返回空 content（无文字结论也无工具调用，思维链耗尽 max_tokens 被截断的典型形态），引擎把空回复误判成轮次耗尽挂起；用户消息其实已完整入链但始终得不到真实回复，感知为「发了收不到」。修复四点：①空回复首轮一次引导重试，仍空则走诊断路径不挂起、文案给出可行动建议（调大 max_tokens/更换非思维模型）；②有工具动作后的空回复按实际轮数挂起并明示「空回复」原因；③挂起链增加实质判定——纯 user 堆叠链清键按新轮次处理，用户历史仍在会话历史中不丢失；④部署配置 max_tokens 8192→16384 给思维链留出空间
+- 变更（挂起文案可解释性）：真轮次耗尽文案不变（含「已挂起保存」与续跑指引）；空回复类挂起/保留文案区分两种形态（零动作保留旧链/有动作按实际轮数），用户可据文案直接分辨「模型没回答」与「真跑满轮次」
+
 ## v6.0.0 · 2026-11-20
 
 - 增强（治理口径贯通·用户决策）：buildContextPack 新增「治理口径」块，注入项目实际 execution_profile/write_policy/expansion 生效值——此前引擎知道执行档而模型上下文从未携带，模型按「默认 production_safe」自我设限（实证：两个 isolated_lab 项目全程自称 production_safe、把允许动作标「禁止」、s6 提权 0 次评估级）；loop-core 规则 6 与 s5/s6 头同步加「实际档位以上下文包为准」指针，提示词与引擎两层口径同源；引擎门照旧逐动作强制，只消除信息差不是放松限制

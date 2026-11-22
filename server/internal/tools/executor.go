@@ -556,6 +556,29 @@ type AsyncJob struct {
 	doneCh   chan struct{} // 关闭后 stateFin/exitFin 可无锁读
 	stateFin string        // finished/killed
 	exitFin  int
+
+	// v6.0.1 P4（fix-plan 20261122）：日志实时可观测——实证 s2-passive.sh 运行 20+ 分钟
+	// 日志 0 字节（管道 tail 缓冲），工作台无法区分「在跑没输出」与「日志损坏」，
+	// 进程被杀时输出全丢。原子计数 + 最后输出时间戳，经 sidecar/poll_async 暴露。
+	logBytes int64 // 原子：已写入日志的字节数
+	lastOut  int64 // 原子：最后一次输出的 UnixNano（0=尚无输出）
+}
+
+// countingWriter v6.0.1 P4：透传写文件并维护实时字节数/最后输出时间戳（原子读）。
+// 日志文件始终是权威产物——计数器故障只影响观测，不影响落盘完整性。
+type countingWriter struct {
+	f     *os.File
+	bytes *int64
+	last  *int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.f.Write(p)
+	if n > 0 {
+		atomic.AddInt64(w.bytes, int64(n))
+		atomic.StoreInt64(w.last, time.Now().UnixNano())
+	}
+	return n, err
 }
 
 // activityWriter v4.6 K7：输出计数器——每次写入刷新活动时间戳（原子读），供空闲看门狗判定。
@@ -610,7 +633,9 @@ func (e *Executor) StartAsync(projectID, command string, timeoutSec int) (*Async
 	job.cmd.Env = append(append(sanitizeEnv(os.Environ()), "JIUTOUNIAO=1", "LANG=C.UTF-8"), e.extraEnvSlice()...)
 	job.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // 进程组：超时/熔断整组终止，不留孤儿继续打目标
 	job.cmd.WaitDelay = 10 * time.Second                      // v3.7.6：逃逸孙进程握管道时强制 Wait 返回
-	job.cmd.Stdout, job.cmd.Stderr = lf, lf
+	// v6.0.1 P4：stdout/stderr 经计数 writer 透传（实时字节数/最后输出时间供 poll_async 与 sidecar）
+	job.cmd.Stdout = &countingWriter{f: lf, bytes: &job.logBytes, last: &job.lastOut}
+	job.cmd.Stderr = &countingWriter{f: lf, bytes: &job.logBytes, last: &job.lastOut}
 	if err := job.cmd.Start(); err != nil {
 		lf.Close()
 		return nil, err
@@ -663,15 +688,34 @@ type asyncSidecar struct {
 	State    string `json:"state,omitempty"`
 	ExitCode int    `json:"exit_code,omitempty"`
 	EndedAt  string `json:"ended_at,omitempty"`
+	// v6.0.1 P4 日志可观测：实时字节数 + 最后输出时间（旧 sidecar 无此字段→poll 时 stat 日志文件兜底）
+	LogBytes     int64  `json:"log_bytes,omitempty"`
+	LastOutputAt string `json:"last_output_at,omitempty"`
+}
+
+// jobObs v6.0.1 P4：从原子计数器取观测值（内存 job 路径）。
+func jobObs(job *AsyncJob) (int64, string) {
+	b := atomic.LoadInt64(&job.logBytes)
+	ls := atomic.LoadInt64(&job.lastOut)
+	ts := ""
+	if ls > 0 {
+		ts = time.Unix(0, ls).Format(time.RFC3339)
+	}
+	return b, ts
 }
 
 // finalizeJobSidecar v4.6 E2：任务终态回写 sidecar（state/exit/ended_at）。
 func (e *Executor) finalizeJobSidecar(projectID string, job *AsyncJob) {
+	lb, lo := jobObs(job)
 	sc := asyncSidecar{ID: job.ID, Command: job.Command, Log: job.LogPath,
 		StartedAt: job.StartedAt.Format(time.RFC3339),
 		Timeout:   int(job.Timeout.Seconds()),
 		State:     job.stateFin, ExitCode: job.exitFin,
-		EndedAt: time.Now().Format(time.RFC3339)}
+		EndedAt: time.Now().Format(time.RFC3339),
+		LogBytes: lb, LastOutputAt: lo}
+	if sc.LastOutputAt == "" {
+		sc.LastOutputAt = sc.EndedAt // 全程零输出：以终态时间兜底（区分「跑完零输出」与「时间戳丢失」）
+	}
 	if job.cmd.Process != nil {
 		sc.PID = job.cmd.Process.Pid
 	}
@@ -683,9 +727,11 @@ func (e *Executor) finalizeJobSidecar(projectID string, job *AsyncJob) {
 }
 
 func (e *Executor) writeJobSidecar(projectID string, job *AsyncJob) {
+	lb, lo := jobObs(job)
 	sc := asyncSidecar{ID: job.ID, Command: job.Command, Log: job.LogPath,
 		StartedAt: job.StartedAt.Format(time.RFC3339),
-		Timeout:   int(job.Timeout.Seconds())}
+		Timeout:   int(job.Timeout.Seconds()),
+		LogBytes:  lb, LastOutputAt: lo}
 	if job.cmd.Process != nil {
 		sc.PID = job.cmd.Process.Pid
 	}
@@ -1128,4 +1174,173 @@ func safeCut(s string, i int) int {
 		i--
 	}
 	return i
+}
+
+// ---------- v6.0.1 P4/P2：日志观测 + 批量隔离（fix-plan 20261122） ----------
+
+// AsyncLogStats v6.0.1 P4：返回作业日志实时字节数与最后输出时间（运行中即可查；
+// 引擎重启后从 sidecar/日志文件兜底恢复）。ok=false 表示 job id 不存在。
+func (e *Executor) AsyncLogStats(projectID, jobID string) (logBytes int64, lastOutputAt string, ok bool) {
+	e.asyncMu.Lock()
+	job := e.asyncJobs[projectID][jobID]
+	e.asyncMu.Unlock()
+	if job != nil {
+		b, ts := jobObs(job)
+		return b, ts, true
+	}
+	dir := e.workspaceDir(projectID)
+	raw, err := os.ReadFile(filepath.Join(dir, ".async", "job-"+jobID+".json"))
+	if err != nil {
+		return 0, "", false
+	}
+	var sc asyncSidecar
+	if json.Unmarshal(raw, &sc) != nil {
+		return 0, "", false
+	}
+	lb, _ := realOutputBytes(filepath.Join(dir, sc.Log))
+	return lb, sc.LastOutputAt, true
+}
+
+// realOutputBytes v6.0.1 P2：日志文件的实质输出字节数（剥离引擎追加的 [JT-JOB-END] 终态标记——
+// 纯零输出任务的文件也会含 ~60B 标记，按原文件大小判断会误判为"有输出"）。
+func realOutputBytes(path string) (int64, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	if idx := bytes.Index(raw, []byte("\n[JT-JOB-END]")); idx >= 0 {
+		return int64(idx), true
+	}
+	return int64(len(raw)), true
+}
+
+// IncompleteJob 未完成的后台作业（v6.0.1 P2 收口对账数据源）。
+type IncompleteJob struct {
+	ID       string `json:"id"`
+	State    string `json:"state"`
+	LogBytes int64  `json:"log_bytes"`
+	Command  string `json:"command"`
+}
+
+// IncompleteAsyncJobs 扫描项目全部后台作业 sidecar，返回未完成项：
+// ① state=killed（超时整组终止——产出不完整）；② finished 但日志近零产出（<32B，
+// 即除 [JT-JOB-END] 标记外无实质输出）。判定只基于机器可读状态，不推断漏洞结论；
+// 收口门据此要求逐条 VT/coverage 留痕（C31 零产出对账），禁止写成阴性结论。
+func (e *Executor) IncompleteAsyncJobs(projectID string) []IncompleteJob {
+	dir := filepath.Join(e.workspaceDir(projectID), ".async")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []IncompleteJob
+	for _, en := range entries {
+		name := en.Name()
+		if !strings.HasPrefix(name, "job-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		raw, rerr := os.ReadFile(filepath.Join(dir, name))
+		if rerr != nil {
+			continue
+		}
+		var sc asyncSidecar
+		if json.Unmarshal(raw, &sc) != nil || sc.State == "" {
+			continue // running 中/无终态：由 S7 JT-JOB-END 门负责
+		}
+		lb, ok2 := realOutputBytes(filepath.Join(dir, sc.Log))
+		if !ok2 {
+			lb = sc.LogBytes
+		}
+		incomplete := sc.State == "killed" || lb < 32
+		if !incomplete {
+			continue
+		}
+		out = append(out, IncompleteJob{ID: sc.ID, State: sc.State, LogBytes: lb, Command: sc.Command})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// ---------- v6.0.1 P2 批量任务逐目标隔离（fix-plan 20261122） ----------
+
+// batchPlaceholder 批量命令模板中的目标占位符（替换为单引号安全引用的目标值）。
+const batchPlaceholder = "{{TARGET}}"
+
+// batchMaxTargets 单批目标上限（防一次投递打爆并发/预算；更多目标分多批）。
+const batchMaxTargets = 100
+
+// BatchTargetResult 单目标子任务（每目标独立进程组/超时/日志——单目标失败不取消其余）。
+type BatchTargetResult struct {
+	Target  string `json:"target"`
+	JobID   string `json:"job_id"`
+	Log     string `json:"log"`
+	Command string `json:"command"`
+	Err     string `json:"err,omitempty"` // 启动失败原因（不影响其余目标）
+}
+
+// BatchJob 批量任务聚合（模板 + 逐目标 job 清单；sidecar 落 .async/batch-<id>.json）。
+type BatchJob struct {
+	ID               string              `json:"id"`
+	Template         string              `json:"template"`
+	Targets          []BatchTargetResult `json:"targets"`
+	StartedAt        time.Time           `json:"started_at"`
+	PerTargetTimeout int                 `json:"per_target_timeout_sec"`
+}
+
+// quoteShellArg 单引号安全引用（' → '\''），目标值注入命令模板前的最后防线。
+func quoteShellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// StartBatch v6.0.1 P2（fix-plan 20261122）：批量任务逐目标隔离执行。
+// 实证事故：nuclei 单进程批量中一个 403 慢响应主机耗尽整批预算（>5min 零产出），
+// 已知漏洞三通道之一整通道失效。本方法把模板按 {{TARGET}} 拆成逐目标独立 bash 进程组
+// （复用 StartAsync：独立超时/日志/sidecar/进程组终止），单目标失败/超时不影响其余，
+// 聚合结果逐目标保留 job id。风险分级/审批/治理门由 orchestrator 工具层在拆分前后完成
+//（模板与逐目标实例都过 ClassifyRisk，任一实例风险升级即拒绝整批）。
+func (e *Executor) StartBatch(projectID, template string, targets []string, timeoutSec int) (*BatchJob, error) {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return nil, fmt.Errorf("命令模板为空")
+	}
+	if !strings.Contains(template, batchPlaceholder) {
+		return nil, fmt.Errorf("命令模板缺少 %s 占位符（模板中写 {{TARGET}}，由引擎逐目标替换并安全引用）", batchPlaceholder)
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("目标列表为空")
+	}
+	if len(targets) > batchMaxTargets {
+		return nil, fmt.Errorf("目标数 %d 超过单批上限 %d——按组分多批投递", len(targets), batchMaxTargets)
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = int(e.asyncTimeout.Seconds())
+	}
+	bid, err := newJobID()
+	if err != nil {
+		return nil, err
+	}
+	batch := &BatchJob{ID: bid, Template: truncate(template, 500), StartedAt: time.Now(), PerTargetTimeout: timeoutSec}
+	for _, t := range targets {
+		t = strings.TrimSpace(t)
+		if t == "" || strings.ContainsAny(t, "\n\r") {
+			continue // 空行/多行值跳过（调用方传清单时的容错）
+		}
+		cmd := strings.ReplaceAll(template, batchPlaceholder, quoteShellArg(t))
+		tr := BatchTargetResult{Target: t, Command: cmd}
+		if job, err := e.StartAsync(projectID, cmd, timeoutSec); err == nil {
+			tr.JobID, tr.Log = job.ID, job.LogPath
+		} else {
+			tr.Err = err.Error() // fail-continue：单目标启动失败不影响其余
+		}
+		batch.Targets = append(batch.Targets, tr)
+	}
+	if len(batch.Targets) == 0 {
+		return nil, fmt.Errorf("无有效目标（全部为空行/多行值）")
+	}
+	dir := e.workspaceDir(projectID)
+	if os.MkdirAll(filepath.Join(dir, ".async"), 0o750) == nil {
+		if b, _ := json.Marshal(batch); b != nil {
+			_ = os.WriteFile(filepath.Join(dir, ".async", "batch-"+batch.ID+".json"), b, 0o640)
+		}
+	}
+	return batch, nil
 }

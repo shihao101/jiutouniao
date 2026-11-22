@@ -46,13 +46,21 @@ func main() {
 		client = llm.NewMock()
 	} else {
 		protocol := strings.ToLower(strings.TrimSpace(cfg.LLM.Protocol))
+		// v6.0.1 P1：LLM 时限/重试参数从 config 注入（原 900s 硬编码；实证网关静默时主循环冻结 15 分钟）
+		llmOpts := llm.Options{
+			RequestTimeoutSec: cfg.LLM.RequestTimeoutSec,
+			MaxRetries:        cfg.LLM.MaxRetries,
+			RetryBaseSec:      cfg.LLM.RetryBaseSec,
+			RetryMaxSec:       cfg.LLM.RetryMaxSec,
+			ResponseMaxBytes:  cfg.LLM.ResponseMaxBytes,
+		}
 		switch protocol {
 		case "anthropic":
-			log.Printf("LLM: Anthropic 协议 %s 模型=%s", cfg.LLM.BaseURL, cfg.LLM.Model)
-			client = llm.NewAnthropic(cfg.LLM.BaseURL, cfg.LLM.APIKey)
+			log.Printf("LLM: Anthropic 协议 %s 模型=%s 请求预算=%ds", cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.RequestTimeoutSec)
+			client = llm.NewAnthropicWithOptions(cfg.LLM.BaseURL, cfg.LLM.APIKey, llmOpts)
 		case "", "openai":
-			log.Printf("LLM: OpenAI 协议 %s 模型=%s", cfg.LLM.BaseURL, cfg.LLM.Model)
-			client = llm.NewOpenAI(cfg.LLM.BaseURL, cfg.LLM.APIKey)
+			log.Printf("LLM: OpenAI 协议 %s 模型=%s 请求预算=%ds", cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.RequestTimeoutSec)
+			client = llm.NewOpenAIWithOptions(cfg.LLM.BaseURL, cfg.LLM.APIKey, llmOpts)
 		default:
 			log.Fatalf("未知 LLM 协议: %s（支持 openai / anthropic）", protocol)
 		}

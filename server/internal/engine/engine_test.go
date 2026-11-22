@@ -728,7 +728,8 @@ func TestDeterministicGateS8ReportFindingsConsistency(t *testing.T) {
 	p := &store.Project{ID: "P-S8"}
 	_ = st.SaveProject(p)
 	// 报告含 2 个 R 条目，findings 仅 1 条 → 应拦截
-	_, _ = o.exec.WriteFile("P-S8", "report.md", "# 报告\n### R-01 明文传输\n内容\n### R-02 弱哈希\n内容\n")
+	// v6.0.1 C29：报告夹具含合规《覆盖边界》章节（边界门单独有专项测试 v601）
+	_, _ = o.exec.WriteFile("P-S8", "report.md", "# 报告\n## 覆盖边界\n| 边界项 | 量化数据 | 解锁条件 | 来源 |\n|---|---|---|---|\n| 认证后 | 0/2 | 提供测试账号 | coverage.json |\n### R-01 明文传输\n内容\n### R-02 弱哈希\n内容\n")
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P-S8", Stage: "s4", Title: "登录枚举", Detail: "x", Severity: "低", Confidence: "确证"})
 	issues := o.deterministicGate(p, "s8")
 	if len(issues) == 0 {

@@ -13,6 +13,7 @@ tags: 小程序,wxapkg,云开发,specB2
 wxappUnpacker ./xxx.wxapkg    # 还原 wxml/wxss/js/json（unveilr 已停止分发，环境内置 wxappUnpacker）
 ```
 - 优先读 app.js（全局逻辑）、app.json（页面树/隐藏页面）、project.config.json（appid）。
+- **v6.0.2 W1 口径（对齐 heads/specB2.md）**：wxappUnpacker/unveilr 上游均已停更——环境内置 wxappUnpacker 可用但**不作唯一判据**：解析失败或存疑时用 install_tool 取其他可维护实现（活跃 fork/Gwxapkg 等）交叉确认；产出记录包型、加密状态、主包/子包覆盖率与解析失败项，不以「成功解包」当完整源码恢复。
 
 ### PC 加密包解密（V1MMWX 魔数）
 - 判别：`xxd -l 16 xxx.wxapkg` 首字节为 `5631 4d4d 5758`（`V1MMWX`）= PC 端微信下载的加密包，wxappUnpacker 直接解会报 wuLib 读文件错误——**必须先解密再解包，不要盲试变体**。

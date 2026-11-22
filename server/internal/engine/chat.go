@@ -56,7 +56,16 @@ func (c *ChatSessions) loadPendingRun(key string) ([]llm.Message, bool) {
 	if err := json.Unmarshal(raw, &msgs); err != nil || len(msgs) == 0 {
 		return nil, false
 	}
-	return msgs, true
+	// v6.0.1：实质判定——链中必须含真实可续跑动作（assistant 工具轮或 tool 结果）。
+	// 纯 user 堆叠链是空回复误挂起的残骸，无动作可续：清键后按新轮次处理（用户历史
+	// 消息仍在会话 hist 中，不丢失）。
+	for _, m := range msgs {
+		if (m.Role == "assistant" && len(m.ToolCalls) > 0) || m.Role == "tool" {
+			return msgs, true
+		}
+	}
+	c.clearPendingRun(key)
+	return nil, false
 }
 
 func (c *ChatSessions) savePendingRun(key string, msgs []llm.Message) {
@@ -108,6 +117,12 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 			resumed = true
 		}
 	}
+	// v6.0.1：本轮执行状态追踪——空回复（无文字无工具调用）与真轮次耗尽分离处置，
+	// didToolWork 区分「有真实动作可挂起」与「零动作无可续跑」。
+	roundsRun := 0
+	emptyResp := false
+	emptyRetried := false
+	didToolWork := false
 	if msgs == nil {
 		msgs = []llm.Message{{Role: "system", Content: sys}}
 		if projectID != "" {
@@ -143,6 +158,7 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 		maxRounds = 24
 	}
 	for round := 0; round < maxRounds; round++ {
+		roundsRun = round + 1
 		chatClient, chatModel := orch.LLM(), orch.cfg.LLM.Model
 		if projectID != "" {
 			if p, perr := orch.store.GetProject(projectID); perr == nil {
@@ -163,11 +179,24 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 		}
 		orch.accountUsageChat(projectID, usage)
 		if len(resp.ToolCalls) == 0 {
+			if strings.TrimSpace(resp.Content) == "" {
+				// v6.0.1：空回复（无文字无工具调用）——常见于思维型模型把 max_tokens 全部耗在
+				// 思维链后被截断（finish_reason=length，content 空）。首轮允许一次引导重试，
+				// 仍空则走诊断路径。此前实现把空回复误判成「轮次耗尽」挂起（实证某历史任务
+				// 连续 7 轮挂起/续跑空转，挂起链退化为纯 user 堆叠，用户误以为消息未被接收）。
+				if !emptyRetried {
+					emptyRetried = true
+					msgs = append(msgs, llm.Message{Role: "user", Content: "（上一条你返回了空内容。请直接给出文字结论或发起工具调用，不要只输出思考过程。）"})
+					continue
+				}
+				emptyResp = true
+			}
 			final = resp.Content
 			break
 		}
 		msgs = append(msgs, resp)
 		for _, tc := range resp.ToolCalls {
+			didToolWork = true
 			result := orch.dispatchChat(projectID, tc)
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: result})
 		}
@@ -175,11 +204,24 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 	}
 	if final == "" {
 		if projectID != "" {
-			// v5.5.0（修复方案 H）：轮次耗尽 → 持久化完整运行链，下一条用户消息自动续跑。
-			c.mu.Lock()
-			c.savePendingRun(key, msgs)
-			c.mu.Unlock()
-			final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），本轮执行链已挂起保存。你直接发送下一条消息即可从断点续跑——已执行的工具调用不会重放，无需重复背景。已有动作与结论见执行流。）", maxRounds)
+			switch {
+			case !didToolWork && !resumed:
+				// v6.0.1：空回复且本轮零动作、无旧挂起链——不挂起（无可续跑状态），给可行动诊断。
+				final = fmt.Sprintf("（模型连续返回空回复：无文字结论、无工具调用，本轮未产生任何动作，执行链未挂起。常见原因：思维型模型把 max_tokens（当前 %d）全部耗在思维链后被截断，或服务端异常。建议在「设置」调大 max_tokens 或更换非思维模型后重发；你的消息已在会话历史中，无需重复粘贴。）", orch.cfg.LLM.MaxTokens)
+			default:
+				// v5.5.0（修复方案 H）：轮次耗尽/有动作的空回复 → 持久化完整运行链，下一条用户消息自动续跑。
+				c.mu.Lock()
+				c.savePendingRun(key, msgs)
+				c.mu.Unlock()
+				switch {
+				case emptyResp && !didToolWork:
+					final = "（模型返回空回复（无文字结论、无工具调用），上轮挂起链已保留并叠加你的新消息。你直接发送下一条消息即可从断点续跑；若连续空回复，请在「设置」调大 max_tokens 或更换非思维模型。）"
+				case emptyResp:
+					final = fmt.Sprintf("（模型第 %d 轮返回空回复，本轮已执行的工具动作链已挂起保存。你直接发送下一条消息即可从断点续跑；若连续空回复，请在「设置」调大 max_tokens 或更换非思维模型。）", roundsRun)
+				default:
+					final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），本轮执行链已挂起保存。你直接发送下一条消息即可从断点续跑——已执行的工具调用不会重放，无需重复背景。已有动作与结论见执行流。）", maxRounds)
+				}
+			}
 		} else {
 			final = fmt.Sprintf("（内部工具轮次达到上限（%d 轮），已暂停本轮执行；已有动作与结论见执行流。继续对话将在此基础上延续。）", maxRounds)
 		}

@@ -39,6 +39,9 @@ var (
 	bucketReceipts    = []byte("receipts")
 	bucketLessons     = []byte("lessons") // v3.4.0 组织级教训库（跨项目脱敏经验）
 	bucketVTs         = []byte("vts")     // v4.6 A2 验证队列（VerificationTask 一等对象）
+	// v6.0.1 P5（fix-plan 20261122）：未定性候选账本——实证"待评估"悬空态（GetCaptchaImg 案：
+	// 非 finding/非 VT/非排除，收口时无人负责）是漏报温床；候选必须三态归档有归宿。
+	bucketCandidates = []byte("candidates")
 )
 
 // ---------- 记录结构 ----------
@@ -272,7 +275,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts} {
+		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts, bucketCandidates} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -574,6 +577,10 @@ func getProjectID(rec any) string {
 	case ReceiptRecord: // v5.5.0 回执归档
 		return r.ProjectID
 	case *ReceiptRecord:
+		return r.ProjectID
+	case Candidate: // v6.0.1 P5 未定性候选
+		return r.ProjectID
+	case *Candidate:
 		return r.ProjectID
 	}
 	return ""
@@ -1240,5 +1247,59 @@ func (s *Store) ListLessons(limit int) ([]*LessonRecord, error) {
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
+	return out, err
+}
+
+// ---------- v6.0.1 P5 未定性候选（三态归档：open → finding / vt / excluded） ----------
+
+// Candidate 未定性候选账本（v6.0.1 C28 数据源）。
+// 实证事故：GetCaptchaImg「匿名可批量取码」在交付物标注「待评估」后既非 finding、非 VT、
+// 非显式排除——收口无人负责，成为漏报温床。规则：任何「待评估/未定性」线索必须落位本账本，
+// 且阶段收口（S4/S5）时 Disposition 不得停留 open。
+type Candidate struct {
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"project_id"`
+	Stage         string    `json:"stage"`
+	Title         string    `json:"title"`
+	Target        string    `json:"target,omitempty"`
+	EvidenceRef   string    `json:"evidence_ref,omitempty"` // evidence/… 或 EV- 编号
+	Disposition   string    `json:"disposition"`            // open / finding / vt / excluded
+	DispositionRef string   `json:"disposition_ref,omitempty"` // finding ID / VT ID / 排除证据文件
+	Reason        string    `json:"reason,omitempty"`          // 归位理由（excluded 强制）
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// AddCandidate 新增候选（初始 open）。
+func (s *Store) AddCandidate(c *Candidate) (string, error) {
+	c.ID = newID("CD")
+	c.CreatedAt = time.Now()
+	c.UpdatedAt = c.CreatedAt
+	if c.Disposition == "" {
+		c.Disposition = "open"
+	}
+	return c.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCandidates, c.ID, c) })
+}
+
+// SaveCandidate 更新候选（update_candidate 归位流转）。
+func (s *Store) SaveCandidate(c *Candidate) error {
+	c.UpdatedAt = time.Now()
+	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCandidates, c.ID, c) })
+}
+
+// GetCandidate 按 id 取候选。
+func (s *Store) GetCandidate(id string) (*Candidate, error) {
+	var c Candidate
+	err := s.db.View(func(tx *bolt.Tx) error { return getJSON(tx, bucketCandidates, id, &c) })
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// ListCandidates 项目全部候选（创建序）。
+func (s *Store) ListCandidates(projectID string) ([]*Candidate, error) {
+	out, err := listBy[Candidate](s, bucketCandidates, projectID)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, err
 }

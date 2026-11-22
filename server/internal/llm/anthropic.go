@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -26,27 +25,26 @@ type anthropicClient struct {
 	baseURL string
 	apiKey  string
 	http    *http.Client
+	opts    Options
+	spec    retrySpec
 }
 
+// NewAnthropic 兼容入口：默认参数（v6.0.1 P1 参数化后的默认值，与 OpenAI 客户端同一口径）。
 func NewAnthropic(baseURL, apiKey string) Client {
-	dialer := &net.Dialer{
-		Timeout:       15 * time.Second,
-		KeepAlive:     30 * time.Second,
-		FallbackDelay: 300 * time.Millisecond,
-	}
-	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     false,
-		MaxIdleConns:          20,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   20 * time.Second,
-		ResponseHeaderTimeout: 890 * time.Second,
-	}
+	return NewAnthropicWithOptions(baseURL, apiKey, DefaultOptions())
+}
+
+// NewAnthropicWithOptions 参数化构造（v6.0.1 P1）：超时/重试/响应上限从 Options 注入，
+// 替换原 900s/890s 硬编码（实证网关静默时主循环冻结 15 分钟）。
+func NewAnthropicWithOptions(baseURL, apiKey string, o Options) Client {
+	o = o.withDefaults()
+	timeout := time.Duration(o.RequestTimeoutSec) * time.Second
 	return &anthropicClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 900 * time.Second, Transport: transport},
+		http:    &http.Client{Timeout: timeout, Transport: newHTTPTransport(timeout)},
+		opts:    o,
+		spec:    newRetrySpec(o),
 	}
 }
 
@@ -92,6 +90,7 @@ type aReq struct {
 }
 
 type aResp struct {
+	Model      string   `json:"model"` // 网关实际服务的模型标识（v6.0.1 P7 漂移检测数据源）
 	Content    []aBlock `json:"content"`
 	StopReason string   `json:"stop_reason"` // end_turn / tool_use / max_tokens
 	Usage      struct {
@@ -161,7 +160,9 @@ func (c *anthropicClient) Chat(ctx context.Context, model string, messages []Mes
 		req.Tools = append(req.Tools, aToolDef{Name: t.Name, Description: t.Description, InputSchema: t.Parameters})
 	}
 	body, _ := json.Marshal(req)
-	return withRetry(ctx, func() (Message, Usage, error) { return c.chatOnce(ctx, body) })
+	return withRetry(ctx, c.spec, func(attemptCtx context.Context) (Message, Usage, error) {
+		return c.chatOnce(attemptCtx, body)
+	})
 }
 
 func (c *anthropicClient) chatOnce(ctx context.Context, body []byte) (Message, Usage, error) {
@@ -177,7 +178,7 @@ func (c *anthropicClient) chatOnce(ctx context.Context, body []byte) (Message, U
 		return Message{}, Usage{}, fmt.Errorf("LLM 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, c.opts.withDefaults().ResponseMaxBytes))
 	if resp.StatusCode >= 300 {
 		return Message{}, Usage{}, fmt.Errorf("LLM 返回 %d: %s", resp.StatusCode, truncate(string(raw), 512))
 	}
@@ -207,7 +208,7 @@ func (c *anthropicClient) chatOnce(ctx context.Context, body []byte) (Message, U
 	if len(ar.Content) == 0 {
 		return Message{}, Usage{}, fmt.Errorf("LLM 空回复（stop_reason=%s）", ar.StopReason)
 	}
-	u := Usage{PromptTokens: ar.Usage.InputTokens, CompletionTokens: ar.Usage.OutputTokens}
+	u := Usage{PromptTokens: ar.Usage.InputTokens, CompletionTokens: ar.Usage.OutputTokens, ProviderModel: ar.Model}
 	u.TotalTokens = u.PromptTokens + u.CompletionTokens
 	return m, u, nil
 }

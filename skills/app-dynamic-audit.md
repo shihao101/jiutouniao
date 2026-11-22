@@ -3,7 +3,7 @@ id: app-dynamic-audit
 title: APP 动态审计实操手册（设备通道/抓包/插桩）
 tags: app,android,frida,mitmproxy,动态,specB1
 ---
-# APP 动态审计实操手册（specB1 动态链 D1-D6 配套）
+# APP 动态审计实操手册（specB1 动态链 D1-D8 配套）
 
 
 > **v5.3.0 专项前置契约（结构化记录）**：每条任务登记 artifact_source（客户提供包/合法测试包/公共包）、device_owner（客户设备/测试设备）、test_account（测试账号/租户）、network_route（隔离网络/抓包通道）、test_data（合成数据）、runtime_access（动态环境可用性）、limitations（缺失前置）。**静态线索不得替代动态确证**——设备/账号/包缺失时逐条 needs_follow_up（reason=precondition_missing），不误记为无漏洞。
