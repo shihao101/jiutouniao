@@ -2,7 +2,10 @@
 """V6/E3 离线门：覆盖矩阵键归一化僵尸检测 + 负结果语义校验 + 端点表↔鉴权差分对账（v5.1 V8）。
 拦截形态：同义单元键漂移产生僵尸 needs_follow_up（0935 案）；
 超时/阻断类观测支撑真阴性终态（14A1 Druid 案）；终态无证据摘要；
-端点表 N 行只测抽样（某高校网关案：APIList 67 端点 diffed 12）/端点表存在但矩阵未执行。"""
+端点表 N 行只测抽样（某高校网关案：APIList 67 端点 diffed 12）/端点表存在但矩阵未执行。
+v6.3.0（S3-⑤）：V8 端点表↔矩阵对账已上移生产运行时门（引擎 endpointMatrixIssues，
+guard enforce_endpoint_matrix，含 # total=N 一致性）随 S4 收口强制执行；本门保留
+同口径离线批量复盘（生产/离线双保险）。"""
 import os, sys, re, glob
 from collections import defaultdict
 from gate_common import load_coverage, norm_ep, TERMINAL, BAD_OBSERVED

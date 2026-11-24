@@ -100,6 +100,65 @@
       <div style="font-size:11.5px;color:var(--muted);margin-top:8px">LLM 出口（只读）：{{ proxy.llmEnv || '未设置（compose LLM_PROXY）' }}</div>
       <button class="primary" style="margin-top:10px" @click="saveProxy">保存代理配置</button>
     </div>
+
+    <!-- v7.0.0 OOB 回连通道（三模式：本机自建/公共/用户自设；盲态类 D3 确证的基础设施） -->
+    <div class="card" style="margin-top:14px">
+      <h4>OOB 回连通道（v7.0.0 · 盲态类盲 SSRF/XXE/盲注/反序列化的确证基础设施）</h4>
+      <p style="margin:4px 0 10px;color:var(--text2);font-size:12px;line-height:1.9">
+        <b>auto 回退链</b>：A1 自托管 interactsh（自有域+公网入站，交互不出第三方，首选）→ C 用户自设（interactsh/dnslog/webhook）→ A2 本地监听器（内网/靶场零外联）→ B 公共 interactsh（免配置兜底，只允许无害探针）。
+        保存后热生效；运行中项目下次 oob_check 使用新配置。ROE oob_callback=deny 时仅 A2 本地监听可用。</p>
+      <label class="fld">模式</label>
+      <select v-model="oob.mode" style="width:260px">
+        <option value="auto">auto（回退链自动选择，推荐）</option>
+        <option value="local">local（本机自建 A1/A2）</option>
+        <option value="public">public（公共 interactsh）</option>
+        <option value="custom">custom（用户自设通道）</option>
+        <option value="off">off（关闭——盲态类禁测）</option>
+      </select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">config.json 默认模式：{{ oob.configDefaultMode || 'auto' }}</div>
+      <div class="grid2" style="margin-top:8px">
+        <div>
+          <h4 style="margin:0 0 6px;font-size:12.5px">A 本机自建（local）</h4>
+          <label class="fld">子形态</label>
+          <select v-model="oob.localSubMode" style="width:100%">
+            <option value="auto">auto（填了 Server URL 走 A1，否则 A2）</option>
+            <option value="interactsh">A1 · 自托管 interactsh-server</option>
+            <option value="listener">A2 · 本地监听器</option>
+          </select>
+          <label class="fld">A1 Server URL（自托管 interactsh-server）</label>
+          <input v-model="oob.localServerURL" placeholder="如 https://oob.example.com（留空=A2 监听器）">
+          <label class="fld">A1 Secret（留空保持不变）</label>
+          <input v-model="oob.localSecret" type="password" :placeholder="oob.localSecretSet ? '已配置' : ''">
+          <div class="grid2">
+            <div><label class="fld">A2 HTTP 监听端口</label><input v-model.number="oob.localHTTPPort" type="number" placeholder="8899"></div>
+            <div><label class="fld">A2 DNS 监听端口（0=不启）</label><input v-model.number="oob.localDNSPort" type="number" placeholder="0"></div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">A2 为目标可直连本机的场景（内网/靶场）；回连地址自动取本机出口 IP</div>
+        </div>
+        <div>
+          <h4 style="margin:0 0 6px;font-size:12.5px">C 用户自设（custom）</h4>
+          <label class="fld">通道类型</label>
+          <select v-model="oob.customKind" style="width:100%">
+            <option value="interactsh">interactsh（自托管 server URL+token）</option>
+            <option value="dnslog">dnslog（dnslog.cn 兼容 API）</option>
+            <option value="webhook">webhook（通用收集器：写 URL / 读 API 返回 JSON 数组）</option>
+          </select>
+          <label class="fld">Server URL</label>
+          <input v-model="oob.customServerURL" :placeholder="oob.customKind === 'dnslog' ? '如 https://dnslog.cn（getdomain.php/getrecords.php）' : '通道地址'">
+          <label class="fld">Secret / Token（留空保持不变）</label>
+          <input v-model="oob.customSecret" type="password" :placeholder="oob.customSecretSet ? '已配置' : ''">
+          <h4 style="margin:10px 0 6px;font-size:12.5px">B 公共（public）</h4>
+          <label class="fld">候选（逗号分隔，自动健康序）</label>
+          <input v-model="oob.publicServer" placeholder="oast.pro,oast.me,oast.live,webhook.site">
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">公共通道只允许无害探针载荷（引擎强制纪律）；回连行为对目标出网侧可见</div>
+        </div>
+      </div>
+      <div class="model-row" style="margin-top:10px">
+        <button class="primary" @click="saveOOB">保存 OOB 通道配置</button>
+        <button class="small" :disabled="oob.testing" @click="testOOB">{{ oob.testing ? '测试中…（起临时通道自检，约 5-15s）' : '连通性测试' }}</button>
+      </div>
+      <div v-if="oob.testResult" class="mono" style="font-size:11.5px;margin-top:6px;white-space:pre-wrap" :style="{color: oob.testResult.ok ? 'var(--green)' : 'var(--red)'}">{{ oob.testResult.text }}</div>
+    </div>
   </div>
 </template>
 
@@ -279,13 +338,53 @@ async function testProxy(endpoint, tag) {
   } catch (e) { proxy.testResult = '❌ ' + e.message }
   finally { proxy.testing = false }
 }
+// v7.0.0 OOB 回连通道（三模式）——状态与保存/测试
+const oob = reactive({ mode: 'auto', configDefaultMode: '', localSubMode: 'auto', localServerURL: '', localSecret: '', localSecretSet: false,
+  localHTTPPort: 8899, localDNSPort: 0, publicServer: '', customKind: 'interactsh', customServerURL: '', customSecret: '', customSecretSet: false,
+  testing: false, testResult: null })
+async function loadOOB() {
+  try {
+    const j = await api('/api/settings/oob')
+    if (j.mode) oob.mode = j.mode
+    if (j.local_sub_mode) oob.localSubMode = j.local_sub_mode
+    oob.localServerURL = j.local_server_url || ''
+    oob.localSecretSet = !!j.local_secret_set
+    if (j.listen_http_port) oob.localHTTPPort = j.listen_http_port
+    if (j.listen_dns_port !== undefined && j.listen_dns_port !== null) oob.localDNSPort = j.listen_dns_port
+    oob.publicServer = j.public_server || ''
+    if (j.custom_kind) oob.customKind = j.custom_kind
+    oob.customServerURL = j.custom_server_url || ''
+    oob.customSecretSet = !!j.custom_secret_set
+    oob.configDefaultMode = j.config_default_mode || ''
+  } catch (e) { /* 首次无配置静默 */ }
+}
+function oobPayload() {
+  return { mode: oob.mode, local_sub_mode: oob.localSubMode, local_server_url: oob.localServerURL,
+    local_secret: oob.localSecret, listen_http_port: oob.localHTTPPort, listen_dns_port: oob.localDNSPort,
+    public_server: oob.publicServer, custom_kind: oob.customKind, custom_server_url: oob.customServerURL, custom_secret: oob.customSecret }
+}
+async function saveOOB() {
+  try {
+    await api('/api/settings/oob', 'POST', oobPayload())
+    oob.localSecret = ''; oob.customSecret = ''
+    session.showToast('OOB 通道已保存并热生效'); await loadOOB()
+  } catch (e) { session.showToast(e.message) }
+}
+async function testOOB() {
+  oob.testing = true; oob.testResult = null
+  try {
+    const j = await api('/api/settings/oob/test', 'POST', oobPayload())
+    oob.testResult = { ok: !!j.ok, text: (j.ok ? '✅ ' : '❌ ') + 'mode=' + (j.mode || '?') + ' | kind=' + (j.kind || '?') + ' | 基域=' + (j.base_domain || '-') + ' | status=' + (j.status || '?') + ' | 自检=' + (j.self_check || '-') + (j.detail ? '\n' + j.detail : '') }
+  } catch (e) { oob.testResult = { ok: false, text: '❌ ' + e.message } }
+  finally { oob.testing = false }
+}
 onMounted(async () => {
   await reload()
   const s = await api('/api/settings')
   ph.recon = { shodan: s.recon?.shodan ? '已配置（留空保持）' : '', fofa: s.recon?.fofa ? '已配置（留空保持）' : '', quake: s.recon?.quake ? '已配置（留空保持）' : '', zoomeye: s.recon?.zoomeye ? '已配置（留空保持）' : '' }
   if (s.recon?.fofa_email) recon.fofaEmail = s.recon.fofa_email
   if (s.pricing) { price.in = s.pricing.in; price.out = s.pricing.out }
-; await loadProxy()})
+; await loadProxy(); await loadOOB()})
 </script>
 
 <style scoped>

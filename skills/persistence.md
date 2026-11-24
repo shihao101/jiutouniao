@@ -48,8 +48,8 @@ tags: 持久化,权限维持,清理,s6,s7
 
 | 排查项 | 只读命令骨架 | 可疑信号 |
 |---|---|---|
-| 计划任务 | `cat /etc/crontab /etc/cron.d/* /var/spool/cron/* 2>/dev/null`、`systemctl list-timers --all` | 指向 /tmp//dev/shm/非常见路径的执行项、最近新增且无业务归属 |
-| SSH 后门 | `grep -v '^#' /root/.ssh/authorized_keys`（逐用户）、`stat` 各 authorized_keys 修改时间 | 非运维窗口新增的公钥、备注异常 |
+| 计划任务 | `cat /etc/crontab /etc/cron.d/* /var/spool/cron/* 2>/dev/null`、`systemctl list-timers --all`、`atq; ls -la /var/spool/cron/atjobs 2>/dev/null`（v6.7.0 补：at 一次性任务） | 指向 /tmp//dev/shm/非常见路径的执行项、最近新增且无业务归属 |
+| SSH 后门 | `grep -v '^#' /root/.ssh/authorized_keys`（逐用户）、`stat` 各 authorized_keys 修改时间；`cat ~/.ssh/known_hosts` 新增条目比对（v6.7.0 补） | 非运维窗口新增的公钥、备注异常；known_hosts 突然出现授权拓扑外的内网主机指纹（=横向线索或前人遗留） |
 | 账号面 | `awk -F: '$3>=1000{print}' /etc/passwd`、`passwd -S` 全量、`/etc/shadow` 最近修改 | uid≥1000 非业务账号、空口令/已锁标记异常 |
 | 启动项 | `ls ~/.config/autostart /etc/xdg/autostart`、`cat ~/.profile ~/.bashrc` 尾部 | 隐藏文件执行行、base64/eval 类内容 |
 | 进程/端口 | `ss -tlnp`、`ps aux`（对比业务基线） | 未知监听、/tmp 起源进程、非常规端口服务 |

@@ -134,5 +134,21 @@ func (r *ROEProfile) Digest() string {
 			"allow": "可自建测试账号（唯一标记+S7 清理登记）",
 		}[v])
 	}
+	// v6.1.0（S1 修复方案⑧）：ROE 运行时消费诚实标注——windows/max_conn_per_s/cooldown 由
+	// ROERuntimeEnforcer 进程内强制；rotation 未接入出口层前只登记不强制，明确标 unenforced，
+	// 禁止让模型把「配置存在」误读为「引擎已强制」。
+	runs := []string{"windows", "max_conn_per_s", "cooldown_protocol"}
+	configured := []string{}
+	for _, k := range runs {
+		if v := strings.TrimSpace(r.Values[k]); v != "" && v != "none" {
+			configured = append(configured, k+"="+v)
+		}
+	}
+	if len(configured) > 0 {
+		lines = append(lines, "- ROE 运行时门（引擎强制）：时间窗/连接预算/冷却协议逐命令判定（"+strings.Join(configured, "、")+"）——窗口外/超预算/冷却期命令确定性拦截留证")
+	}
+	if v := strings.TrimSpace(r.Values["rotation"]); v != "" && v != "unlimited" {
+		lines = append(lines, "- rotation="+v+"【unenforced】：出口轮换额度需出口代理层支持，当前仅登记人工核对——不得当作引擎已强制")
+	}
 	return strings.Join(lines, "\n")
 }

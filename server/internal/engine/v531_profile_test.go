@@ -82,7 +82,7 @@ func TestV531LoadExecutionProfiles(t *testing.T) {
 
 func TestV531ProfileGateProductionSafe(t *testing.T) {
 	o, _ := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531", Target: "https://target.example", ExecutionProfile: "production_safe"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531", Target: "https://target.example", ExecutionProfile: "production_safe"}
 	_ = o.store.SaveProject(p)
 
 	blocked := []string{
@@ -127,7 +127,7 @@ func TestV531ProfileGateProductionSafe(t *testing.T) {
 	}
 	// 空档/未知档一律按 production_safe（缺省收紧）
 	for _, prof := range []string{"", "unknown-lab", "PROD_SAFE"} {
-		q := &store.Project{ID: "P-V531-X", ExecutionProfile: prof}
+		q := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-X", ExecutionProfile: prof}
 		if o.profileOf(q) != "production_safe" {
 			t.Errorf("档位 %q 应归一为 production_safe", prof)
 		}
@@ -139,7 +139,7 @@ func TestV531ProfileGateProductionSafe(t *testing.T) {
 
 func TestV531ProfileGateIsolatedLab(t *testing.T) {
 	o, _ := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-LAB", Target: "http://lab.example", ExecutionProfile: "isolated_lab"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-LAB", Target: "http://lab.example", ExecutionProfile: "isolated_lab"}
 	_ = o.store.SaveProject(p)
 	// Lab 允许受控写/PoC 链（不在档内拦截——走风险分级+审批链）
 	allowedInLab := []string{
@@ -170,8 +170,8 @@ func TestV531ProfileGateIsolatedLab(t *testing.T) {
 
 func TestV531LabOnlyBanner(t *testing.T) {
 	o, _ := v48Orchestrator(t)
-	prod := &store.Project{ID: "P-V531-B1", ExecutionProfile: "production_safe"}
-	lab := &store.Project{ID: "P-V531-B2", ExecutionProfile: "isolated_lab"}
+	prod := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-B1", ExecutionProfile: "production_safe"}
+	lab := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-B2", ExecutionProfile: "isolated_lab"}
 	if b := o.labOnlyBanner(prod, "persistence"); !strings.Contains(b, "Lab Only") {
 		t.Fatalf("production_safe 下 Lab Only 技能应注入横幅")
 	}
@@ -186,20 +186,20 @@ func TestV531LabOnlyBanner(t *testing.T) {
 func TestV531ProfilePersistDefault(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	// store 层缺省收紧：空/未知档落库为 production_safe，isolated_lab 显式保留
-	p1 := &store.Project{ID: "P-V531-D1", Name: "缺省"}
+	p1 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-D1", Name: "缺省"}
 	if err := st.CreateProject(p1); err != nil {
 		t.Fatal(err)
 	}
 	if p1.ExecutionProfile != "production_safe" {
 		t.Fatalf("空档应缺省 production_safe，实际 %q", p1.ExecutionProfile)
 	}
-	p2 := &store.Project{ID: "P-V531-D2", Name: "靶场", ExecutionProfile: "isolated_lab"}
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-D2", Name: "靶场", ExecutionProfile: "isolated_lab"}
 	_ = st.CreateProject(p2)
 	got, _ := st.GetProject(p2.ID)
 	if got.ExecutionProfile != "isolated_lab" {
 		t.Fatalf("显式 isolated_lab 应持久化，实际 %q", got.ExecutionProfile)
 	}
-	p3 := &store.Project{ID: "P-V531-D3", Name: "非法档", ExecutionProfile: "bogus"}
+	p3 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-D3", Name: "非法档", ExecutionProfile: "bogus"}
 	_ = st.CreateProject(p3)
 	got3, _ := st.GetProject(p3.ID)
 	if got3.ExecutionProfile != "production_safe" {

@@ -52,8 +52,8 @@ func matrixTableFixture(omitVerdict map[int]bool, drop []int) string {
 		}
 		if omitVerdict[i] {
 			b.WriteString(fmt.Sprintf("| C-%02d | 触发面摘要 |  | 证据指针 | TH-01 |\n", i))
-		} else if verdict == "假设" {
-			// v5.9.0 执行卡门：假设行附五要素标记（入口/探针/阳性/阴性/停止）
+		} else if verdict == "假设" || verdict == "待判定" {
+			// v5.9.0 执行卡门 + v6.3.0 S3-② 口径统一：假设/待判定行附五要素标记（入口/探针/阳性/阴性/停止）
 			b.WriteString(fmt.Sprintf("| C-%02d | 入口: /e%d 首探针: GET?x=probe 阳性: 差异 阴性: 无差异 停止: ≤6 请求 | %s | 证据指针 | TH-01 |\n", i, i, verdict))
 		} else {
 			b.WriteString(fmt.Sprintf("| C-%02d | 触发面摘要 | %s | 证据指针 | TH-01 |\n", i, verdict))
@@ -65,7 +65,7 @@ func matrixTableFixture(omitVerdict map[int]bool, drop []int) string {
 // M2：判定表缺失 / 缺行 / 无判定格 / 完整通过 四分支
 func TestV48MatrixGate(t *testing.T) {
 	o, _ := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V48M"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48M"}
 	_ = o.store.SaveProject(p)
 
 	// ① 判定表缺失 → 拦截
@@ -85,8 +85,9 @@ func TestV48MatrixGate(t *testing.T) {
 	if len(issues) == 0 || !strings.Contains(issues[0], "无三态判定格") {
 		t.Fatalf("无判定格应拦截: %v", issues)
 	}
-	// ④ 27 行三态完整 → 通过（且收口门路径执行同结果）
+	// ④ 27 行三态完整 → 通过（且收口门路径执行同结果；v6.3.0 S3-① 起收口门需 S3 三件套齐备）
 	_, _ = o.exec.WriteFile(p.ID, "deliverables/s3-筛查矩阵判定表.md", matrixTableFixture(nil, nil))
+	writeS3ClosureDeliverables(t, o, p)
 	if issues := o.matrixTableIssues(p); len(issues) != 0 {
 		t.Fatalf("完整判定表应通过: %v", issues)
 	}
@@ -103,7 +104,7 @@ func TestV48MatrixGate(t *testing.T) {
 // M4：日期字段必须落在任务时间窗内（早于开始 / 晚于今天拦截；窗内放行；自由文本不扫）
 func TestV48DateWindow(t *testing.T) {
 	o, _ := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V48D", CreatedAt: time.Now().Add(-48 * time.Hour)}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48D", CreatedAt: time.Now().Add(-48 * time.Hour)}
 	_ = o.store.SaveProject(p)
 	today := time.Now().Format("2006-01-02")
 	early := time.Now().Add(-72 * time.Hour).Format("2006-01-02")
@@ -131,7 +132,7 @@ func TestV48DateWindow(t *testing.T) {
 func TestV48ReflectFailureHint(t *testing.T) {
 	o, _ := v48Orchestrator(t)
 	o.heads = map[string]*Head{}
-	p := &store.Project{ID: "P-V48Q", Target: "a.example.com", StageStates: map[string]*store.StageState{
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48Q", Target: "a.example.com", StageStates: map[string]*store.StageState{
 		"s4": {Status: "done", ReflectFailures: 2},
 	}}
 	out := o.buildContextPack(p, "s5")
@@ -196,7 +197,7 @@ func TestV48AdversarialPassVT(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	o.llm = &fakeLLM{reply: "- [假设] 图床接口可 SSRF 打内网元数据 | 证据指针: evidence/s2.txt | 类: C-12\n" +
 		"- [假设] 管理后台弱口令可达 | 证据指针: evidence/s2.txt | 类: C-01\n"}
-	p := &store.Project{ID: "P-V48R", CreatedAt: time.Now()}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48R", CreatedAt: time.Now()}
 	_ = st.SaveProject(p)
 	// 主清单已含「管理后台弱口令」→ 该条应判 covered
 	_, _ = o.exec.WriteFile(p.ID, "deliverables/s3-筛查矩阵判定表.md", matrixTableFixture(nil, nil))
@@ -234,7 +235,7 @@ func TestV48AdversarialPassVT(t *testing.T) {
 func TestV48AdversarialPassFailOpen(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	o.llm = &fakeErrLLM{}
-	p := &store.Project{ID: "P-V48S"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48S"}
 	_ = st.SaveProject(p)
 	note, deliv := o.adversarialAssumptionPass(context.Background(), p, "s3")
 	if note != "" || deliv != "" {
@@ -262,7 +263,7 @@ func (f *fakeErrLLM) Chat(_ context.Context, _ string, _ []llm.Message, _ []llm.
 // W4：身份获取六轨编排门（无凭证+登录面 → 逐轨 VT 留痕）
 func TestV48IdentityTracks(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V48W"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48W"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddAsset(&store.Asset{ProjectID: p.ID, Type: "登录面", Value: "http://t/admin/login", Detail: "管理后台登录"})
 
@@ -286,7 +287,7 @@ func TestV48IdentityTracks(t *testing.T) {
 	}
 	// ③ 已获身份（verified session loot）但无 VT 留痕 → 拦截首轨留痕（新项目避免清库）
 	o3, st3 := v48Orchestrator(t)
-	p3 := &store.Project{ID: "P-V48W2"}
+	p3 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48W2"}
 	_ = st3.SaveProject(p3)
 	_, _ = st3.AddAsset(&store.Asset{ProjectID: p3.ID, Type: "登录面", Value: "http://t/admin/login"})
 	_, _ = st3.AddLoot(&store.LootRecord{ProjectID: p3.ID, Type: "session", Target: "t", Masked: "adm***23", Verified: "verified"})
@@ -301,7 +302,7 @@ func TestV48IdentityTracks(t *testing.T) {
 	}
 	// ⑤ 无登录面 → 不适用（不编造）
 	o2, st2 := v48Orchestrator(t)
-	p2 := &store.Project{ID: "P-V48X"}
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48X"}
 	_ = st2.SaveProject(p2)
 	if issues := o2.identityTrackIssues(p2, "s4"); len(issues) != 0 {
 		t.Fatalf("无登录面应不适用: %v", issues)
@@ -317,7 +318,7 @@ func TestV48IdentityTracks(t *testing.T) {
 func TestV48W4ContextHint(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	o.heads = map[string]*Head{}
-	p := &store.Project{ID: "P-V48Y", Target: "a.example.com"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48Y", Target: "a.example.com"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddAsset(&store.Asset{ProjectID: p.ID, Type: "登录面", Value: "http://t/login"})
 	out := o.buildContextPack(p, "s4")
@@ -337,7 +338,7 @@ func TestV48W4ContextHint(t *testing.T) {
 // W5：行为预算器（批量配额/空壳即停/冷却协议）
 func TestV48BatchBudget(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V48B"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48B"}
 	_ = st.SaveProject(p)
 	cmd := "nuclei -u http://t -t cves/"
 
@@ -356,7 +357,7 @@ func TestV48BatchBudget(t *testing.T) {
 	}
 	// ③ 配额超限 → 冷却协议（默认 12/10min）
 	o2, st2 := v48Orchestrator(t)
-	p2 := &store.Project{ID: "P-V48B2"}
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48B2"}
 	_ = st2.SaveProject(p2)
 	for i := 0; i < o2.cfg.Engine.BatchQuotaPer10Min; i++ {
 		if note := o2.batchBudgetGate(p2, "s4", cmd); note != "" {
@@ -377,7 +378,7 @@ func TestV48BatchBudget(t *testing.T) {
 	}
 	// ⑥ 有产出批量反馈附基线自检提醒；空壳反馈附空壳提示
 	o3, st3 := v48Orchestrator(t)
-	p3 := &store.Project{ID: "P-V48B3"}
+	p3 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48B3"}
 	_ = st3.SaveProject(p3)
 	if f := o3.batchResultFeedback(p3, "s4", cmd, strings.Repeat("hit", 100), 0); !strings.Contains(f, "批间基线自检") {
 		t.Fatalf("有产出批量应附基线自检提醒: %q", f)

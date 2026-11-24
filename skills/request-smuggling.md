@@ -1,11 +1,15 @@
 ---
 id: request-smuggling
 title: HTTP 请求走私手册（CL-TE/TE-CL 变体探测）
-tags: smuggling,走私,cl,te,代理,s4
+tags: smuggling,走私,cl,te,代理,s4,s2
 ---
 # HTTP 请求走私手册（前后端 Content-Length / Transfer-Encoding 解析分歧）
 
 > 判据=「计时差异/下一个请求被污染」的**受控探测**；确证后利用（劫持他人请求/绕过前端控制）转 S5 审批。
+
+## 阶段边界（S2，v6.2.0——与 heads/s2.md S2-10 同源）
+
+S2 侦察窗口**只做面识别先验与线索登记，不执行本手册任何探针**：第一节「前置确认」的响应头/架构信号属于既有响应的被动读取；一旦命中信号，S2 当场 `record_vt`（Priority=1，title 含「request-smuggling」）并 `upsert_fact key=arch.signal`，TE/CL/TE-TE/CL-CL 全部变体探测（第二节）与 h2c 升级探针归 S4 投递执行——S2 发包探测属阶段越界（s1ActionGate 类边界由阶段头与治理门强制）。
 
 ## 一、前置确认（有代理/前端链才值得测）
 

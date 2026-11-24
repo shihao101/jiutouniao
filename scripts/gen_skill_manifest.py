@@ -24,9 +24,15 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 SKILLS_DIR = os.path.join(ROOT, "skills")
 ROUTER = os.path.join(SKILLS_DIR, "00-router.md")
 OUT = os.path.join(SKILLS_DIR, "manifest.json")
-VERSION = "5.6.0"
+VERSION = "5.8.0"
 
 STAGE_RE = re.compile(r"^(s[1-8]|specA|specB1|specB2)$")
+
+# v6.6.0（SP-④）：短标签映射——frontmatter 中的 a/b1/b2 归一化为 specA/specB1/specB2。
+# 此前短标签不匹配 STAGE_RE 被静默丢弃，7 个专项相关技能 stage_fit 落成 s4 或空，
+# spec 阶段 load_skill 检索 +3 加成仅覆盖 4/12（审计实证）。
+SHORT_STAGE_TAG = {"a": "specA", "b1": "specB1", "b2": "specB2"}
+DROPPED_STAGE_TAGS = set()
 
 # 关键技能策展覆盖表：aliases（检索同义词）/ handoff_to（交接去向）。
 # 覆盖路由器与高危/家族卡技能；其余技能 aliases/handoff 不硬造（宁缺勿滥，检索正文兜底）。
@@ -44,6 +50,7 @@ CURATED = {
     "upload-bypass": {"aliases": ["文件上传", "上传绕过"], "handoff_to": ["webshell-memshell"]},
     "webshell-memshell": {"aliases": ["webshell", "内存马", "后门"]},
     "persistence": {"aliases": ["权限维持", "后门驻留"]},
+    "cleanup-handover": {"aliases": ["收尾", "清理移交", "影响量化", "待续处置", "移交清单"]},
     "logic-csrf-deser": {"aliases": ["反序列化", "csrf"]},
     "identity-bootstrapping": {"aliases": ["身份获取", "账号获取"], "handoff_to": ["session-state-chain"]},
         "session-state-chain": {"aliases": ["会话链", "会话构造"]},
@@ -75,6 +82,16 @@ CURATED = {
     "framework-priors": {"aliases": ["框架指纹", "先验"]},
     "report-writing": {"aliases": ["报告", "报告编写"]},
     "subdomain-takeover": {"aliases": ["子域接管", "接管"]},
+    # v6.6.0（SP-⑤）：三大专项新增条目配套技能（P0 批 A12/D7/W7 + P1 批 A13/A14/D8/W8/W9 + P2 W10）
+    "llm-agent-protocol-boundaries": {"aliases": ["mcp", "a2a", "agent协议", "信任边界", "受众绑定", "混淆代理"], "depends_on": ["llm-agent-toolchain", "auth-flow-deep", "evidence-standard"], "handoff_to": ["api-idor", "report-writing"]},
+    "app-integrity-server-verify": {"aliases": ["play integrity", "app attest", "设备完整性", "完整性判定", "防重放"], "depends_on": ["app-dynamic-audit", "evidence-standard"], "handoff_to": ["evidence-standard", "report-writing"]},
+    "miniapp-platform-login": {"aliases": ["授权码", "code2session", "登录态", "会话绑定", "身份映射"], "depends_on": ["miniapp-audit", "miniapp-server"], "handoff_to": ["api-idor", "session-lifecycle", "report-writing"]},
+    "llm-agent-memory-integrity": {"aliases": ["agent记忆", "记忆投毒", "长期记忆", "上下文投毒"], "depends_on": ["rag-attack", "evidence-standard"], "handoff_to": ["evidence-standard", "report-writing"]},
+    "llm-gateway-policy-chain": {"aliases": ["llm网关", "防护链", "内容安全", "策略链", "误报漏报"], "depends_on": ["llm-top10", "evidence-standard"], "handoff_to": ["evidence-standard", "report-writing"]},
+    "app-sdk-privacy-behavior": {"aliases": ["sdk数据行为", "隐私清单", "privacy manifest", "sdk治理"], "depends_on": ["app-privacy-compliance", "app-static-audit"], "handoff_to": ["report-writing"]},
+    "miniapp-host-isolation": {"aliases": ["宿主桥接", "跨小程序", "宿主能力", "隔离边界"], "depends_on": ["miniapp-audit"], "handoff_to": ["api-idor", "report-writing"]},
+    "miniapp-cloud-identity": {"aliases": ["云函数身份", "部署边界", "云资源身份", "iam"], "depends_on": ["miniapp-audit", "miniapp-server", "cloud-security"], "handoff_to": ["evidence-standard", "report-writing"]},
+    "miniapp-privacy-governance": {"aliases": ["备案", "隐私披露", "sdk治理证据", "个人信息"], "depends_on": ["app-privacy-compliance"], "handoff_to": ["report-writing"]},
 }
 
 # Lab Only 技能集（与 server/internal/engine/profile.go labOnlySkillIds 保持一致——策展兜底同源）。
@@ -136,7 +153,19 @@ def main():
             sys.exit(1)
         with open(os.path.join(SKILLS_DIR, fname), encoding="utf-8") as f:
             body = f.read()
-        stage_fit = [t for t in tags if STAGE_RE.match(t)]
+        stage_fit = []
+        for t in tags:
+            if STAGE_RE.match(t):
+                if t not in stage_fit:
+                    stage_fit.append(t)
+            elif t in SHORT_STAGE_TAG:
+                full = SHORT_STAGE_TAG[t]
+                if full not in stage_fit:
+                    stage_fit.append(full)
+            elif re.fullmatch(r"s\d+|spec\w+", t):
+                # 形似阶段标签但不在白名单——记录而非静默丢弃（消除再次漂移的盲区）
+                DROPPED_STAGE_TAGS.add(f"{sid}:{t}")
+        stage_fit.sort()
         cur = CURATED.get(sid, {})
         deps = set(cur.get("depends_on", []))
         deps |= router_pairs().get(sid, set())
@@ -210,6 +239,8 @@ def main():
     n_lab = sum(1 for s in skills if s.get("lab_only"))
     n_stage = sum(1 for s in skills if s.get("stage_fit"))
     print(f"OK manifest 重生成: {len(skills)} 技能 | depends_on {n_dep} | aliases {n_ali} | stage_fit {n_stage} | lab_only {n_lab}")
+    if DROPPED_STAGE_TAGS:
+        print(f"WARN 形似阶段标签但未入白名单（请核对 STAGE_RE/SHORT_STAGE_TAG）: {', '.join(sorted(DROPPED_STAGE_TAGS))}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 ---
 id: "intel-factory"
 title: "JS 情报工厂标准管线（v4.6 W2：chunk 全量/配置必取/sourcemap 还原/四件套产出）"
-tags: "侦察,bundle,sourcemap,情报,s2,s3"
+tags: 侦察,bundle,sourcemap,情报,s2,s3,s1
 ---
 # JS 情报工厂标准管线（v4.6 W2）
 

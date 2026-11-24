@@ -27,13 +27,13 @@ func gateBlocked(t *testing.T, o *Orchestrator, st *store.Store, p *store.Projec
 
 func TestV531ChannelGatesRunCommand(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-C1", Name: "通道测试", Target: "https://target.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C1", Name: "通道测试", Target: "https://target.example", Authorized: true}
 	_ = st.SaveProject(p)
 	// 执行档门：HTTP DELETE（生产档违禁）
 	gateBlocked(t, o, st, p, "run_command",
 		`{"command":"curl -s -X DELETE http://target.example/api/items/5","reason":"r"}`, "production_safe")
 	// 范围门：strict_scope 项目访问范围外目标
-	ps := &store.Project{ID: "P-V531-C1S", Name: "范围测试", Target: "https://target.example", StrictScope: true}
+	ps := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C1S", Name: "范围测试", Target: "https://target.example", StrictScope: true, Authorized: true}
 	_ = st.SaveProject(ps)
 	gateBlocked(t, o, st, ps, "run_command",
 		`{"command":"curl -s https://other-univ.edu.cn/admin","reason":"r"}`, "范围外目标")
@@ -49,7 +49,7 @@ func TestV531ChannelGatesRunCommand(t *testing.T) {
 
 func TestV531ChannelGatesRunAsync(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-C2", Name: "异步通道", Target: "https://target.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C2", Name: "异步通道", Target: "https://target.example", Authorized: true}
 	_ = st.SaveProject(p)
 	// 此前 run_async 完全绕过双门——后台 mysqldump 批量导出必须被执行档拦截
 	gateBlocked(t, o, st, p, "run_async",
@@ -58,7 +58,7 @@ func TestV531ChannelGatesRunAsync(t *testing.T) {
 
 func TestV531ChannelGatesShellWrite(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-C3", Name: "会话注入", Target: "https://target.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C3", Name: "会话注入", Target: "https://target.example", Authorized: true}
 	_ = st.SaveProject(p)
 	// 此前 stdin 注入只过风险分级不过双门——注册写提交须被注册门拦截
 	gateBlocked(t, o, st, p, "shell_write",
@@ -70,7 +70,7 @@ func TestV531ChannelGatesShellWrite(t *testing.T) {
 
 func TestV531ChannelGatesShellOpen(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-C4", Name: "会话打开", Target: "https://target.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C4", Name: "会话打开", Target: "https://target.example", Authorized: true}
 	_ = st.SaveProject(p)
 	// shell_open 自 v5.2.0 已有双门，v5.3.1 并入执行档门
 	gateBlocked(t, o, st, p, "shell_open",
@@ -79,7 +79,7 @@ func TestV531ChannelGatesShellOpen(t *testing.T) {
 
 func TestV531ChannelGatesHexstrike(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V531-C5", Name: "工具桥", Target: "https://target.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C5", Name: "工具桥", Target: "https://target.example", Authorized: true}
 	_ = st.SaveProject(p)
 	o.hex = NewHexStrikeBridge("http://127.0.0.1:1") // 门必须先于网关调用（端口不通即可验证未被触达）
 	gateBlocked(t, o, st, p, "hexstrike_command",
@@ -92,7 +92,7 @@ func TestV531ChannelGatesAllowNormalFlow(t *testing.T) {
 	_ = st2
 	o.approver = ap // v48Orchestrator 不预置审批器；正常流必须经审批链
 	// l1 策略：L0/L1 自动批准——治理门放行的正常流量不被误伤
-	p := &store.Project{ID: "P-V531-C6", Name: "正常流", Target: "https://target.example", AutoApprove: "l1"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V531-C6", Name: "正常流", Target: "https://target.example", AutoApprove: "l1", Authorized: true}
 	_ = st.SaveProject(p)
 	got := o.dispatch(context.Background(), p, "s4", mkCall("run_command", `{"command":"echo gate-ok","reason":"r"}`))
 	if strings.Contains(got, "拦截") || strings.Contains(got, "拒绝") {

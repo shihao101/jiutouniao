@@ -15,11 +15,11 @@
         <input v-model="f.name" placeholder="如：XX 系统 Web 渗透测试">
         <label class="fld">目标（每行一个）*</label>
         <textarea v-model="f.target" rows="3" placeholder="demo.example.com&#10;10.70.160.234&#10;https://chat.example.com（LLM 应用入口）"></textarea>
-        <label class="fld">授权范围（一句话写清目标与边界即可；v6.0.0 支持授权语义——内网资产不必事先枚举）<button class="small ghost" style="margin-left:8px" @click="resetScope">重置</button></label>
+        <label class="fld">授权范围（支持多行，全文注入执行上下文；v6.0.0 支持授权语义——内网资产不必事先枚举）<button class="small ghost" style="margin-left:8px" @click="resetScope">重置</button></label>
         <textarea v-model="f.scope" rows="2" placeholder="如：授权 test.example.com 全部子域与 80/443 端口，含立足点可达内网资产的受控横向（逐项审批）；第三方组件与生产数据库除外"></textarea>
-        <label class="fld">测试规则 ROE（一句话写清禁区与纪律即可）<button class="small ghost" style="margin-left:8px" @click="resetRoe">重置</button></label>
+        <label class="fld">测试规则 ROE（支持多行，全文注入执行上下文——每条纪律都会被模型读到）<button class="small ghost" style="margin-left:8px" @click="resetRoe">重置</button></label>
         <textarea v-model="f.roe" rows="3"></textarea>
-        <label class="fld">测试目的 / 成功标准（一句话即可）<button class="small ghost" style="margin-left:8px" @click="resetSuccess">重置</button></label>
+        <label class="fld">测试目的 / 成功标准（支持多行——S8 报告必须对照回应）<button class="small ghost" style="margin-left:8px" @click="resetSuccess">重置</button></label>
         <textarea v-model="f.success" rows="2"></textarea>
         <label class="fld">认证会话（可选·登录后测试）</label>
         <textarea v-model="f.auth" rows="2" placeholder="测试账号 / Cookie / Token 说明（仅用于授权测试）"></textarea>
@@ -39,13 +39,13 @@
         <label class="fld">九头编制（点击加载专项头；说明见 title 悬浮）</label>
         <div class="spec-row">
           <div class="spec-chip" :class="{on: f.specs.has('A')}" @click="toggle('A')"
-               title="专项 A · AI(LLM)：提示注入 / 越狱 / 系统提示提取 / Agent 工具滥用（A1-A11），OWASP LLM Top10 + ATLAS">
+               title="专项 A · AI(LLM)：提示注入 / 越狱 / 系统提示提取 / Agent 工具滥用 / MCP·A2A 协议边界 / 记忆完整性 / 网关策略链（A1-A14），OWASP LLM Top10 2026 + Agentic Top10 2026 + ATLAS">
             {{ f.specs.has('A') ? '☑' : '☐' }} 专项 A · AI(LLM)</div>
           <div class="spec-chip" :class="{on: f.specs.has('B1')}" @click="toggle('B1')"
-               title="专项 B1 · APP 静态+动态：jadx 反编译审计 + Frida 运行时双链，OWASP MASTG">
+               title="专项 B1 · APP 静态+动态：jadx 反编译审计 + Frida 运行时双链 + 平台完整性服务端判定 + 隐私清单/SDK 数据行为（静态链 S1-S5 + 动态链 D1-D8），OWASP MASTG 2.0/MASVS 2.1">
             {{ f.specs.has('B1') ? '☑' : '☐' }} 专项 B1 · APP</div>
           <div class="spec-chip" :class="{on: f.specs.has('B2')}" @click="toggle('B2')"
-               title="专项 B2 · 小程序全流程：wxapkg 解包 → 密钥审计 → 前端逻辑 → 接口与云侧（W1-W6）">
+               title="专项 B2 · 小程序全流程：wxapkg 解包 → 密钥审计 → 前端逻辑 → 接口与云侧 → 平台登录态/宿主隔离/云身份/治理证据（W1-W10）">
             {{ f.specs.has('B2') ? '☑' : '☐' }} 专项 B2 · 小程序</div>
         </div>
         <div class="row2">

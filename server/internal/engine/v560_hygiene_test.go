@@ -69,7 +69,7 @@ func TestV560StreamToolNoPlaintextSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.creds = svc
-	p := &store.Project{ID: "P-HY", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-HY", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	// 模拟 store_credential 的参数流经 streamTool
 	args, _ := json.Marshal(map[string]string{"identity": "operator", "kind": "bearer", "secret": "leaky-token-xyz"})
@@ -92,7 +92,7 @@ func TestV560RequestCredentialNoPlaintext(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.creds = svc
-	p := &store.Project{ID: "P-RC", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-RC", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 
 	// 异步等待提问 → 1s 后回答 → 校验入库/掩码/无明文
@@ -149,7 +149,7 @@ func TestV560ProjectHasIdentityAndStateBlock(t *testing.T) {
 	t.Setenv(credentials.EnvMasterKey, v560Key)
 	svc, _ := credentials.New(st)
 	o.creds = svc
-	p := &store.Project{ID: "P-ST", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-ST", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 
 	// S0：无任何身份
@@ -184,7 +184,7 @@ func TestV560ProjectHasIdentityAndStateBlock(t *testing.T) {
 
 func TestV560IdentityTrackDispositionGate(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-DIS", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-DIS", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	_, _ = o.store.AddAsset(&store.Asset{ProjectID: p.ID, Type: "登录面", Value: "http://t/login"})
 	// 六轨全部登记但仅 pending（未处置）→ 应拦（审计修复：此前只查标题）

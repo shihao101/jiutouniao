@@ -1,7 +1,7 @@
 ---
 id: llm-payloads
 title: 提示注入与越狱载荷库
-tags: llm,payload,越狱,提示注入
+tags: llm,payload,越狱,提示注入,specA
 ---
 # 提示注入与越狱载荷库（授权测试用）
 

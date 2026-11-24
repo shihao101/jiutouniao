@@ -1,7 +1,7 @@
 ---
 id: api-idor
 title: API 测试与越权（IDOR/BOLA）手册
-tags: api,idor,bola,越权,接口
+tags: api,idor,bola,越权,接口,s4,s5
 ---
 # API 测试与越权手册（OWASP API Top 10）
 

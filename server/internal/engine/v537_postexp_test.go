@@ -11,7 +11,7 @@ import (
 func TestV537PostExploitGate(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	// 未勾选：s6 → skipped，Summary 记录决策原因
-	p := &store.Project{ID: "P-V537-A", Name: "未勾选", PostExploit: false,
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-A", Name: "未勾选", PostExploit: false,
 		StageStates: map[string]*store.StageState{"s6": {Status: "pending"}}}
 	_ = st.SaveProject(p)
 	state := p.StageStates["s6"] // 与 runPipeline 一致：gate 操作的是项目映射内的状态对象
@@ -27,7 +27,7 @@ func TestV537PostExploitGate(t *testing.T) {
 		t.Fatalf("skipped 未落库: %+v", got.StageStates["s6"])
 	}
 	// 勾选：s6 不跳过
-	p2 := &store.Project{ID: "P-V537-B", Name: "已勾选", PostExploit: true}
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-B", Name: "已勾选", PostExploit: true}
 	_ = st.SaveProject(p2)
 	state2 := &store.StageState{Status: "pending"}
 	if o.applyPostExploitGate(p2, "s6", state2) {
@@ -37,7 +37,7 @@ func TestV537PostExploitGate(t *testing.T) {
 		t.Fatalf("勾选后状态不应被改动: %+v", state2)
 	}
 	// 非 s6 阶段不受影响（s5 在未勾选时也照常执行）
-	p3 := &store.Project{ID: "P-V537-C", Name: "负例", PostExploit: false}
+	p3 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-C", Name: "负例", PostExploit: false}
 	_ = st.SaveProject(p3)
 	if o.applyPostExploitGate(p3, "s5", &store.StageState{Status: "pending"}) {
 		t.Fatal("s5 不应受后渗透门影响")
@@ -51,7 +51,7 @@ func TestV537PostExploitGate(t *testing.T) {
 
 func TestV537PostExploitPersist(t *testing.T) {
 	_, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V537-D", Name: "持久化", PostExploit: true}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-D", Name: "持久化", PostExploit: true}
 	if err := st.CreateProject(p); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestV537PostExploitPersist(t *testing.T) {
 	if !got.PostExploit {
 		t.Fatal("post_exploit=true 应持久化")
 	}
-	p2 := &store.Project{ID: "P-V537-E", Name: "默认"}
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-E", Name: "默认"}
 	_ = st.CreateProject(p2)
 	got2, _ := st.GetProject(p2.ID)
 	if got2.PostExploit {
@@ -70,7 +70,7 @@ func TestV537PostExploitPersist(t *testing.T) {
 // v5.3.7 逻辑核查②补验：update_finding remediation 补写/追加
 func TestV537RemediationPatch(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V537-F", Name: "remediation"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V537-F", Name: "remediation"}
 	_ = st.SaveProject(p)
 	// 首登无 remediation → 补写
 	got := o.dispatch(testCtx(), p, "s4", mkCall("record_finding",

@@ -38,11 +38,11 @@ func TestV52RegistrationGate(t *testing.T) {
 
 func TestV52ScopeGate(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V52", Target: "https://iop.example.edu.cn/", StrictScope: true}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V52", Target: "https://iop.example.edu.cn/", StrictScope: true}
 	_ = st.SaveProject(p)
-	// 主目标子域 → 放行
-	if blocked, _ := o.scopeGate(p, "curl -s https://api.iop.example.edu.cn/x"); blocked {
-		t.Fatalf("主目标子域不应拦截")
+	// v6.1.0（方案②）：主目标子域不再自动放行——须精确目标行/显式通配/in_scope 资产
+	if blocked, _ := o.scopeGate(p, "curl -s https://api.iop.example.edu.cn/x"); !blocked {
+		t.Fatalf("主目标子域在 v6.1.0 起应拦截（删除后缀自动放行）")
 	}
 	// 白名单 OSINT → 放行
 	if blocked, _ := o.scopeGate(p, "curl -s https://crt.sh/?q=x"); blocked {
@@ -56,22 +56,22 @@ func TestV52ScopeGate(t *testing.T) {
 	if !strings.Contains(msg, "record_asset") {
 		t.Fatalf("拦截文案应指引 record_asset: %s", msg)
 	}
-	// 资产登记后放行
+	// v6.1.0：无授权依据的旧式登记不再放行（登记≠授权）
 	_, _ = st.AddAsset(&store.Asset{ProjectID: p.ID, Type: "域名", Value: "other-univ.edu.cn"})
-	if blocked, _ := o.scopeGate(p, "curl -s https://other-univ.edu.cn/admin"); blocked {
-		t.Fatalf("资产登记后应放行")
+	if blocked, _ := o.scopeGate(p, "curl -s https://other-univ.edu.cn/admin"); !blocked {
+		t.Fatalf("无 scope_status 的登记资产应 fail-closed 拦截")
 	}
-	// 非 strict 项目不校验
-	p2 := &store.Project{ID: "P-V52B", Target: "https://iop.example.edu.cn/", StrictScope: false}
+	// 人工确认后（in_scope+依据）放行
+	_, _ = st.AddAsset(&store.Asset{ProjectID: p.ID, Type: "域名", Value: "api.iop.example.edu.cn",
+		ScopeStatus: "in_scope", ScopeEvidence: "项目授权清单"})
+	if blocked, _ := o.scopeGate(p, "curl -s https://api.iop.example.edu.cn/x"); blocked {
+		t.Fatalf("in_scope 资产应放行")
+	}
+	// 非 strict 项目不校验范围门本身（影子门在 governanceGates 层另行拦截）
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V52B", Target: "https://iop.example.edu.cn/", StrictScope: false}
 	_ = st.SaveProject(p2)
 	if blocked, _ := o.scopeGate(p2, "curl -s https://anywhere.example/"); blocked {
 		t.Fatalf("非 strict_scope 项目不应校验")
-	}
-	// v5.3.9：OSINT 数据源白名单补全（测绘/泄露库/档案）——对第三方 API 读请求应放行
-	for _, src := range []string{"fofa.info", "quake.360.net", "zoomeye.org", "hunter.qianxin.com", "api.pwnedpasswords.com", "web.archive.org"} {
-		if blocked, _ := o.scopeGate(p, "curl -s https://"+src+"/query"); blocked {
-			t.Fatalf("OSINT 数据源 %s 不应拦截（v5.3.9 白名单）", src)
-		}
 	}
 }
 

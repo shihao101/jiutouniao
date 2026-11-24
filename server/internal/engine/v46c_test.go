@@ -26,7 +26,7 @@ func v46cOrchestrator(t *testing.T) (*Orchestrator, *store.Store, string) {
 // V4：L2 已批准工单既无使用痕迹也未申报 → s7 门拦截；有使用痕迹 → 放行。
 func TestV46cGateL2Unused(t *testing.T) {
 	o, st, _ := v46cOrchestrator(t)
-	p := &store.Project{ID: "P-C1"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-C1"}
 	_ = st.SaveProject(p)
 	// L2 已批工单 A：无任何使用痕迹（应拦截）
 	idUnused, _ := st.AddApproval(&store.Approval{ProjectID: p.ID, Stage: "s3",
@@ -105,7 +105,7 @@ outbound:
 	}
 	// 上下文注入：o.roe 非空 → 上下文含 ROE 节；nil → 不含
 	o, st, _ := v46cOrchestrator(t)
-	p := &store.Project{ID: "P-C2"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-C2"}
 	_ = st.SaveProject(p)
 	o.roe = rp
 	ctx := o.buildContextPack(p, "s4")
@@ -124,7 +124,7 @@ outbound:
 // 改为验证 store 侧过滤前提（本测试锁定数据形状，防止字段变更破坏枚举）。
 func TestV46cVTListShapeForSprint(t *testing.T) {
 	_, st, _ := v46cOrchestrator(t)
-	p := &store.Project{ID: "P-C3"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-C3"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddVT(&store.VerificationTask{ProjectID: p.ID, Stage: "s4", Title: "SQLi 布尔确认",
 		ReadyAssets: "scripts/b4.sh", Status: "ready", Priority: 1})

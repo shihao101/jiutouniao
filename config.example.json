@@ -25,10 +25,59 @@
   },
   "auth_token": "",
   "admin_user": "admin",
-  "admin_password": "部署后必改",
   "debug_captcha": false,
   "hexstrike_url": "",
   "max_project_tokens": 0,
   "price_per_1m_input": 0,
-  "price_per_1m_output": 0
+  "price_per_1m_output": 0,
+  "admin_password_hash": "",
+  "guard": {
+    "enforce_authorization": true,
+    "block_shadow_assets": true,
+    "enforce_asset_scope": true,
+    "enforce_s1_l0": true,
+    "enforce_s1_closure": true,
+    "enforce_s2_closure": true,
+    "enforce_batch_scope": true,
+    "enforce_s3_closure": true,
+    "enforce_target_class_matrix": true,
+    "enforce_plan_handover": true,
+    "enforce_endpoint_matrix": true,
+    "enforce_roe_runtime": true,
+    "require_s1_roe_ack": true,
+    "require_s1_oob_channel": true,
+    "lesson_behavior_per_target": true,
+    "asset_metadata_validation": true,
+    "enforce_spec_target_recon": true,
+    "enforce_spec_closure": true,
+    "enforce_s6_target_recon": true,
+    "enforce_s6_deliverables": true,
+    "enforce_s7_strict_followup_pool": true,
+    "enforce_s8_finding_report_recon": true
+  },
+  "paths": {
+    "heads_dir": "heads",
+    "prompts_dir": "prompts",
+    "skills_dir": "skills"
+  },
+  "oob": {
+    "mode": "auto",
+    "poll_interval_sec": 30,
+    "require_channel_for_blind": true,
+    "local": {
+      "sub_mode": "auto",
+      "server_url": "",
+      "secret": "",
+      "listen_http_port": 8899,
+      "listen_dns_port": 0
+    },
+    "public": {
+      "server": "oast.pro,oast.me,oast.live,webhook.site"
+    },
+    "custom": {
+      "kind": "interactsh",
+      "server_url": "",
+      "secret": ""
+    }
+  }
 }

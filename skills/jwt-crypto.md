@@ -1,7 +1,7 @@
 ---
 id: jwt-crypto
 title: JWT 与密码学实现审计手册
-tags: jwt,密码学,加密,认证
+tags: jwt,密码学,加密,认证,s2,s4
 ---
 # JWT 与密码学实现审计
 

@@ -46,5 +46,6 @@ WS 握手指纹：`Upgrade: websocket`+`Connection: Upgrade`+`Sec-WebSocket-Vers
 
 > 口径（loop-core v4.8 纪律 3）：先 probe 后 batch——每个外部工具对目标首次使用前先用小样本探针确认可用性，探针被拦/挂起先切适配通道再批量；探针结果写入交付物工具声明小节。各工具在「挑战型 WAF / 封闭站」下的可用性与适配通道：
 
-- sqlmap：注入流量无会话态会被挑战型 WAF 拦截（假阴性）——先 probe（--level 1 单参数）确认可达；适配通道：挑战态 cookie/UA 注入（--cookie/--headers），或经注入通道（mitmproxy↔CDP 上游代理链）带挑战态运行。
-- curl：低频手工请求始终可用——也是挑战态复放的最小工具（channel-snapshot 快照 cookie/UA 复放）；禁用它做大批量枚举。
+- InQL/graphql-cli（introspection 与 schema 枚举）：introspection 流量命中挑战型 WAF 时假阴性——先 probe（单查询 introspection）确认可达；适配通道：channel-snapshot 快照 cookie/UA 复放，或经浏览器通道（mitmproxy↔CDP 上游代理链）带挑战态运行。
+- wscat/websocat（WebSocket 握手与 CSWSH 探针）：握手对 Origin 校验类拦截先 probe 单连接；适配通道：自定义 Origin 头复放（-s/-o 快照态）。
+- curl：GraphQL POST/WS 升级请求的最小复放工具（channel-snapshot 快照 cookie/UA 复放）；批查询枚举改用 InQL 脚本化，禁用 curl 循环大批量。（v6.4.0 修正：原样板误列 sqlmap——本技能不涉及 SQL 注入通道。）

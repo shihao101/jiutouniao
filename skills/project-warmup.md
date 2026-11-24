@@ -23,15 +23,19 @@ mkdir -p .async
 
 ## 二、按预检结果补齐（集中处理，不逐个补）
 
-1. **缺工具**：对 MISSING 项逐个 install_tool（apt 优先）；一次补完再开工，禁止测到一半再补。
+> **v6.1.0 阶段边界**：本节安装/下载类动作（install_tool、nuclei -update-templates、apt/pip/git clone）**仅限 S2 及以后**执行（经治理门与审批）；S1 只做第一节只读预检并把缺失项写入《环境准备清单》交付物，由运维预置或后续阶段补齐。第三方下载不是目标测试流量，但仍须走审批与代理通道纪律。
+
+1. **缺工具**：对 MISSING 项逐个 install_tool（apt 优先）；一次补完再开工，禁止测到一半再补（S2+；S1 只登记不安装）。
 2. **缺模板**：`run_async {"command":"nuclei -update-templates","timeout":600}` 后台下载，期间先做被动侦察。
 3. **缺词表**：优先用镜像已装位置 `/usr/share/seclists`（apt 预装，先探测再动手）；确认缺失才补装——`install_tool seclists`（apt），或 `env http_proxy=$TOOL_PROXY https_proxy=$TOOL_PROXY git clone --depth 1 https://github.com/danielmiessler/SecLists /usr/share/seclists`（登记路径以实测为准，禁止臆造未实测路径）。
 4. **无 arjun/interactsh-client**：`install_tool arjun`；interactsh-client 由 apt `interactsh-client` 或 go 安装；都不可用则记入交付物限制（OOB 走公网平台兜底，见下）。
 5. **缺语料（PAT/curated 字典）**：PAT 缺失 → `run_async {"command":"env http_proxy=$TOOL_PROXY https_proxy=$TOOL_PROXY git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings /opt/tools/PayloadsAllTheThings","timeout":600}` 后台补装（期间先做被动侦察），仍失败则记入交付物限制并改用 seclists + web 检索；curated 字典缺失 → 用 load_skill payload-mutation-algebra §7 的表现场构造（不阻塞开工）。语料用法：403 两份字典配合 payload-mutation-algebra §7（路径族×头族组合）；SSTI 矩阵配合 ssti-engine-map。
 
-## 三、OOB 回连通道（开工定死，全程统一）
+## 三、OOB 回连通道（v6.1.0 统一口径：证据一律落 evidence/oob/）
 
-- **一级（默认）本机反链**：后台启动 `nohup interactsh-client > .async/oob.log 2>&1 & echo "OOB_PID $!"`，从 `.async/oob.log` 取回连域名（形如 `xxxx.oast.pro`）写入交付物；容器与目标同网段时可改用本地监听地址（`nc -lvnp 4444`/HTTP 接收器）。
+- **canonical 产物（三处统一，禁止把 /tmp 或 .async 当唯一证据源）**：`evidence/oob/channel.txt`（最少字段 domain/pid/started_at_utc/self_check_id/self_check_result/channel_type/process_state）、`evidence/oob/interactsh.log`（客户端日志）、`evidence/oob/self-check.txt`（自检回连记录）。进程日志可写 /tmp/.async，但收口核验只认 evidence/oob/；
+- **阶段边界（v6.1.0 ⑯）**：S1 只核验已预置通道（管理员预置，环境准备流程），不安装不启动；S2 及以后允许按本节命令安装/启动（经治理门与审批）；
+- **一级（默认）本机反链**：后台启动 `nohup interactsh-client > /tmp/oob.log 2>&1 & echo "OOB_PID $!"`，从 /tmp/oob.log 取回连域名（形如 `xxxx.oast.pro`）后把 domain/pid/started_at_utc/self_check 结果写入 `evidence/oob/channel.txt`，原始日志拷贝为 `evidence/oob/interactsh.log`；容器与目标同网段时可改用本地监听地址（`nc -lvnp 4444`/HTTP 接收器）。
 - **二级（兜底）公网平台**：本机通道自检失败（无回连域名/目标不可达）才用 dnslog.cn、ceye.io 等；**只做存在性证明，不投递敏感 payload**；切换通道必须在证据中注明原因。
 - 同一测试单元通道固定；回连域名与交互记录 = 盲注类验证的证据。
 

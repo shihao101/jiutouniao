@@ -62,6 +62,8 @@ type Project struct {
 	StrictScope      bool                   `json:"strict_scope"`      // 严格限定范围（只测给定目标）
 	BudgetTokens     int64                  `json:"budget_tokens"`     // 项目级 Token 预算（0=用全局配置）
 	Authorized       bool                   `json:"authorized"`        // 创建时勾选授权确认（视为已授权开工）
+	OOBRequired      bool                   `json:"oob_required"`      // v6.1.0（方案⑪）：项目显式声明需要 OOB 回连通道——S1 收口核验 channel.txt
+	ROEAcknowledgedAt string                `json:"roe_acknowledged_at,omitempty"` // v6.1.0（方案⑩）：ROE 红线四要素经 request_user_input(purpose=roe_ack) 确认的 UTC 时间——确认前命令通道全部拦截
 	ModelID          string                 `json:"model_id"`          // 本项目使用的模型（空=默认模型）
 	AutoApprove      string                 `json:"auto_approve"`      // 审批策略：manual（默认，全部人工）/l1（仅 L1 自动）/all（L1+L2 自动）；空=全局配置
 	PreApproved      string                 `json:"pre_approved"`      // v6.0.0：预批准档 none（默认人工）/all（全通过——含提权/横向及后续新增类别）/逗号类别（privesc,lateral,persistence）；仅自动签人工核签环节，治理门照常前置
@@ -73,6 +75,9 @@ type Project struct {
 	FinishedAt       string                 `json:"finished_at,omitempty"` // v2.6：终态时间（done/failed/killed），仪表盘总耗时基准
 	StageStates      map[string]*StageState `json:"stage_states"`          // key: stage id（s0..s9, specA/B1/B2）
 	KillReason       string                 `json:"kill_reason,omitempty"`
+	// v6.4.0（S4-⑩）：项目级累计回环消费数——loopback 上限（LoopbackMaxRuns）的真实口径
+	// 持久化（原实现仅进程内存 map，服务重启清零=额度重置为 3 次）。
+	LoopUsed int `json:"loop_used,omitempty"`
 }
 
 // StageState 单个阶段头的执行状态。
@@ -94,6 +99,21 @@ type StageState struct {
 	// v5.9.1：最后活动时间（每次 runStage 进入刷新；StartedAt 保持首次进入——
 	// 重入/断点续跑不覆盖，阶段耗时图反映真实起点）。
 	LastActiveAt string `json:"last_active_at,omitempty"`
+	// v6.4.0（S4-⑤）：V3 两清单结构化落库（ready_but_unexecuted/l2_approved_unused）——
+	// 收口与代收口路径写入本字段，S5 上下文「S4 移交项」块与 v3HandoverIssues 承接对账的
+	// 数据源。原实现只落时间线（上下文仅最近 15 条窗口，可能挤出）与影子交付物文件（引擎不读），
+	// S5 承接反蒸发（s5.md:14）无机械对账依据。
+	V3Ready []string `json:"v3_ready,omitempty"`
+	V3L2    []string `json:"v3_l2,omitempty"`
+	// v6.4.0（S4-⑩）：回环重入原因——loopback 入队成功时写入目标阶段，重跑阶段开工由
+	// buildContextPack 注入「回环重入原因」块（S4 二次进入直击回环线索，不再靠模型翻时间线）；
+	// 该阶段收口成功后清空。
+	ReentryReason string `json:"reentry_reason,omitempty"`
+	// v6.5.0（S5-⑥）：预算冲刺预警已注入标记——触发条件从 remain == budget/3 精确等于
+	// 改为进入「剩 ≤1/3」阈值区间后首轮触发一次（budget 非 3 的倍数时旧条件永不命中，
+	// 多目标放大后最常见的预算形态整段丢失 V3 就绪投递引导）；runStage 启动复位
+	// （重跑/回环重入可再次触发），同一次运行内不重复注入。
+	SprintNotified bool `json:"sprint_notified,omitempty"`
 }
 
 // FindingClaim v4.6 E1：结论-证据判据串（断言与所引文件内容的机械绑定）。
@@ -121,7 +141,15 @@ type Finding struct {
 	Detail     string `json:"detail"`
 	Confidence string `json:"confidence"`            // 确证/疑似/待查
 	Access     string `json:"access,omitempty"`      // v4.4 利用前提：anonymous/pre-auth/post-auth（S5 队列消费依据）
-	ImpactRank int    `json:"impact_rank,omitempty"` // v4.4 影响排序 1-6（1=RCE系…5=上传落点；0=未标注）
+	ImpactRank int    `json:"impact_rank,omitempty"` // v4.4 影响排序 1-6（1=RCE系…5=上传落点，6=其余；0=未标注。v6.4.0 S4-④ 档位与 s4.md/record_vt priority 三处归一）
+	// v6.4.0（S4-⑥）：移交路线（browser-auth=认证受阻移交 S5-2a / cli=CLI 投递器 / manual=人工读码等）。
+	// s4.md:37「browser-auth 路线移交」从自由文本升级为结构化锚点——S5 移交项注入块与
+	// v3HandoverIssues 承接对账消费；旧数据 detail 文本标记由引擎等价识别（orchestrator）。
+	Route string `json:"route,omitempty"`
+	// v6.9.0（S8-⑤）：逐目标归属（与 Asset.TargetRef 口径同源）——多目标报告按目标组织与
+	// S8 反向对账分组（S8-③）的结构化事实源；空=全局/单目标（行为与 v6.8.0 一致，
+	// 标题词边界文本匹配为回退路径）。
+	TargetRef string `json:"target_ref,omitempty"`
 	// v4.6 E4 可利用性双维：verified（已实测利用）/ conditional（条件性，schema 未知等）/ untested（未投递）。
 	// 高危+untested 由引擎自动降级为中级呈现（F2320 双轨定级口径固化）。
 	Exploitability string         `json:"exploitability,omitempty"`
@@ -140,6 +168,24 @@ type Asset struct {
 	Value     string    `json:"value"`
 	Detail    string    `json:"detail"`
 	CreatedAt time.Time `json:"created_at"`
+	// v6.1.0（S1 修复方案②⑤⑳）：范围状态与目标归属——「登记线索」≠「测试授权」。
+	// ScopeStatus: in_scope（有授权依据）/shadow_pending（待人工核实归属）/out_of_scope/
+	// conditional（需再授权）/unknown（旧数据缺字段或缺省——fail-closed，不放行）。
+	// ScopeEvidence 记录授权依据（授权清单/工单/批准记录 ID）；TargetRef 标注归属的原始目标行。
+	// Metadata 承载 APP/小程序/云账号等类型化台账字段（禁存明文凭据，密钥只存 *_ref 指针）。
+	TargetRef     string            `json:"target_ref,omitempty"`
+	ScopeStatus   string            `json:"scope_status,omitempty"`
+	ScopeEvidence string            `json:"scope_evidence,omitempty"`
+	Source        string            `json:"source,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+// EffectiveScope 资产范围状态生效值：空/未知一律 unknown（fail-closed，不放行）。
+func (a *Asset) EffectiveScope() string {
+	if a == nil || strings.TrimSpace(a.ScopeStatus) == "" {
+		return "unknown"
+	}
+	return strings.ToLower(strings.TrimSpace(a.ScopeStatus))
 }
 
 type TimelineEvent struct {
@@ -505,6 +551,28 @@ func (s *Store) AddAsset(a *Asset) (string, error) {
 	return a.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketAssets, a.ID, a) })
 }
 
+// GetAsset v6.1.0（S1 修复方案②）：按 ID 取资产（update_asset 范围状态流转用）。
+func (s *Store) GetAsset(projectID, assetID string) (*Asset, error) {
+	var out *Asset
+	err := s.db.View(func(tx *bolt.Tx) error {
+		var rec Asset
+		if err := json.Unmarshal(tx.Bucket(bucketAssets).Get([]byte(assetID)), &rec); err != nil {
+			return err
+		}
+		if rec.ID == "" || rec.ProjectID != projectID {
+			return fmt.Errorf("资产不存在或不属于该项目")
+		}
+		out = &rec
+		return nil
+	})
+	return out, err
+}
+
+// UpdateAsset v6.1.0（S1 修复方案②）：范围状态流转持久化（人工确认后 shadow_pending→in_scope）。
+func (s *Store) UpdateAsset(a *Asset) error {
+	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketAssets, a.ID, a) })
+}
+
 func (s *Store) AddTimeline(t *TimelineEvent) (string, error) {
 	t.ID = newID("T")
 	t.CreatedAt = time.Now()
@@ -603,7 +671,31 @@ func sortFindings(fs []*Finding) {
 }
 
 func (s *Store) ListAssets(projectID string) ([]*Asset, error) {
-	return listBy[Asset](s, bucketAssets, projectID)
+	out, err := listBy[Asset](s, bucketAssets, projectID)
+	// v6.3.0（S3-⑧）：桶序→确定性排序——in_scope 优先（授权资产是威胁建模/批量清单的
+	// 一等输入，shadow/unknown 资产只作线索），同档按登记时间倒序（最新登记在场）。
+	// 原实现无排序，大项目资产被上下文块截断时 AI/凭据类资产可能随机丢失。
+	sort.SliceStable(out, func(i, j int) bool {
+		pi, pj := assetScopeRank(out[i].ScopeStatus), assetScopeRank(out[j].ScopeStatus)
+		if pi != pj {
+			return pi < pj
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, err
+}
+
+// assetScopeRank 范围状态排序权重：in_scope=0 → conditional=1 → 其余（shadow_pending/
+// out_of_scope/unknown/空）=2（线索类资产靠后展示）。
+func assetScopeRank(status string) int {
+	switch status {
+	case "in_scope":
+		return 0
+	case "conditional":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (s *Store) ListTimeline(projectID string) ([]*TimelineEvent, error) {
@@ -668,7 +760,8 @@ type CoverageEntry struct {
 	// undetermined_timeout（超时未定性）/ blocked_ratelimit / blocked_waf / not_tested。
 	// 前两类之外的状态值不得支撑 ruled_out/no_issue_found 终态（orchestrator 强制）。
 	ObservedResult string    `json:"observed_result,omitempty"`
-	Count          int       `json:"count"` // 该单元测试次数
+	Depth          string    `json:"depth,omitempty"` // v7.0.0 深度阶梯 D0-D4（盲态类真阴性终态门槛=D2 差分对照 + OOB 通道健康）
+	Count          int       `json:"count"`           // 该单元测试次数
 	FirstSeen      time.Time `json:"first_seen"`
 	LastSeen       time.Time `json:"last_seen"`
 }
@@ -699,6 +792,7 @@ func (s *Store) UpsertCoverage(c *CoverageEntry) (*CoverageEntry, error) {
 				old.Status = c.Status
 				old.Notes = c.Notes
 				old.ObservedResult = c.ObservedResult
+				old.Depth = c.Depth  // v7.0.0 核对加固⑦：Depth 必须随更新回写——同键二次提交带 depth 会被静默丢弃（盲态门复核场景必现）
 				old.Stage = c.Stage
 				old.LastSeen = time.Now()
 				return b.Put([]byte(key), mustJSON(&old))

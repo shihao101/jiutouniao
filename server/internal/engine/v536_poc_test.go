@@ -12,7 +12,7 @@ import (
 
 func TestV536RecordFindingPOC(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V536", Name: "poc"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V536", Name: "poc"}
 	_ = st.SaveProject(p)
 	// 预置真实证据（自动关联的数据源）
 	ev1, _ := st.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: "s4", Type: "command", Input: "curl -s http://t/x", Output: "HTTP/1.1 200"})
@@ -49,7 +49,7 @@ func TestV536RecordFindingPOC(t *testing.T) {
 
 func TestV536RecordFindingPOCValidation(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V536-B", Name: "poc校验"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V536-B", Name: "poc校验"}
 	_ = st.SaveProject(p)
 	// 空 response 拒绝
 	got := o.dispatch(testCtx(), p, "s4", mkCall("record_finding",

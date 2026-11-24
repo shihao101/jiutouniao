@@ -1,15 +1,43 @@
 ---
 id: recon-playbook
 title: 侦察与资产测绘手册
-tags: 侦察,子域,端口,指纹,s2
+tags: 侦察,子域,端口,指纹,s2,whois,被动dns,ASN,osint
 ---
 # 侦察与资产测绘手册（被动优先）
 
-## 子域枚举（被动）
+## 被动域名与网络归属测绘（被动，v6.2.0 与 heads/s1.md S1-6 同源口径）
+
+只查询公开数据源与 DNS/WHOIS 协议本身，不对解析出的地址发 HTTP、端口或服务探测（那是本手册「存活与指纹/端口扫描」主动节的动作，须 S2 起、授权与 ROE 约束满足后执行）。每条结果记录查询 UTC 时间、数据源、scope_status，逐条 record_asset 登记（登记线索≠测试授权）。
+
+### 证书透明度与子域候选
 ```bash
 curl -s "https://crt.sh/?q=%25.<域>&output=json" | jq -r '.[].name_value' | sort -u   # 证书透明度
-dig +short <域> ANY; host <域>                                                        # DNS
+dig +short <域> ANY; host <域>                                                        # DNS 概览
 ```
+
+### WHOIS/注册归属（注册商/主体/隐私状态）
+```bash
+whois <域>    # 注册商、注册主体、隐私保护状态、注册与到期日——主体与客户实体一致=归属佐证
+```
+
+### DNS 全谱八类（逐类查询；ANY 在部分权威服务器返回不完整，不可替代逐类）
+```bash
+for r in A AAAA CNAME MX NS TXT SOA CAA; do echo "== $r"; dig +short <域> $r; done
+```
+
+### ASN/网段归属
+```bash
+whois -h whois.cymru.com " -v <目标IP>"    # ASN/网段/国家/注册组织（Team Cymru 免费口径）
+```
+bgp.tools/ipinfo.io 免费页面作交叉参照（只读）；同段旁站仅记录线索，禁止越界测试。
+
+### 历史 IP 与被动 DNS
+- SecurityTrails/ViewDNS/Netcraft 等免费口径查历史解析记录、历史 IP 归属与关联主机（有 Key 用 API，无 Key 用免费页面，均属第三方被动源）；
+- **无数据源或无凭据时写明「未查询及原因」，不以查询失败断言不存在**（v6.1.0 方案⑦口径）。
+
+### 子域候选承接（S1→S2 增量）
+- S1 已产出 `evidence/s1-subs-final.txt`（合并器产物）与 `evidence/s1-subs-manifest.json`（来源 manifest，无来源标 not_checked）：S2 从该文件出发做增量枚举与活性核对，不从零重复全量被动枚举；产物缺失时按 manifest not_checked 口径补跑本节命令。
+- 子域接管面判定：load_skill subdomain-takeover（纯 DNS 指纹，被动合法；candidate 交客户回收）。
 
 ## 存活与指纹（主动，限速）
 ```bash
@@ -58,7 +86,7 @@ load_skill history-recon          # CDX API 兜底 curl 全程可用，零安装
 
 ## 空间测绘（四平台，Key 注入环境变量；v5.3.9 起四平台 Host 在 scopeGate 白名单内）
 
-IP 直连/无域名目标优先用测绘平台做资产与指纹测绘（被动，L0）。Quake 用法见下；FOFA/ZoomEye/Hunter 的 API 与 Key 变量（$FOFA_EMAIL+$FOFA_KEY / $ZOOMEYE_KEY / $HUNTER_KEY）见 osint-leak-intel 第四节速查表——四平台查询结果口径一致：
+IP 直连/无域名目标优先用测绘平台做资产与指纹测绘（被动，L0）。Quake 用法见下；FOFA/ZoomEye/Hunter/Shodan 的 API 与 Key 变量（$FOFA_EMAIL+$FOFA_KEY / $ZOOMEYE_KEY / $HUNTER_KEY / $SHODAN_KEY）见 osint-leak-intel 第五节速查表——五平台查询结果口径一致：
 
 - 查询结果只作侦察线索与漏报复核参照，仍需本机验证后才能登记为确证结论。
 - 速率限制：免费 Tier 有 QPS 限制，连续查询间 sleep 2-3 秒。

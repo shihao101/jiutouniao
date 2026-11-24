@@ -1,9 +1,13 @@
 ---
 id: auth-flow-deep
 title: OAuth/OIDC/SAML 认证流程深度手册
-tags: oauth,oidc,saml,redirect_uri,state,pkce,s4
+tags: oauth,oidc,saml,redirect_uri,state,pkce,s4,s2
 ---
 # 认证流程深度手册（OAuth/OIDC/SAML；JWT 见 jwt-crypto，会话见 auth-bypass）
+
+## 阶段边界（S2，v6.2.0——与 heads/s2.md S2-10 同源）
+
+S2 侦察窗口**只做 SSO/票据/扫码登录机制的面识别与线索登记**：命中信号（OAuth/OIDC 参数面、SAML 断言、扫码轮询端点）即 `record_vt`（Priority=1，title 含「auth-flow-deep」）并 `upsert_fact key=arch.signal`，账号态测试单元逐条 record_vt 移交（禁止静默跳过）；匿名可测项（redirect_uri 变体/state 缺失等）按本手册探针链在 S2 授权窗口执行，账号态主动测试归 S4/S5。
 
 ## 一、OAuth/OIDC 探针链
 

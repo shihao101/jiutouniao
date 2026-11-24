@@ -10,7 +10,7 @@ import (
 
 func TestV538QualityReviewConfirm(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V538", Name: "死锁修复", PostExploit: true,
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V538", Name: "死锁修复", PostExploit: true,
 		StageStates: map[string]*store.StageState{
 			"s1": {Status: "done", Review: "反思门调用失败（重试 3 次）；确定性质量门通过放行【quality-pending：S8 收口前须复核本阶段交付物】"},
 			"s4": {Status: "done", Review: "预算护栏代收口【quality-pending：确定性门拦截 2 项——S8 收口前逐项复核】"},
@@ -41,7 +41,7 @@ func TestV538QualityReviewConfirm(t *testing.T) {
 		t.Fatal("清除应落库")
 	}
 	// ③ 无标记项目：直接放行
-	p2 := &store.Project{ID: "P-V538-B", Name: "无标记", StageStates: map[string]*store.StageState{
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V538-B", Name: "无标记", StageStates: map[string]*store.StageState{
 		"s1": {Status: "done", Review: "反思门审查：通过"}}}
 	if o.applyQualityReviewConfirm(p2, false) {
 		t.Fatal("无标记不应要求确认")
@@ -50,7 +50,7 @@ func TestV538QualityReviewConfirm(t *testing.T) {
 
 func TestV538DeterministicGateNoDeadlock(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V538-C", Name: "门回归", PostExploit: true,
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V538-C", Name: "门回归", PostExploit: true,
 		StageStates: map[string]*store.StageState{
 			"s1": {Status: "done", Review: "【quality-pending：S8 收口前须复核】"},
 			"s8": {Status: "running", Review: ""},

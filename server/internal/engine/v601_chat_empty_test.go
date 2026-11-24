@@ -42,7 +42,7 @@ func v601ChatSetup(t *testing.T, rounds int) (*Orchestrator, *store.Store) {
 
 func TestV601ChatEmptyFirstRoundDiagnosticNoPending(t *testing.T) {
 	o, st := v601ChatSetup(t, 4)
-	p := &store.Project{ID: "P-V601-A", Name: "chat-empty", Target: "http://t"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V601-A", Name: "chat-empty", Target: "http://t"}
 	_ = st.SaveProject(p)
 	f := &fakeEmptyLLM{}
 	o.llm = f
@@ -66,7 +66,7 @@ func TestV601ChatEmptyFirstRoundDiagnosticNoPending(t *testing.T) {
 
 func TestV601ChatPendingAllUserDiscarded(t *testing.T) {
 	_, st := v601ChatSetup(t, 4)
-	p := &store.Project{ID: "P-V601-B", Name: "chat-residue", Target: "http://t"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V601-B", Name: "chat-residue", Target: "http://t"}
 	_ = st.SaveProject(p)
 	// 模拟 v6.0.1 之前的残骸链：纯 user 堆叠（空回复误挂起产物）
 	chatSessions.savePendingRun(p.ID, []llm.Message{
@@ -90,7 +90,7 @@ func TestV601ChatPendingAllUserDiscarded(t *testing.T) {
 
 func TestV601ChatEmptyAfterToolWorkSuspends(t *testing.T) {
 	o, st := v601ChatSetup(t, 4)
-	p := &store.Project{ID: "P-V601-C", Name: "chat-work-empty", Target: "http://t"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V601-C", Name: "chat-work-empty", Target: "http://t"}
 	_ = st.SaveProject(p)
 	f := &fakeToolThenEmptyLLM{}
 	o.llm = f

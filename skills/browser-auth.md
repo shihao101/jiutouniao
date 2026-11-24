@@ -1,7 +1,7 @@
 ---
 id: browser-auth
 title: 浏览器认证实战手册（真实浏览器登录 + CLI 接管混合流水线）
-tags: 认证,浏览器,加密协议,挑战值,验证码,wasm,browser-kit,s5,s6
+tags: 认证,浏览器,加密协议,挑战值,验证码,wasm,browser-kit,s5,s6,s4
 ---
 # 浏览器认证实战手册（browser-auth）
 
@@ -57,7 +57,7 @@ JT_PASS='<凭据>' /opt/venv/bin/python /opt/tools/browser-kit/browser_login.py 
 ## 三、验证码与多步登录人机协同（强制）
 
 - `browser_login.py` exit 42 → 用已落盘的 `shots/login.png` 调 `request_user_input` 请人工读码 → 携 `--captcha <值>` 重试一次。
-- **禁止自动打码/OCR/碰撞**。人工读码单次会话内有效，验证码过期则再次转人工，不循环。
+- **登录流水线内禁止自动打码/碰撞（v6.5.0 S5-⑤ 边界明文化）**：人工读码单次会话内有效，验证码过期则再次转人工，不循环。L4 验证码攻坚轨的受控 OCR 闭环（captcha-ocr 单会话）不属本流水线，口径见 identity-bootstrapping L4——两轨不混用。
 - 验证码若仅在失败超限后启用（fd-hide 类），默认路径无验证码，直接登录。
 - **多步登录/MFA（v3.1.0）**：提交后出现口令输入位（密码框消失）→ 配置 `--otp-env` 自动注入动态口令（口令值只走环境变量）；未配置时 exit 45 → request_user_input 向人工索取口令后重试。滑块/行为类验证码不支持自动处理，转人工或登记 needs_follow_up。
 - **SPA 慢挂载**：表单延迟渲染由探测重试覆盖（`--detect-timeout` 默认 10s 轮询），无需人工干预。
@@ -96,7 +96,7 @@ JT_PASS='<凭据>' /opt/venv/bin/python /opt/tools/browser-kit/browser_login.py 
 
 > 口径（loop-core v4.8 纪律 3）：先 probe 后 batch——外部工具首次使用前小样本探针确认可用性。本技能工具链在「挑战型 WAF / 封闭站」下的可用性与适配通道：
 
-- captcha-ocr.py：验证码识别（列投影分割+模板匹配）——挑战型 WAF 下取决于图片获取通道：经 browser_login.py 会话内取图则可用；直连取图被拦时先建会话再取。识别率对扭曲/干扰型有上限（总案 §七.3），分割数不符返回 None 强制降级人工读码/browser-auth 会话，不硬套。
+- captcha-ocr.py：验证码识别（列投影分割+模板匹配）——**仅用于 identity-bootstrapping L4 攻坚轨的受控探针（会话内取图、单会话闭环，v6.5.0 S5-⑤ 边界）**，不用于本流水线登录提交（登录流水线强制人工读码，见 §三）；直连取图被拦时先建会话再取。识别率对扭曲/干扰型有上限（总案 §七.3），分割数不符返回 None 强制降级人工读码/browser-auth 会话，不硬套。
 - browser_login.py：浏览器会话建立——适配通道本体（挑战型 WAF/封闭站下始终可用），是 captcha-ocr 取图与后续 oracle 探针的通道来源。
 - browser_oracle.py：凭据面预言机探针（枚举/锁定预言机）——挑战态已注入（经 browser_login 会话）时可用；无验证码面直连可用（auth-browser 分流：无验证码面直连、SimCaptcha 类面走会话）。
 - channel-snapshot.py：通道资产固化（挑战态提取/复放）——始终可用，且是本清单其它工具的适配通道来源。

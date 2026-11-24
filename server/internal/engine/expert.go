@@ -422,17 +422,100 @@ func (o *Orchestrator) reflectStage(ctx context.Context, p *store.Project, stage
 	b.WriteString("\n## 审查要求\n")
 	b.WriteString("1) 判断该阶段是否达成了其目标且有证据支撑；2) 指出明显缺口（如：扫描未做全端口、发现无证据、交付物缺失）。\n")
 	// v2.3.0：S7/S8 专项核查（实测缺陷：清理波及存量数据、报告同根因拆条抬高计数、未实测利用断言）
+	// v6.8.0（S7-②）S7 节重写：旧三问停留在 v5.1.3 之前口径（问句 a 隐含「自建数据可执行删除」、
+	// 问句 c 是「执行后还原」旧范式），与 v5.1.3「自建数据只登记不删除」/v5.3.0「清理确认清单仅有
+	// 登记完整性核对+只读复核两类动作」单一规则直接矛盾（同文件 S6 节已按新口径，s7 是漏改点）；
+	// 且旧三问未覆盖 S7-2「三件事」（四元组对账/并入移交清单/只读复核）。现按单一规则四问重写。
 	if stageID == "s7" {
-		b.WriteString("\n### S7 专项核查（清理铁律）\n")
-		b.WriteString("a) 本阶段所有 DELETE/UPDATE/rm 是否仅作用于智能体自建数据（每项是否有前置 SELECT 证据证明行集与预期一致）？\n")
-		b.WriteString("b) 是否存在波及测试前已存在数据的删除/修改/覆盖（如删除了非测试账号的行、覆盖了公告/模板原文）？发现即 BLOCK。\n")
-		b.WriteString("c) 修改过的配置/模板是否保留了原文副本（evidence/）或已如实声明无法还原并移交？\n")
+		b.WriteString("\n### S7 专项核查（清理铁律·v5.1.3/v5.3.0 单一规则）\n")
+		b.WriteString("a) 本阶段（含时间线/交付物记录的执行动作）是否存在任何目标侧删除/修改/还原/注销类执行——rm/del/DELETE/UPDATE/DROP/TRUNCATE/reg delete/sc delete/net user /delete/atrm/schtasks /delete/服务删除/应用重启/Filter 卸载？**单一规则：智能体不执行任何目标侧清理，登记移交≠执行**（isolated_lab 项目亦以快照恢复回收，不在目标上执行清理命令）——出现即 BLOCK。\n")
+		b.WriteString("b) 《需人工清理清单》是否逐项含四元组（位置/指纹/建议清理命令/验证命令），并与上下文「S6 移交项」块、《上传文件记录清单》逐项对账——上游已登记项缺并入、或四元组残缺且未补齐说明即 BLOCK；存量数据被注入载荷的行是否只登记未触碰（DELETE/UPDATE/就地中和类语句出现即 BLOCK）？\n")
+		b.WriteString("c) 是否完成「测试前基线（S1 记录的资产/数据规模）vs 移交清单」的只读复核，差异逐条说明并写入《需人工清理清单》？\n")
+		b.WriteString("d) 《待续清单处置》是否对 needs_follow_up 逐项真实三选一（已补测有 update_coverage 回写 / 范围外附理由 / 移交复测含启动条件·步骤·工作量三要素）——零引用条目即 BLOCK（机械门管「有没有引用」，本问管「引用是否真实处置」）？\n")
 	}
 	if stageID == "s8" {
 		b.WriteString("\n### S8 专项核查（去重与反夸大）\n")
 		b.WriteString("a) P0/P1 条目是否存在同根因拆分（同一漏洞机制+同一修复动作应合并为一条，多种表现写在条目内）？发现即 BLOCK。\n")
-		b.WriteString("b) P0/P1 每条是否都引用了实测复现命令或证据文件（EV-xxx）？仅凭数据结构推断（如「存在 reset_token 字段即可接管账号」）而无实测的，必须降为「待验证」单列。\n")
+		// v6.9.0（S8-②）问句 b 细化：证据编号须与 findings 库 EvidenceIDs 对得上——只引不对应也视为未引用。
+		b.WriteString("b) P0/P1 每条是否都引用了实测复现命令或证据文件（EV-xxx）？引用的证据编号是否与 findings 库该条目的证据对得上——只引不对应也视为未引用。仅凭数据结构推断（如「存在 reset_token 字段即可接管账号」）而无实测的，必须降为「待验证」单列。\n")
 		b.WriteString("c) P0/P1/P2 计数是否等于独立根因数（非原始发现条数）？定级表是否附合并映射？\n")
+		// v6.9.0（S8-⑥）问句 d：防漏并（与 a/c 的防拆条虚高对称的虚低方向）——多目标分组文件
+		// 承接清单在上下文「分组交付物承接」块在场，漏一组且无说明即 BLOCK；单目标项目无该块，跳过本问。
+		b.WriteString("d) 多目标项目：上下文「分组交付物承接」清单中每个 s4-/s5-/s6-/spec- 文件的已验证漏洞是否都已进《发现详情》或在盲区章说明未并入原因——漏一组且无说明即 BLOCK（单目标项目跳过本问）。\n")
+		// v6.9.0（S8-②）审查素材注入——此前输入只有计数与证据摘要，三问对报告正文是盲审
+		// （同根因拆条/证据引用/计数=根因数均针对定级表与发现详情，审查方看不到即无法核查）。
+		// 呈现性注入不新增拦截；机械层反向对账由 deterministicGate S8-③ 门承担，两层互补。
+		if raw, rerr := o.exec.ReadFile(p.ID, "report.md"); rerr == nil {
+			b.WriteString("\n### 审查素材（S8 专项核查输入）\n")
+			b.WriteString("#### report.md 定级表与发现详情摘录\n" + s8ReportExcerpt(raw) + "\n")
+			rids := s8ReportRIDs(raw)
+			if len(rids) == 0 {
+				b.WriteString("#### 报告 R- 条目编号\n（report.md 未检出 ^### R- 条目——若报告以其他编号体系书写，请在意见中指出）\n")
+			} else {
+				b.WriteString("#### 报告 R- 条目编号\n" + strings.Join(rids, ", ") + "\n")
+			}
+			if len(findings) > 0 {
+				// v6.9.0 第六轮核对：清单附证据编号（EvidenceIDs，引擎自动关联的 EV- 编号）——
+				// 问句 b「引用的证据编号是否与 findings 库该条目的证据对得上」的核查数据源：
+				// 素材只有编号/等级/标题时证据对应无法核对（与第三轮 key_figures 通道缺口同类的
+				// 「承诺有执行点、数据源缺位」形态）。
+				b.WriteString("#### findings 库全量清单（编号/等级/置信度/证据/标题）\n")
+				for i, f := range findings {
+					if i >= 50 {
+						b.WriteString(fmt.Sprintf("- …（其余 %d 条截断，search_memory query=\"finding:<id>\" 可直取单条全文）\n", len(findings)-50))
+						break
+					}
+					b.WriteString(s8FindingLine(f) + "\n")
+				}
+			}
+		} else {
+			b.WriteString("\n### 审查素材（S8 专项核查输入）\n（report.md 不可读——契约守卫会在收口前拦截/归位；请在意见中指出报告缺失）\n")
+		}
+	}
+	// v6.3.0（S3-⑦）：S3 专项核查——兑现 s3.md S3-10「反思门会按清单抽查」的承诺：
+	// R7 第一层假设缺漏审查五项清单逐项提问（此前 s3 只走通用审查，专项节仅 s7/s8）。
+	if stageID == "s3" {
+		b.WriteString("\n### S3 专项核查（R7 第一层假设缺漏审查，对照《假设缺漏审查留痕》）\n")
+		b.WriteString("a) 筛查矩阵 27 类三态完整性：判定表 27 行齐、每行判定恰为 假设/不适用/待判定 之一且附证据指针？\n")
+		b.WriteString("b) STRIDE 逐组件完备性：DFD 每组件×每元素有枚举结论（威胁模型可溯源，不留「待补」空组件）？\n")
+		b.WriteString("c) 组合链覆盖：防护绕过/边界类（C-10/C-11）命中时同类面是否全部排期复测？\n")
+		b.WriteString("d) 数据类映射：行业模板（K1）命中时 C-17 具象化是否落表？\n")
+		b.WriteString("e) 影响等级一致性：判定表高危类与威胁清单等级/测试计划优先级是否对齐？\n")
+	}
+	// v6.6.0（SP-⑧）：三专项核查节——SP-② 确定性门刻意最小集起步（条目三态只查文件存在），
+	// 专项条目内容质量由本节承接（与 s3 五问同款机制）；判据源自
+	// docs/深度研究_专项新增条目可执行化_20261121.md 的判定纪律。
+	if stageID == "specA" {
+		b.WriteString("\n### 专项A 核查（AI/LLM 目标判定纪律）\n")
+		b.WriteString("a) 候选验证是否配齐正/负/基线对照（缺正对照不得「确证」——Canary/mock 前置契约兑现）？\n")
+		b.WriteString("b) 「注入成功」是否以对后续授权与工具行为的实际影响为准，而非模型复述恶意内容（判据对照 load_skill evidence-standard AI 节与 llm-agent-protocol-boundaries 三联判据）？发现即 BLOCK。\n")
+		c := "c) 系统提示/隐藏上下文原文是否落库（违反 A3 泄露要点摘要 ≤200 字口径即 BLOCK——只允许摘要+分级留证）？\n"
+		b.WriteString(c)
+	}
+	if stageID == "specB1" {
+		b.WriteString("\n### 专项B1 核查（APP 双链判定纪律）\n")
+		b.WriteString("a) 静态发现是否全部标「待动态验证」且假设队列已移交（静态直升确证 = BLOCK——静态不下最终结论）？\n")
+		b.WriteString("b) 客户端检测绕过是否被单独确证为服务端授权缺陷（D1/D7 口径：客户端绕过≠服务端缺陷，判定链判据见 load_skill app-integrity-server-verify，缺服务端判定证据即 BLOCK）？\n")
+		b.WriteString("c) Hook/抓包/脱壳产物是否仅用于授权测试且未分发（红线口径）？\n")
+	}
+	if stageID == "specB2" {
+		b.WriteString("\n### 专项B2 核查（小程序判定纪律）\n")
+		b.WriteString("a) 测试是否越出平台边界（微信/支付宝/抖音平台基础设施与其他租户不因目标授权自动入范围——负对照纪律见 load_skill miniapp-host-isolation，越界即 BLOCK）？\n")
+		b.WriteString("b) 支付/真实用户数据操作是否全部经审批（红线口径）？\n")
+		c2 := "c) 解包子包覆盖率与解析失败项是否如实记录（W1 口径：不以「成功解包」描述为完整源码恢复）？\n"
+		b.WriteString(c2)
+	}
+	// v6.7.0（S6-⑤）：S6 专项核查——兑现 s6.md S6-4/S6-6 红线「反思门会核查」的承诺：
+	// 持久化只登记不处置、存量排查只发现只登记、移交承接留痕、拓扑引用（引擎机械门查不了
+	// 行为语义红线，本节补 LLM 层定向抽查——与 s7 清理铁律节同粒度，只拦关键缺口）。
+	if stageID == "s6" {
+		b.WriteString("\n### S6 专项核查（后渗透红线，对照 s6.md S6-4/S6-6）\n")
+		b.WriteString("a) 持久化/驻留工件是否全部四元组登记（位置/指纹/建议清理命令/验证命令）且无任何删除/还原/注销类执行——时间线或交付物中出现 rm/del/atrm/schtasks /delete/net user /delete/reg delete/sc delete/服务删除/应用重启即 BLOCK（v4.8.1 口径：只记录移交，验证一条命令的影响后即停止使用该驻留）？\n")
+		b.WriteString("b) S6-6 存量持久化痕迹排查是否只发现、只登记、不处置（逐项 record_finding 置信度=疑似/待查；确证第三方后门是否列入《需人工清理清单》移交——存量数据绝对不动）？\n")
+		c := "c) S5 移交项（上下文「S5 移交项」块）是否按价值消费或显式移交留痕——零承接且交付物无留痕即 BLOCK（S7 清点三选一口径）？\n"
+		b.WriteString(c)
+		d := "d) 《权限矩阵》与《横向路径图》是否引用《拓扑重建》最新版（s6.md v5.4 拓扑引用强制——未覆盖拓扑向量逐项三态处置，禁止横向收口时拓扑向量零消费）？\n"
+		b.WriteString(d)
 	}
 	b.WriteString("输出格式：第一行必须是 PASS 或 BLOCK；随后用不超过 5 条列出意见。宁可放行也不要吹毛求疵，只拦截「关键缺口」。")
 
@@ -454,6 +537,71 @@ func (o *Orchestrator) reflectStage(ctx context.Context, p *store.Project, stage
 	return text, blocked, nil
 }
 
+// ---------- v6.9.0（S8-②）反思门 S8 审查素材提取（确定性纯函数） ----------
+
+// s8ReportExcerptRe 《发现详情》章节标题（定级表常见写在该章内或紧邻其前）。
+var s8ReportExcerptRe = regexp.MustCompile(`(?m)^#{1,3}[^\n]*发现详情[^\n]*$`)
+
+// s8LevelTableRe 定级表/合并映射类独立章节标题（与发现详情并列书写形态）——第七轮核对补
+// 「合并映射」：定级表映射常独立成节（## 合并映射 / ## 定级表映射），映射不在素材内时问句
+// a/c 的拆条与合并核对缺数据源（与证据编号同类的核查数据源闭合）。
+var s8LevelTableRe = regexp.MustCompile(`(?m)^#{1,3}[^\n]*(?:漏洞定级表|定级表|合并映射)[^\n]*$`)
+
+// s8ReportRIDRe 报告定级条目编号（^### R-001 形态，与 v3.7.4 正向门同一锚定口径）。
+var s8ReportRIDRe = regexp.MustCompile(`(?m)^#{2,4}\s+(R-\d+)`)
+
+// s8ReportSectionOf 从 loc 开始截取到下一个二级标题（不含）或文末。
+func s8ReportSectionOf(raw string, loc []int) string {
+	sec := raw[loc[0]:]
+	if m := regexp.MustCompile(`(?m)^##\s+`).FindStringIndex(sec[1:]); m != nil {
+		sec = sec[1 : 1+m[0]]
+	}
+	return sec
+}
+
+// s8ReportExcerpt 反思门审查素材：《发现详情》与《漏洞定级表》章节并取（重叠按起始位置去重），
+// 任一缺失回退另一章，均缺失回退全文头部。rune 上限 6000（约 6k token，仅 s8 收口时一次调用），
+// 截断标注「余略」。
+func s8ReportExcerpt(raw string) string {
+	var secs []string
+	seen := map[int]bool{}
+	for _, re := range []*regexp.Regexp{s8LevelTableRe, s8ReportExcerptRe} {
+		if loc := re.FindStringIndex(raw); loc != nil && !seen[loc[0]] {
+			seen[loc[0]] = true
+			secs = append(secs, s8ReportSectionOf(raw, loc))
+		}
+	}
+	sec := strings.Join(secs, "\n")
+	if strings.TrimSpace(sec) == "" {
+		sec = raw
+	}
+	r := []rune(sec)
+	if len(r) > 6000 {
+		return string(r[:6000]) + "\n…（余略，共 " + strconv.Itoa(len(r)) + " 字符）"
+	}
+	return sec
+}
+
+// s8ReportRIDs 提取报告 R- 条目编号清单（供审查方核对「P0/P1 全部有证据引用」「计数=根因数」）。
+func s8ReportRIDs(raw string) []string {
+	var out []string
+	for _, m := range s8ReportRIDRe.FindAllStringSubmatch(raw, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// s8FindingLine v6.9.0（S8-② 第六轮核对）：findings 清单行——编号/等级/置信度/证据
+// （EvidenceIDs，引擎自动关联的 EV- 编号；问句 b「引用证据与 findings 库对得上」的核查
+// 数据源）/标题；无证据编号时如实缺省（素材缺失即审查意见的输入）。
+func s8FindingLine(f *store.Finding) string {
+	ev := ""
+	if len(f.EvidenceIDs) > 0 {
+		ev = " 证据[" + strings.Join(f.EvidenceIDs, ",") + "]"
+	}
+	return fmt.Sprintf("- %s [%s/%s]%s %s", f.ID, f.Severity, f.Confidence, ev, f.Title)
+}
+
 // ---------- v4.8 R7 第二层：对抗假设 pass（引擎钩子，s3 收口时触发） ----------
 
 // adversarialHypRe 对抗假设清单行：markdown 列表项（每行一条假设）。
@@ -468,7 +616,11 @@ var adversarialHypRe = regexp.MustCompile(`(?m)^\s*[-*]\s*(.+)$`)
 func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.Project, stageID string) (string, string) {
 	// 主清单语料 = s3 交付物文本（判定表+威胁清单在列）
 	mainCorpus := o.deliverablesText(p.ID)
-	normMain := normForKey(mainCorpus)
+	// v6.3.0（S3-② 配套修复）：diff 语料归一化不再截断——原实现 normForKey(mainCorpus)
+	// 把主清单截到 48 字符，containment 只对语料开头 48 字生效（旧测试靠文件字典序碰巧
+	// 通过）；改用 normCovText 全语料归一（小写/全角折叠/去空白，不截断），diff 语义回到
+	// 「假设是否被主清单任何位置覆盖」的本意。
+	normMain := normCovText(mainCorpus)
 	corpus := mainCorpus
 	if len([]rune(corpus)) > 12000 {
 		corpus = string([]rune(corpus)[:12000])
@@ -523,7 +675,7 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 	vtCreated := 0
 	for _, h := range hyps {
 		key := normForKey(h.content)
-		if key == "" || strings.Contains(normMain, key) {
+		if key == "" || strings.Contains(normMain, normCovText(h.content)) {
 			covered = append(covered, h.raw)
 			continue
 		}

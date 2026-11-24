@@ -165,6 +165,20 @@ RUN chmod +x /usr/local/bin/node && \
     printf '#!/bin/sh\nexec node /opt/wxappUnpacker/wuWxapkg.js "$@"\n' > /usr/local/bin/wxappUnpacker && \
     chmod +x /usr/local/bin/wxappUnpacker && \
     wxappUnpacker 2>&1 | grep -q "Unpack a wxapkg" || { echo "FATAL: wxappUnpacker 冒烟失败"; exit 1; }; \
+    # v6.6.0（SP-⑨）：B2 解包双实现——specB2 W1「多实现交叉确认」口径落地：主实现
+    # wxappUnpacker（供应链锁定，上）+ 备用实现 Gwxapkg v2.8.1（发布页 linux-amd64 二进制，
+    # github.com/25smoking/Gwxapkg——best-effort：可达即装并记录来源与 sha256 到
+    # /opt/tools/wxapkg-implementations.txt；不可达不拒镜像，运行时按单实现口径如实记录）。
+    mkdir -p /opt/tools/gwxapkg && \
+    ( curl -fsSL --max-time 120 -o /opt/tools/gwxapkg/gwxapkg \
+        "https://github.com/25smoking/Gwxapkg/releases/download/v2.8.1/gwxapkg-linux-amd64" \
+      && chmod +x /opt/tools/gwxapkg/gwxapkg \
+      && { /opt/tools/gwxapkg/gwxapkg -h || true; } | head -c 120 \
+      && { echo "wxappUnpacker: pin=rtcatc/wxappUnpacker@46207ff (node)"; \
+           echo "gwxapkg: release=v2.8.1 url=github.com/25smoking/Gwxapkg sha256=$(sha256sum /opt/tools/gwxapkg/gwxapkg | cut -d' ' -f1)"; \
+         } > /opt/tools/wxapkg-implementations.txt \
+      && echo "OK: B2 解包双实现就绪（wxappUnpacker + gwxapkg）" ) \
+    || echo "warn: Gwxapkg 备用实现不可达（离线/上游移除）——wxappUnpacker 单实现口径，镜像继续"; \
     git clone --depth 1 https://github.com/ticarpi/jwt_tool /opt/jwt_tool && \
     if [ "$(git -C /opt/jwt_tool rev-parse HEAD)" != "3bc7407cf2222d6a821dcc19c776e5a1b1cb9a9b" ]; then echo "FATAL: jwt_tool pin 不匹配（v5.6.0 供应链锁定）——人工复核后更新 PIN"; exit 1; fi; \
     python3 -c "import re; p='/opt/jwt_tool/jwt_tool.py'; s=open(p,encoding='utf-8').read(); s2,n=re.subn(r\"'#[^']*': None,?\\s*\", '', s); open(p,'w',encoding='utf-8').write(s2); print('jwt_tool py3.14 compat patch: removed', n, 'None-comment keys')" && \

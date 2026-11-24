@@ -105,7 +105,7 @@ func TestV550IdentityResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.creds = svc
-	p := &store.Project{ID: "P-RES"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-RES"}
 	_ = st.SaveProject(p)
 	m1, err1 := svc.Put(credentials.Input{ProjectID: p.ID, Identity: "operator/session-1", Kind: "cookie", Secret: "ck-1"})
 	if err1 != nil {
@@ -150,7 +150,7 @@ func TestV550IdentityResolve(t *testing.T) {
 
 func TestV550CompactArchiveAndReceiptRetrieval(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-G"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-G"}
 	p.StageStates = map[string]*store.StageState{"s2": {Status: "running"}}
 	_ = st.SaveProject(p)
 
@@ -200,7 +200,7 @@ func TestV550CompactArchiveAndReceiptRetrieval(t *testing.T) {
 		t.Fatalf("receipt 取回应返回原文: %s", truncateText(res, 200))
 	}
 	// 跨项目拒绝
-	res2 := o.dispatch(context.Background(), &store.Project{ID: "P-OTHER"}, "s2", llm.ToolCall{Name: "search_memory",
+	res2 := o.dispatch(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-OTHER"}, "s2", llm.ToolCall{Name: "search_memory",
 		Arguments: fmt.Sprintf(`{"query":"receipt:%s"}`, rid)})
 	if !strings.Contains(res2, "不属于本项目") {
 		t.Fatalf("跨项目 receipt 读取应拒绝: %s", res2)
@@ -222,7 +222,7 @@ func TestV550LoopbackOverLimit(t *testing.T) {
 	for _, sid := range []string{"s1", "s2", "s4", "s5", "s7"} {
 		states[sid] = &store.StageState{Status: "done"}
 	}
-	p := &store.Project{ID: "P-D", StageStates: states}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-D", StageStates: states}
 	_ = st.SaveProject(p)
 	// 前 3 次入队
 	for _, to := range []string{"s1", "s2", "s4"} {
@@ -267,7 +267,7 @@ func TestV550BudgetExhaustionPauses(t *testing.T) {
 	o, st := v550Orchestrator(t)
 	o.llm = &fakeToolLLM{}
 	o.approver = NewApprover(st, o.bus, "manual")
-	p := &store.Project{ID: "P-E", Name: "预算暂停", PostExploit: true, Target: "http://t",
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-E", Name: "预算暂停", PostExploit: true, Target: "http://t",
 		StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	if err := o.runStage(context.Background(), p, "s2"); err != nil {
@@ -285,7 +285,7 @@ func TestV550BudgetExhaustionPauses(t *testing.T) {
 	o2.llm = &fakeToolLLM{}
 	o2.approver = NewApprover(st, o2.bus, "manual")
 	o2.cfg.Engine.BudgetExhaustedPolicy = "auto_close"
-	p2 := &store.Project{ID: "P-E2", Name: "auto_close", PostExploit: true, Target: "http://t",
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-E2", Name: "auto_close", PostExploit: true, Target: "http://t",
 		StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p2)
 	if err := o2.runStage(context.Background(), p2, "s2"); err != nil {
@@ -355,7 +355,7 @@ func TestV550ChatPendingRunResume(t *testing.T) {
 	o.cfg.Engine.ChatToolRounds = 2
 	o.approver = NewApprover(st, o.bus, "manual")
 	chatSessions = newChatSessions(o)
-	p := &store.Project{ID: "P-H", Name: "chat", PostExploit: true, Target: "http://t"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-H", Name: "chat", PostExploit: true, Target: "http://t"}
 	_ = st.SaveProject(p)
 
 	llm1 := &fakeSeqLLM{toolRounds: 5}

@@ -1,7 +1,7 @@
 ---
 id: "js-challenge-waf-playbook"
 title: "JS 挑战型 WAF 对抗剧本（瑞数类：行为预算/通道矩阵/对策阶梯）"
-tags: "对抗,WAF,瑞数,js-challenge,浏览器,限速,behavior"
+tags: "对抗,WAF,瑞数,js-challenge,浏览器,限速,behavior,s2,s4,s5"
 ---
 # JS 挑战型 WAF 对抗剧本（v4.6 K6/C3）
 

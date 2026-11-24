@@ -18,7 +18,7 @@ import (
 // ① executed 无 result_ref 拒绝
 func TestV561ExecutedRequiresResultRef(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-RR", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-RR", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	vid, _ := st.AddVT(&store.VerificationTask{ProjectID: p.ID, Title: "[W4-L1] 测试轨", Status: "pending"})
 	res := o.dispatch(context.Background(), p, "s4", llmToolCallV560("update_vt",
@@ -36,7 +36,7 @@ func TestV561ExecutedRequiresResultRef(t *testing.T) {
 // ② 三态块统一判据：verified Loot → S1（缺陷#1）
 func TestV561LootIdentityNotS0(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-LI", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-LI", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	_, _ = st.AddLoot(&store.LootRecord{ProjectID: p.ID, Type: "session", Target: "t", Masked: "adm***23", Verified: "verified"})
 	if !o.projectHasIdentity(p) {
@@ -60,7 +60,7 @@ func TestV561StoreCredentialRefreshesContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.creds = svc
-	p := &store.Project{ID: "P-RF", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-RF", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	o.dispatch(context.Background(), p, "s4", llmToolCallV560("store_credential",
 		`{"identity":"operator","kind":"bearer","secret":"tok-v561"}`))
@@ -79,7 +79,7 @@ func TestV561StoreCredentialRefreshesContext(t *testing.T) {
 // ④ Receipt 归档脱敏（RunB#11）
 func TestV561ReceiptArchivedMasked(t *testing.T) {
 	_, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-RM", StageStates: map[string]*store.StageState{"s2": {Status: "running"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-RM", StageStates: map[string]*store.StageState{"s2": {Status: "running"}}}
 	_ = st.SaveProject(p)
 	long := "Authorization: Bearer live-secret-token-9999 " + strings.Repeat("Y", 5000)
 	archive := func(stage, content string) string {
@@ -103,7 +103,7 @@ func TestV561ReceiptArchivedMasked(t *testing.T) {
 // ⑤ AnswerAsk 普通提问答案脱敏（RunB#6）
 func TestV561AskAnswerMasked(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-AM"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-AM"}
 	_ = st.SaveProject(p)
 	askID, _ := st.AddAsk(&store.AskRecord{ProjectID: p.ID, Question: "决策？", Status: "pending"})
 	if err := o.AnswerAsk(askID, "选择 B；顺便 token=abcd12345678efgh", "tester"); err != nil {
@@ -124,7 +124,7 @@ func TestV561ProvenanceValidationAndMatrixVT(t *testing.T) {
 	t.Setenv(credentials.EnvMasterKey, v550TestKey)
 	svc, _ := credentials.New(st)
 	o.creds = svc
-	p := &store.Project{ID: "P-PV", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-PV", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	// forged 无 method 拒绝
 	if _, err := svc.Put(credentials.Input{ProjectID: p.ID, Identity: "forged", Kind: "bearer", Secret: "x", Origin: "forged"}); err == nil {
@@ -175,7 +175,7 @@ func TestV561CredCommandTargetBinding(t *testing.T) {
 	t.Setenv(credentials.EnvMasterKey, v550TestKey)
 	svc, _ := credentials.New(st)
 	o.creds = svc
-	p := &store.Project{ID: "P-TB", StageStates: map[string]*store.StageState{}, AutoApprove: "all"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-TB", StageStates: map[string]*store.StageState{}, AutoApprove: "all"}
 	_ = st.SaveProject(p)
 	meta, _ := svc.Put(credentials.Input{ProjectID: p.ID, Target: "http://api.t.local", Identity: "op", Kind: "bearer", Secret: "tok"})
 	res := o.dispatch(context.Background(), p, "s4", llmToolCallV560("cred_command",

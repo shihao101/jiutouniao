@@ -1,7 +1,7 @@
 ---
 id: payload-mutation-algebra
 title: 通用变异代数与绕过路径（过滤器指纹→系统化变体→fallback 链）
-tags: 绕过,waf,编码,变异,fuzz,s4
+tags: 绕过,waf,编码,变异,fuzz,s4,s5
 ---
 # 通用变异代数（任何 payload 被拦后先查我）
 

@@ -36,15 +36,24 @@ func confidenceTier(conf string) int {
 }
 
 // sortQueueFindings 待利用队列排序（稳定排序，原列表不被修改）：
+//  0. v6.4.0（S4-④）anonymousFirst=true（无凭证项目）时 access=anonymous 的项置最前——
+//     兑现 buildContextPack 上下文承诺「无凭证项目优先消费 access=anonymous 的高危项」
+//     （v6.3.0 及以前该承诺无排序键支撑，与 multitarget.go「不向模型撒谎」纪律相悖）；
 //  1. 已标注 impact_rank（1-6）的项排在未标注之前，标注内按 rank 升序——RCE 系先打；
 //  2. 同档内置信度高在前（确证 → 疑似 → 待查）；
 //  3. 再按严重度高在前；
 //  4. 其余保持登记时间序（稳定排序保证）。
-func sortQueueFindings(fs []*store.Finding) []*store.Finding {
+func sortQueueFindings(fs []*store.Finding, anonymousFirst bool) []*store.Finding {
 	out := make([]*store.Finding, len(fs))
 	copy(out, fs)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
+		if anonymousFirst {
+			aa, ab := a.Access == "anonymous", b.Access == "anonymous"
+			if aa != ab {
+				return aa
+			}
+		}
 		ra, rb := a.ImpactRank > 0, b.ImpactRank > 0
 		if ra != rb {
 			return ra

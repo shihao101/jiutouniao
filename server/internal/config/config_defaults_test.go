@@ -11,7 +11,7 @@ import (
 func TestBarrierTimeoutDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	minimal := `{"listen":":9999"}`
+	minimal := `{"listen":":9999","admin_password_hash":"test-hash"}`
 	if err := os.WriteFile(path, []byte(minimal), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestBarrierTimeoutDefault(t *testing.T) {
 		t.Fatalf("未配置 barrier_timeout_sec 应回退默认 1800，实际 %d", cfg.Engine.BarrierTimeoutSec)
 	}
 	// 显式配置可覆盖
-	if err := os.WriteFile(path, []byte(`{"engine":{"barrier_timeout_sec":600}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"engine":{"barrier_timeout_sec":600},"admin_password_hash":"test-hash"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = Load(path)

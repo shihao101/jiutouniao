@@ -55,6 +55,15 @@ var subAgentTools = map[string]bool{
 	// v5.5.0（修复方案 A/F）：带态测试进子代理工具面（角色矩阵扇出复放依赖 http_request/cred_command）；
 	// 凭据管理类动作（store/revoke）仍只属于主头。
 	"http_request": true, "cred_command": true, "list_credentials": true,
+	// v6.4.0（S4-⑪）：台账登记类工具进子代理工具面——C27 queued_vt 桶（record_vt）与 C28
+	// 候选归位（record_candidate/update_candidate）在并行扇出场景不再依赖主头 poll 后转登
+	//（待验证/未定性线索由最贴近的一线即时入账本，防简报遗漏；bbolt 事务串行化，
+	// 与 record_finding 同级风险面，不改流程状态、不触发审批）。
+	"record_vt": true, "update_vt": true, "record_candidate": true, "update_candidate": true,
+	// v6.5.0（S5-⑧）：逐目标隔离批量通道进子代理工具面——多目标 S5 扇出单元做同构批量
+	// 利用/验证（同一 PoC/探针跨目标投递）不再退化为逐目标 run_command（轮次按目标数
+	// 线性折损）；与 run_command 同级风险面，审批与模板/实例风险一致性由引擎执行时统一强制。
+	"run_batch": true,
 }
 
 // subAgentToolDefs 主头工具面的受控子集（按白名单过滤）。
@@ -73,7 +82,7 @@ const subAgentCharter = `你是九头鸟的「子代理」：由主头派生，�
 ## 子代理守则
 1. 只做派发目标相关的工作，不要扩大攻击面；范围外资产只记录不访问。
 2. 你拥有独立的轮次预算（%d 轮），到轮次将自动结束——优先完成目标内最有价值的验证。
-3. 你的发现必须实时 record_finding / update_coverage / upsert_fact 入库（与主头共享黑板），不要攒到最后。
+3. 你的发现必须实时 record_finding / update_coverage / upsert_fact 入库（与主头共享黑板），不要攒到最后；**待验证/未定性线索立即 record_vt / record_candidate 入账本（与主头共享验证队列与候选账本），不要攒在结果简报里**。
 4. 全部红线与深度测试纪律见执行循环宪法（同主头）：禁破坏性、生产数据只做存在性证明、命令留证。
 5. 完成或确认无法推进时，输出一段「结果简报」纯文本（做了什么/确证了什么/未完成什么），不要调用主头专属工具（如 complete_stage——不在你的工具面里，调用会报错）。`
 

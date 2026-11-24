@@ -16,11 +16,19 @@ tags: 会话,登录,session,cookie,越权,存储型,注入,s4,s5
 ├─ 无凭据 + ROE auto_register=deny（v5.1 默认）→ L1 只评估不注册；
 │   其余轨（auth-bypass/重置/默认口令/browser-auth）→ 仍无身份 →
 │   identity-bootstrapping v5.8.0 口径（不主动询问；用户主动提供的凭据经 request_credential 入库）；
-│   拒绝/超时 → update_coverage(premise_failed, notes「ROE 禁自建且客户未提供账号」) 移交，禁止硬磕
+│   拒绝/超时 → **不得直接移交（v6.5.0 S5-③ 口径统一）**：先 load_skill observable-degradation
+│   逐项过四通道评估，可行项就地三态登记，不可行项才 update_coverage(needs_follow_up,
+│   notes「ROE 禁自建且客户未提供账号 + 四通道逐项不可行原因」) 按四元组移交，禁止硬磕
 ├─ 无凭据 + 注册关闭 → 先走 auth-bypass（万能密码/重置/默认口令）；仍失败 →
-│   update_coverage(premise_failed, notes「无凭据且注册关闭」) 移交，禁止硬磕
+│   同上：先 observable-degradation 四通道评估，不可行才
+│   update_coverage(needs_follow_up, notes「无凭据且注册关闭 + 四通道不可行原因」) 移交，禁止硬磕
 └─ 登录面有加密协议/验证码/UA 指纹 → load_skill browser-auth（真实浏览器合规登录）
 ```
+
+> **与 observable-degradation 的衔接（v6.5.0 S5-③）**：本决策树「仍无身份」的终点不是直接移交——
+> 认证后项必须先过 observable-degradation 四通道（时延侧信道/缓存差分/错误文案差分/自建数据回流），
+> 能拿到存在性证明的按三态登记，确实不可观测的才按四元组移交（移交原因写明四通道逐项不可行）。
+> 本轨与降级轨不可互相替代（有身份一律走本链带态测试）。
 
 ## 二、A 注册链（ROE auto_register=allow + 注册开放时；v5.1 默认 deny 不执行）
 

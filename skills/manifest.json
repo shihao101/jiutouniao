@@ -1,9 +1,9 @@
 {
- "version": "5.6.0",
+ "version": "5.8.0",
  "generated": "2026-11-14",
  "description": "机器可读技能清单（v5.3.2：gen_skill_manifest.py 单源生成——aliases/depends_on/handoff_to/stage_fit/lab_only 全量结构化，引擎 SkillRegistry 消费；重新生成请跑 scripts/gen_skill_manifest.py）",
  "route_file": "skills/00-router.md",
- "count": 126,
+ "count": 140,
  "skills": [
   {
    "id": "00-router",
@@ -143,7 +143,9 @@
     "idor",
     "bola",
     "越权",
-    "接口"
+    "接口",
+    "s4",
+    "s5"
    ],
    "aliases": [
     "idor",
@@ -155,6 +157,10 @@
    ],
    "handoff_to": [
     "evidence-standard"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -195,9 +201,49 @@
     "app-static-audit"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specB1"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-integrity-server-verify",
+   "file": "skills/app-integrity-server-verify.md",
+   "title": "\"平台应用完整性与服务端判定（Play Integrity/App Attest 挑战绑定→服务端验证→业务决策）\"",
+   "tags": [
+    "app",
+    "android",
+    "ios",
+    "完整性",
+    "play-integrity",
+    "app-attest",
+    "服务端判定",
+    "specB1",
+    "b1",
+    "s4"
+   ],
+   "aliases": [
+    "play integrity",
+    "app attest",
+    "设备完整性",
+    "完整性判定",
+    "防重放"
+   ],
+   "depends_on": [
+    "app-dynamic-audit",
+    "evidence-standard"
+   ],
+   "handoff_to": [
+    "evidence-standard",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB1"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "app-ios-audit",
@@ -216,7 +262,8 @@
     "app-static-audit"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specB1"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -238,9 +285,49 @@
     "report-writing"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specB1",
+    "specB2"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "app-sdk-privacy-behavior",
+   "file": "skills/app-sdk-privacy-behavior.md",
+   "title": "\"APP 隐私清单与 SDK 数据行为（声明 vs 运行时数据流——采集/共享/保留/删除路径逐项比对）\"",
+   "tags": [
+    "app",
+    "ios",
+    "android",
+    "隐私清单",
+    "sdk",
+    "privacy-manifest",
+    "数据行为",
+    "specB1",
+    "b1",
+    "s4"
+   ],
+   "aliases": [
+    "sdk数据行为",
+    "隐私清单",
+    "privacy manifest",
+    "sdk治理"
+   ],
+   "depends_on": [
+    "app-dynamic-audit",
+    "app-privacy-compliance",
+    "app-static-audit"
+   ],
+   "handoff_to": [
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB1"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "app-static-audit",
@@ -284,7 +371,9 @@
     "会话",
     "jwt",
     "oauth",
-    "爆破"
+    "爆破",
+    "s4",
+    "s5"
    ],
    "aliases": [
     "认证绕过",
@@ -292,6 +381,10 @@
    ],
    "depends_on": [
     "browser-auth"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -306,13 +399,15 @@
     "redirect_uri",
     "state",
     "pkce",
-    "s4"
+    "s4",
+    "s2"
    ],
    "depends_on": [
     "jwt-crypto",
     "session-lifecycle"
    ],
    "stage_fit": [
+    "s2",
     "s4"
    ],
    "execution_profile_default": "production_safe"
@@ -360,13 +455,50 @@
     "wasm",
     "browser-kit",
     "s5",
-    "s6"
+    "s6",
+    "s4"
    ],
    "depends_on": [
     "auth-bypass"
    ],
    "stage_fit": [
+    "s4",
     "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "business-state-machine",
+   "file": "skills/business-state-machine.md",
+   "title": "业务状态机滥用（非法状态转移/竞态/配额）",
+   "tags": [
+    "s4",
+    "s5",
+    "业务逻辑",
+    "状态机",
+    "竞态",
+    "配额",
+    "idempotency"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "c27-reconciliation",
+   "file": "skills/c27-reconciliation.md",
+   "title": "27类收口对账表规范（S6 收口件模板）",
+   "tags": [
+    "对账",
+    "C27",
+    "s6",
+    "收口",
+    "模板\nstage_fit: s6\nexecution_profile_default: neutral"
+   ],
+   "stage_fit": [
     "s6"
    ],
    "execution_profile_default": "production_safe"
@@ -430,6 +562,31 @@
     "s2",
     "s5",
     "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "cleanup-handover",
+   "file": "skills/cleanup-handover.md",
+   "title": "S7 收口移交剧本（影响量化 / 清理登记移交 / 只读复核 / 待续处置）",
+   "tags": [
+    "收尾",
+    "清理",
+    "移交",
+    "影响评估",
+    "待续处置",
+    "登记",
+    "s7"
+   ],
+   "aliases": [
+    "收尾",
+    "清理移交",
+    "影响量化",
+    "待续处置",
+    "移交清单"
+   ],
+   "stage_fit": [
+    "s7"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -817,7 +974,8 @@
     "判据",
     "s4",
     "s5",
-    "s8"
+    "s8",
+    "s6"
    ],
    "aliases": [
     "证据",
@@ -826,6 +984,7 @@
    "stage_fit": [
     "s4",
     "s5",
+    "s6",
     "s8"
    ],
    "execution_profile_default": "production_safe"
@@ -1075,6 +1234,27 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "http-security-headers",
+   "file": "skills/http-security-headers.md",
+   "title": "HTTP 安全响应头基线（C-25 头配置面）",
+   "tags": [
+    "s4",
+    "安全头",
+    "csp",
+    "hsts",
+    "cookie",
+    "headers",
+    "配置"
+   ],
+   "depends_on": [
+    "tls-deep-audit"
+   ],
+   "stage_fit": [
+    "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "hypothesis-0day",
    "file": "skills/hypothesis-0day.md",
    "title": "0day 假设驱动测试工作流（异常→假设→差异→定性）",
@@ -1182,12 +1362,34 @@
    "depends_on": [
     "browser-auth",
     "injection-points",
+    "observable-degradation",
     "osint-leak-intel",
     "session-state-chain",
     "weak-cred-bruteforce"
    ],
    "handoff_to": [
     "session-state-chain"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "identity-flow-audit",
+   "file": "skills/identity-flow-audit.md",
+   "title": "身份流程全链审计（验证码/重置/OAuth/注册/锁定/会话）",
+   "tags": [
+    "s4",
+    "s5",
+    "认证",
+    "验证码",
+    "重置",
+    "oauth",
+    "注册",
+    "锁定",
+    "会话"
    ],
    "stage_fit": [
     "s4",
@@ -1297,12 +1499,14 @@
     "sourcemap",
     "情报",
     "s2",
-    "s3"
+    "s3",
+    "s1"
    ],
    "depends_on": [
     "frontend-sca"
    ],
    "stage_fit": [
+    "s1",
     "s2",
     "s3"
    ],
@@ -1393,7 +1597,10 @@
     "js-challenge",
     "浏览器",
     "限速",
-    "behavior"
+    "behavior",
+    "s2",
+    "s4",
+    "s5"
    ],
    "aliases": [
     "js挑战",
@@ -1406,6 +1613,11 @@
    "handoff_to": [
     "channel-snapshot"
    ],
+   "stage_fit": [
+    "s2",
+    "s4",
+    "s5"
+   ],
    "execution_profile_default": "production_safe"
   },
   {
@@ -1416,11 +1628,17 @@
     "jwt",
     "密码学",
     "加密",
-    "认证"
+    "认证",
+    "s2",
+    "s4"
    ],
    "depends_on": [
     "auth-flow-deep",
     "session-lifecycle"
+   ],
+   "stage_fit": [
+    "s2",
+    "s4"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1446,6 +1664,85 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "llm-agent-memory-integrity",
+   "file": "skills/llm-agent-memory-integrity.md",
+   "title": "\"Agent 记忆与目标完整性（写入者/保留期/隔离与删除控制——低信任内容不得持久改变授权行为）\"",
+   "tags": [
+    "llm",
+    "agent",
+    "记忆",
+    "记忆投毒",
+    "长期记忆",
+    "上下文投毒",
+    "删除",
+    "specA",
+    "a",
+    "s4"
+   ],
+   "aliases": [
+    "agent记忆",
+    "记忆投毒",
+    "长期记忆",
+    "上下文投毒"
+   ],
+   "depends_on": [
+    "evidence-standard",
+    "rag-attack"
+   ],
+   "handoff_to": [
+    "evidence-standard",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specA"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "llm-agent-protocol-boundaries",
+   "file": "skills/llm-agent-protocol-boundaries.md",
+   "title": "\"Agent 协议与委托信任边界（MCP/A2A：受众绑定/令牌透传/工具描述替换/出站路径）\"",
+   "tags": [
+    "llm",
+    "agent",
+    "mcp",
+    "a2a",
+    "协议",
+    "信任边界",
+    "受众绑定",
+    "specA",
+    "a",
+    "s4"
+   ],
+   "aliases": [
+    "mcp",
+    "a2a",
+    "agent协议",
+    "信任边界",
+    "受众绑定",
+    "混淆代理"
+   ],
+   "depends_on": [
+    "auth-flow-deep",
+    "evidence-standard",
+    "llm-agent-toolchain"
+   ],
+   "handoff_to": [
+    "api-idor",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specA"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
    "id": "llm-agent-toolchain",
    "file": "skills/llm-agent-toolchain.md",
    "title": "LLM Agent 工具链滥用手册（Function Calling/MCP/插件越权实操）",
@@ -1459,9 +1756,52 @@
     "a"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specA"
    ],
    "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "llm-gateway-policy-chain",
+   "file": "skills/llm-gateway-policy-chain.md",
+   "title": "\"LLM 网关与策略链（输入/检索/工具结果/输出四通道×控制点矩阵——逐层核对放行/阻断决策）\"",
+   "tags": [
+    "llm",
+    "网关",
+    "防护链",
+    "内容安全",
+    "策略链",
+    "遥测",
+    "误报",
+    "漏报",
+    "specA",
+    "a",
+    "s4"
+   ],
+   "aliases": [
+    "llm网关",
+    "防护链",
+    "内容安全",
+    "策略链",
+    "误报漏报"
+   ],
+   "depends_on": [
+    "evidence-standard",
+    "llm-agent-toolchain",
+    "llm-payloads",
+    "llm-top10"
+   ],
+   "handoff_to": [
+    "evidence-standard",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specA"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
   },
   {
    "id": "llm-multimodal",
@@ -1480,7 +1820,8 @@
     "rag-attack"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specA"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1492,7 +1833,11 @@
     "llm",
     "payload",
     "越狱",
-    "提示注入"
+    "提示注入",
+    "specA"
+   ],
+   "stage_fit": [
+    "specA"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1651,6 +1996,161 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "miniapp-cloud-identity",
+   "file": "skills/miniapp-cloud-identity.md",
+   "title": "\"小程序云资源身份与部署边界（调用来源/HTTP 暴露/服务身份 IAM/数据库规则/存储/环境差异）\"",
+   "tags": [
+    "小程序",
+    "云开发",
+    "云函数",
+    "身份",
+    "iam",
+    "部署边界",
+    "security-rules",
+    "specB2",
+    "b2",
+    "s4"
+   ],
+   "aliases": [
+    "云函数身份",
+    "部署边界",
+    "云资源身份",
+    "iam"
+   ],
+   "depends_on": [
+    "cloud-security",
+    "evidence-standard",
+    "miniapp-audit",
+    "miniapp-server"
+   ],
+   "handoff_to": [
+    "evidence-standard",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB2"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "miniapp-host-isolation",
+   "file": "skills/miniapp-host-isolation.md",
+   "title": "\"小程序宿主能力与跨小程序隔离（宿主桥接/敏感权限 API/跨小程序数据边界——仅负对照）\"",
+   "tags": [
+    "小程序",
+    "宿主",
+    "桥接",
+    "跨小程序",
+    "隔离",
+    "权限api",
+    "specB2",
+    "b2",
+    "s4"
+   ],
+   "aliases": [
+    "宿主桥接",
+    "跨小程序",
+    "宿主能力",
+    "隔离边界"
+   ],
+   "depends_on": [
+    "api-idor",
+    "miniapp-audit"
+   ],
+   "handoff_to": [
+    "api-idor",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB2"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "miniapp-platform-login",
+   "file": "skills/miniapp-platform-login.md",
+   "title": "\"小程序平台登录态与身份绑定（授权码生命周期/code换会话/身份映射/刷新撤销/防重放）\"",
+   "tags": [
+    "小程序",
+    "登录态",
+    "授权码",
+    "code2session",
+    "会话绑定",
+    "身份映射",
+    "specB2",
+    "b2",
+    "s4"
+   ],
+   "aliases": [
+    "授权码",
+    "code2session",
+    "登录态",
+    "会话绑定",
+    "身份映射"
+   ],
+   "depends_on": [
+    "api-idor",
+    "miniapp-audit",
+    "miniapp-server",
+    "session-lifecycle"
+   ],
+   "handoff_to": [
+    "api-idor",
+    "session-lifecycle",
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB2"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
+   "id": "miniapp-privacy-governance",
+   "file": "skills/miniapp-privacy-governance.md",
+   "title": "\"小程序备案、隐私披露与 SDK 治理证据（独立治理检查项——与技术漏洞分开定性，法务判断不自动化）\"",
+   "tags": [
+    "小程序",
+    "备案",
+    "隐私政策",
+    "披露",
+    "sdk治理",
+    "个人信息",
+    "specB2",
+    "b2",
+    "s4"
+   ],
+   "aliases": [
+    "备案",
+    "隐私披露",
+    "sdk治理证据",
+    "个人信息"
+   ],
+   "depends_on": [
+    "app-privacy-compliance",
+    "app-sdk-privacy-behavior",
+    "report-writing"
+   ],
+   "handoff_to": [
+    "report-writing"
+   ],
+   "stage_fit": [
+    "s4",
+    "specB2"
+   ],
+   "execution_profile_default": "production_safe",
+   "lab_only": true,
+   "lab_only_actions": "见技能正文「Execution Profile 标注」节（v5.3.2 起高危技能已逐项标注）"
+  },
+  {
    "id": "miniapp-server",
    "file": "skills/miniapp-server.md",
    "title": "小程序服务端攻击链手册（解包 API → 鉴权/签名/越权）",
@@ -1667,7 +2167,8 @@
     "api-idor"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specB2"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1738,7 +2239,7 @@
   {
    "id": "oob-interactsh",
    "file": "skills/oob-interactsh.md",
-   "title": "OOB 回连双通道手册（盲注/SSRF/XXE 无回显验证）",
+   "title": "OOB 回连通道手册（盲注/SSRF/XXE 无回显验证 · 三模式引擎托管）",
    "tags": [
     "oob",
     "回连",
@@ -1746,9 +2247,11 @@
     "dnslog",
     "盲注",
     "s4",
-    "s5"
+    "s5",
+    "s1"
    ],
    "stage_fit": [
+    "s1",
     "s4",
     "s5"
    ],
@@ -1799,7 +2302,10 @@
     "gitleaks",
     "dork",
     "s2",
-    "s4"
+    "s4",
+    "网盘",
+    "邮箱格式",
+    "shodan"
    ],
    "aliases": [
     "泄露库",
@@ -1922,10 +2428,12 @@
     "编码",
     "变异",
     "fuzz",
-    "s4"
+    "s4",
+    "s5"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -2024,6 +2532,10 @@
     "s6",
     "privesc"
    ],
+   "depends_on": [
+    "cloud-security",
+    "k8s-attack"
+   ],
    "stage_fit": [
     "s6"
    ],
@@ -2119,7 +2631,8 @@
     "llm-top10"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "specA"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -2133,7 +2646,9 @@
     "冷却",
     "扫描governor",
     "风控",
-    "behavior"
+    "behavior",
+    "s4",
+    "s5"
    ],
    "aliases": [
     "限速",
@@ -2144,6 +2659,10 @@
    ],
    "handoff_to": [
     "channel-snapshot"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -2175,12 +2694,17 @@
     "子域",
     "端口",
     "指纹",
-    "s2"
+    "s2",
+    "whois",
+    "被动dns",
+    "ASN",
+    "osint"
    ],
    "depends_on": [
     "history-recon",
     "intel-factory",
-    "osint-leak-intel"
+    "osint-leak-intel",
+    "subdomain-takeover"
    ],
    "stage_fit": [
     "s2"
@@ -2216,12 +2740,14 @@
     "cl",
     "te",
     "代理",
-    "s4"
+    "s4",
+    "s2"
    ],
    "depends_on": [
     "intranet-lateral"
    ],
    "stage_fit": [
+    "s2",
     "s4"
    ],
    "execution_profile_default": "production_safe"
@@ -2303,6 +2829,7 @@
    "depends_on": [
     "auth-bypass",
     "browser-auth",
+    "observable-degradation",
     "session-lifecycle"
    ],
    "stage_fit": [
@@ -2354,7 +2881,8 @@
     "红队",
     "现场",
     "授权",
-    "s2"
+    "s2",
+    "s6"
    ],
    "aliases": [
     "社工",
@@ -2370,7 +2898,8 @@
     "osint-leak-intel"
    ],
    "stage_fit": [
-    "s2"
+    "s2",
+    "s6"
    ],
    "execution_profile_default": "production_safe",
    "lab_only": true,
@@ -2405,7 +2934,8 @@
     "布尔",
     "时间",
     "waf",
-    "s4"
+    "s4",
+    "s5"
    ],
    "aliases": [
     "sql注入",
@@ -2419,7 +2949,8 @@
     "evidence-standard"
    ],
    "stage_fit": [
-    "s4"
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -2722,7 +3253,8 @@
     "落点",
     "清理",
     "s5",
-    "s7"
+    "s7",
+    "s6"
    ],
    "aliases": [
     "webshell",
@@ -2730,10 +3262,12 @@
     "后门"
    ],
    "depends_on": [
-    "capability-primitive-search"
+    "capability-primitive-search",
+    "upload-bypass"
    ],
    "stage_fit": [
     "s5",
+    "s6",
     "s7"
    ],
    "execution_profile_default": "production_safe",

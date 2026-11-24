@@ -15,7 +15,7 @@ import (
 func TestV600PreApprovedAllAutoPass(t *testing.T) {
 	ap, st := testApprover(t)
 	// all=全通过：提权类 L2 工单即时自动批准（含后续新增类别，无需登记关键词）
-	p := &store.Project{ID: "P-V600-A", Name: "全通过", PreApproved: "all"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-A", Name: "全通过", PreApproved: "all"}
 	_ = st.SaveProject(p)
 	res, err := ap.Request(context.Background(), p.ID, "s6", "【提权】SUID find 本地提权验证", "L2")
 	if err != nil || res != "auto-approved" {
@@ -29,7 +29,7 @@ func TestV600PreApprovedAllAutoPass(t *testing.T) {
 
 func TestV600PreApprovedNoneFallsBackToManual(t *testing.T) {
 	ap, st := testApprover(t)
-	p := &store.Project{ID: "P-V600-B", Name: "默认", PreApproved: ""}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-B", Name: "默认", PreApproved: ""}
 	_ = st.SaveProject(p)
 	ap.SetWaitTimeout(1) // 屏障超时语义（barrier_timeout_sec）：1s 后工单 expired、Request 返回 timeout
 	res, err := ap.Request(context.Background(), p.ID, "s6", "【提权】验证", "L2")
@@ -47,7 +47,7 @@ func TestV600PreApprovedNoneFallsBackToManual(t *testing.T) {
 
 func TestV600PreApprovedCategoryMatch(t *testing.T) {
 	ap, st := testApprover(t)
-	p := &store.Project{ID: "P-V600-C", Name: "类别档", PreApproved: "privesc,lateral"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-C", Name: "类别档", PreApproved: "privesc,lateral"}
 	_ = st.SaveProject(p)
 	if res, _ := ap.Request(context.Background(), p.ID, "s6", "【横向】凭据复用 SMB 枚举", "L2"); res != "auto-approved" {
 		t.Fatalf("类别命中应自动批准: %s", res)
@@ -75,8 +75,8 @@ func TestV600NormalizePreApproved(t *testing.T) {
 
 func TestV600EffectiveWritePolicyAndExpansion(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	lab := &store.Project{ID: "P-V600-D", Name: "靶场", ExecutionProfile: "isolated_lab"}
-	prod := &store.Project{ID: "P-V600-E", Name: "生产", ExecutionProfile: "production_safe"}
+	lab := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-D", Name: "靶场", ExecutionProfile: "isolated_lab"}
+	prod := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-E", Name: "生产", ExecutionProfile: "production_safe"}
 	_ = st.SaveProject(lab)
 	_ = st.SaveProject(prod)
 	// 第 2 层：无部署级 YAML → 按执行档派生
@@ -109,7 +109,7 @@ func TestV600EffectiveWritePolicyAndExpansion(t *testing.T) {
 
 func TestV600ScopeGateExtensionTicket(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V600-F", Name: "扩展", Target: "10.0.0.1",
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-F", Name: "扩展", Target: "10.0.0.1",
 		ExecutionProfile: "isolated_lab", StrictScope: true}
 	_ = st.SaveProject(p)
 	// 立足点发现证据：172.33.0.40 出现在证据链 → 可走 expansion 通道
@@ -143,7 +143,7 @@ func TestV600ScopeGateExtensionTicket(t *testing.T) {
 		t.Fatalf("未发现目标应维持硬拦且不开工单: msg=%s", msg4)
 	}
 	// 生产档对照：派生 deny，已发现目标也硬拦（通用型缺省收紧）
-	p2 := &store.Project{ID: "P-V600-G", Name: "生产对照", Target: "10.0.0.1",
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V600-G", Name: "生产对照", Target: "10.0.0.1",
 		ExecutionProfile: "production_safe", StrictScope: true}
 	_ = st.SaveProject(p2)
 	_, _ = st.AddEvidence(&store.EvidenceRecord{ProjectID: p2.ID, Stage: "s5", Type: "command",

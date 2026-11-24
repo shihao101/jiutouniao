@@ -1,7 +1,7 @@
 ---
 id: auth-bypass
 title: 认证与会话攻击手册
-tags: 认证,会话,jwt,oauth,爆破
+tags: 认证,会话,jwt,oauth,爆破,s4,s5
 ---
 # 认证与会话攻击手册
 

@@ -1,7 +1,7 @@
 ---
 id: "rate-limit-playbook"
 title: "限速/连接级阻断目标剧本（有效速率核算/完全静默冷却/窗口化执行）"
-tags: "对抗,限速,冷却,扫描governor,风控,behavior"
+tags: "对抗,限速,冷却,扫描governor,风控,behavior,s4,s5"
 ---
 # 限速/连接级阻断目标剧本（v4.6 K3/K4）
 
@@ -18,7 +18,7 @@ tags: "对抗,限速,冷却,扫描governor,风控,behavior"
 
 - 触发阻断 → **零探活**（探活可能重置锁定窗口——某限速分型目标 观测，未实验验证前不得反向采信）；
 - 金丝雀：静默 15min → 单请求探活；失败 → 45min → 90min 指数退避；
-- 「完全静默 ≥60min 恢复、周期探活重置锁定」已入组织教训（behavior_class=rate-limited）——S1/S2 承接限速类目标时 load_skill 本技能并执行该默认。
+- 「完全静默 ≥60min 恢复、周期探活重置锁定」已入组织教训（behavior_class=rate-limited）——S1/S2 承接限速类目标时载入本技能并执行该默认。
 
 ## 三、窗口化批量执行（冷却结束后的唯一正确姿势）
 

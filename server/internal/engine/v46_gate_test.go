@@ -32,7 +32,7 @@ func call(t *testing.T, o *Orchestrator, p *store.Project, stage, name, args str
 // E1-①/②：claims 判据串校验（缺失文件 / 判据串未命中 → 拒绝；命中 → 通过）
 func TestV46RecordFindingClaims(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46A"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46A"}
 	_ = o.store.SaveProject(p)
 	_, _ = o.exec.WriteFile(p.ID, "evidence/probe.txt", "HTTP 200 94068B ofid=2 教務處")
 
@@ -59,7 +59,7 @@ func TestV46RecordFindingClaims(t *testing.T) {
 // E1-③：否定性断言 + 确证 + 无 claims → 拒绝（0935 jar 案形态）
 func TestV46RecordFindingNegativeAssert(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46B"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46B"}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s5", "record_finding",
 		`{"title":"Admin 验证码绕过不依赖会话 Cookie","severity":"高","confidence":"确证","detail":"evidence/s5-exp02-jar1.txt 为空 jar，客户端未获得任何会话 Cookie"}`)
@@ -77,7 +77,7 @@ func TestV46RecordFindingNegativeAssert(t *testing.T) {
 // E1-④：确证 与 待验证 同文 → 拒绝（1AC8 sendSMS 案形态）
 func TestV46RecordFindingPendingConfidence(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46C"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46C"}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s4", "record_finding",
 		`{"title":"sendSMS 未授权可达（短信轰炸面）","severity":"中","confidence":"确证","detail":"接口可达性确证；服务端是否校验待 S4 单请求验证"}`)
@@ -89,7 +89,7 @@ func TestV46RecordFindingPendingConfidence(t *testing.T) {
 // E4：高危 + exploitability=untested → 自动降级中级
 func TestV46RecordFindingExploitabilityCap(t *testing.T) {
 	o, st := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46D"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46D"}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s4", "record_finding",
 		`{"title":"管理面隐藏路径暴露未认证会话分配","severity":"高","confidence":"疑似","exploitability":"untested","detail":"分配原语确证 e-EV001；续接/触达未验证"}`)
@@ -105,7 +105,7 @@ func TestV46RecordFindingExploitabilityCap(t *testing.T) {
 // B1：归一化标题全等 → 入口判重拒绝
 func TestV46RecordFindingDedup(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46E"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46E"}
 	_ = o.store.SaveProject(p)
 	base := `{"title":"招生报考系统全站 HTTP 明文传输，登录凭据可被嗅探","severity":"高","confidence":"确证","detail":"evidence/p.txt"}`
 	if got := call(t, o, p, "s2", "record_finding", base); !strings.Contains(got, "已登记漏洞") {
@@ -119,7 +119,7 @@ func TestV46RecordFindingDedup(t *testing.T) {
 // E3：负结果语义——非法 observed_result 拒绝；缺失自动降级；negative_valid 放行
 func TestV46CoverageObservedResult(t *testing.T) {
 	o, st := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46F"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46F"}
 	_ = o.store.SaveProject(p)
 	// ① 显式非法
 	got := call(t, o, p, "s4", "update_coverage",
@@ -158,7 +158,7 @@ func TestV46CoverageObservedResult(t *testing.T) {
 // V3：s4/s5 收口强制清单
 func TestV46CompleteStageForcedLists(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46G", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46G", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s4", "complete_stage", `{"summary":"x"}`)
 	if !strings.Contains(got, "ready_but_unexecuted") {
@@ -174,7 +174,7 @@ func TestV46CompleteStageForcedLists(t *testing.T) {
 // B5：update_finding 结论回写（强制 reason + 修订留痕）
 func TestV46UpdateFinding(t *testing.T) {
 	o, st := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46H"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46H"}
 	_ = o.store.SaveProject(p)
 	id, _ := st.AddFinding(&store.Finding{ProjectID: p.ID, Stage: "s2", Title: "ShellInABox 未认证会话分配", Severity: "高", Confidence: "疑似", Detail: "EV-001"})
 	// 缺 reason → 拒绝
@@ -196,7 +196,7 @@ func TestV46UpdateFinding(t *testing.T) {
 // R2 门禁扩容：s8 收口层兜底（入口层漏网的旧记录也被拦）
 func TestV46GateE1Backstop(t *testing.T) {
 	o, st := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V46I"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46I"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddFinding(&store.Finding{ProjectID: p.ID, Stage: "s8", Title: "X 验证码绕过不依赖会话 Cookie", Severity: "高", Confidence: "确证", Detail: "jar 为空"})
 	_, _ = st.AddFinding(&store.Finding{ProjectID: p.ID, Stage: "s8", Title: "Y 未鉴权面", Severity: "低", Confidence: "", Detail: "z"})

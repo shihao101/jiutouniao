@@ -44,7 +44,7 @@ func writeV543AsyncSidecar(t *testing.T, dir, pid, jobID, command, state string)
 
 func TestV543HarvestAsyncOutputs(t *testing.T) {
 	o, _, dir := v543Orchestrator(t)
-	p := &store.Project{ID: "P-V543A"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V543A"}
 	_ = o.store.SaveProject(p)
 	writeV543AsyncSidecar(t, dir, p.ID, "job111abc", "bash scripts/gen-inventory.sh", "finished")
 	writeV543AsyncSidecar(t, dir, p.ID, "job222def", "bash scripts/long-run.sh", "running") // 在途不收割
@@ -71,7 +71,7 @@ func TestV543HarvestAsyncOutputs(t *testing.T) {
 
 func TestV543HarvestV3ListsSkipsExecutedVT(t *testing.T) {
 	o, st, dir := v543Orchestrator(t)
-	p := &store.Project{ID: "P-V543B"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V543B"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddVT(&store.VerificationTask{ID: "VT-A", ProjectID: p.ID, Stage: "s4",
 		Title: "泛化枚举确认", ReadyAssets: "scripts/gen-inventory.sh", Status: "ready"})
@@ -116,7 +116,7 @@ func TestV543HarvestV3ListsSkipsExecutedVT(t *testing.T) {
 
 func TestV543UpdateCoverageNoteRequired(t *testing.T) {
 	o, st, _ := v543Orchestrator(t)
-	p := &store.Project{ID: "P-V543C"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V543C"}
 	_ = st.SaveProject(p)
 	// 结论态 + 空 notes → 拒绝
 	got := call(t, o, p, "s4", "update_coverage",
@@ -140,7 +140,7 @@ func TestV543UpdateCoverageNoteRequired(t *testing.T) {
 
 func TestV543DeterministicGateCoverageNote(t *testing.T) {
 	o, st, _ := v543Orchestrator(t)
-	p := &store.Project{ID: "P-V543D"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V543D"}
 	_ = st.SaveProject(p)
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: p.ID, Stage: "s4",
 		Endpoint: "GET /a/", VulnClass: "泛化类A", Status: "vulnerable", Notes: ""})
@@ -204,7 +204,7 @@ func TestV543ProfileWordBoundaryAndReadOnlyExemption(t *testing.T) {
 
 func TestV543ProfileGateMessageExplainable(t *testing.T) {
 	o, _, _ := v543Orchestrator(t)
-	p := &store.Project{ID: "P-V543E", ExecutionProfile: "production_safe"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V543E", ExecutionProfile: "production_safe"}
 	blocked, msg := o.profileGate(p, `curl -X POST http://t/api/order -d '{"status":"paid"}'`)
 	if !blocked {
 		t.Fatal("真实状态变更应被 profileGate 拦截")

@@ -43,6 +43,10 @@ tags: "工具,M6,通道,挑战型waf,封闭站,先probe后batch,s2,s4"
 
 searchsploit（本地库）/ hashcat（ROE 额度）/ openssl/jq/python3 数据处理 / sourcemap 还原 / subdomain-takeover.py（纯 DNS）——**无目标流量，始终可用**，且优先于任何在线探测（窗口 0 零流量纪律）。
 
+## 四a、利用框架类（v6.5.0 S5-⑦ 登记）
+
+- msf（metasploit/msfvenom）：利用选型降级链第一级（s5.md 3a）的现成模块验证器——Kali 可 `apt install metasploit-framework`（install_tool 通道）；**对目标流量默认直连（严禁走 TOOL_PROXY）**；植入/持久化类动作遵 execution profile（production_safe 下被 governanceGates 拦截属预期）。**msf 不可用（未装/网络受限）时降级链不跳级**：searchsploit 检索（本文件第四节）→ 公开 PoC 适配 → 自写 PoC（poc-template），工具缺失按 loop-core 工具守则如实写入交付物。
+
 ## 五、引用规范
 
 - 各技能 M6 节书写格式：`> 通用判据以 tool-channels.md 为准；本技能差异：<仅列本技能特有工具的可用性与适配通道>`；

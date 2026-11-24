@@ -39,6 +39,21 @@ Get-ChildItem "C:\Program Files*" -Recurse -Include *.exe 2>$null | ? { $_.GetAc
 ```
 - Potato 系列（SeImpersonate）实际利用先审批。
 
+## 容器/云检查组（S6-5 专项；v6.7.0 S6-⑧ 补节——head 点名的检查组在此落地，逐项详表见 load_skill cloud-security / k8s-attack）
+
+> 初始立足点在容器/云上时逐项过本组（只读枚举优先，候选路径先审批再验证）：
+
+```bash
+cat /proc/1/cgroup 2>/dev/null | head -3; ls -la /.dockerenv 2>/dev/null   # 是否容器内
+capsh --print 2>/dev/null | grep -i "cap_sys_admin\|cap_net_admin" || grep Cap /proc/self/status   # 特权 capability（privileged 容器=逃逸候选）
+ls -l /var/run/docker.sock /run/docker.sock 2>/dev/null                    # docker.sock 挂载（可写=逃逸候选）
+find / -maxdepth 3 -path /proc -prune -o -path /sys -prune -o -type d -name "*host*" -print 2>/dev/null | head -5   # hostFS/宿主路径挂载线索
+mount | grep -iE "host|docker.sock|/etc;/|/var/run"                        # 敏感挂载面
+env; curl -s -H "X-aws-ec2-metadata-token: false" --max-time 3 http://169.254.169.254/latest/meta-data/ 2>/dev/null | head -5   # 云实例元数据（IMDSv1 无 token 即可达=凭据候选；IMDSv2 需 token 属加固）
+```
+- 判据与分云命令矩阵：load_skill cloud-security（IMDSv1/IAM 角色面）；容器逃逸候选表：load_skill k8s-attack §4（privileged/docker.sock/hostPath/capability/内核 CVE/特权 Pod）。
+- 候选路径**先审批再验证**（head S6-5 口径）；只读枚举与存在性证明可直接推进。
+
 ## 记录纪律
 - 每个候选路径 → record_timeline + 覆盖矩阵(vuln_class=提权)；成功的写入权限矩阵。
 

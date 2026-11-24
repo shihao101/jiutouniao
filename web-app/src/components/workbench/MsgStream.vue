@@ -18,7 +18,7 @@
       <div v-if="!stream.events.length" class="empty">
         {{ projects.current ? '暂无执行记录——启动流水线或在下方对话/下达指令' : '选择项目后显示统一执行流' }}
       </div>
-      <template v-for="(e, i) in visible" :key="i">
+      <template v-for="(e, i) in visible" :key="e.seq || i">
         <!-- 对话/阶段消息 -->
         <div v-if="e.kind === 'msg'" class="msg" :class="e.role === 'user' ? 'me' : 'ai'">
           <div class="avatar">{{ e.role === 'user' ? '我' : '九' }}</div>

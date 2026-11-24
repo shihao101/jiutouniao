@@ -16,7 +16,7 @@ import (
 // V3-F1①：顶层 JSON 数组参数仍然放行（回归 v4.6 原语义）
 func TestV49CompleteStageTopLevelLists(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V49A", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V49A", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s4", "complete_stage", `{"summary":"x","ready_but_unexecuted":[],"l2_approved_unused":[]}`)
 	if strings.Contains(got, "V3") || strings.Contains(got, "缺少必填清单") {
@@ -45,7 +45,7 @@ func TestV49CompleteStageTopLevelLists(t *testing.T) {
 // V3-F1②：summary 约定字面格式回退（实证模型行为：清单写进 summary 文本）
 func TestV49CompleteStageSummaryFallback(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V49B", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V49B", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
 	// 实证形态 1：冒号 + 空数组（含前后文）
 	got := call(t, o, p, "s4", "complete_stage", `{"summary":"S4 收口。\n\nready_but_unexecuted: []\nl2_approved_unused: []\n本轮全部投递。"}`)
@@ -102,7 +102,7 @@ func TestV49ParseV3ListFromText(t *testing.T) {
 // F2：护栏代收口清单收割（VT 台账 pending/ready → 代填；executed/其他阶段不收）
 func TestV49HarvestV3Lists(t *testing.T) {
 	o, st := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V49C"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V49C"}
 	_ = st.SaveProject(p)
 	mk := func(id, stage, status string) {
 		if _, err := st.AddVT(&store.VerificationTask{ID: id, ProjectID: p.ID, Stage: stage,
@@ -142,7 +142,7 @@ func TestV49HarvestV3Lists(t *testing.T) {
 // F2 回归：代收口不改变 dispatch 侧行为——complete_stage 在 V3 通过后仍被实体文件检查拦截
 func TestV49CompleteStageStillRequiresFiles(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V49D", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V49D", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
 	got := call(t, o, p, "s4", "complete_stage", `{"summary":"x","ready_but_unexecuted":[],"l2_approved_unused":[]}`)
 	if !strings.Contains(got, "实体交付物") {
@@ -153,7 +153,7 @@ func TestV49CompleteStageStillRequiresFiles(t *testing.T) {
 // dispatch(ctx) 直连冒烟：确保新增解析在完整分发路径上无 panic
 func TestV49DispatchSmoke(t *testing.T) {
 	o, _ := v46Orchestrator(t)
-	p := &store.Project{ID: "P-V49E", StageStates: map[string]*store.StageState{"s5": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V49E", StageStates: map[string]*store.StageState{"s5": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
 	got := o.dispatch(context.Background(), p, "s5", llm.ToolCall{Name: "complete_stage", Arguments: `{"summary":"ready_but_unexecuted=[] l2_approved_unused=[]"}`})
 	if strings.Contains(got, "缺少必填清单") {

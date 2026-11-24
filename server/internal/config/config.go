@@ -13,9 +13,11 @@ type Config struct {
 	Listen  string       `json:"listen"`   // HTTP 监听地址，如 ":8787"（绑定全部网卡）
 	DataDir string       `json:"data_dir"` // 项目工作区根目录
 	WebDir  string       `json:"web_dir"`  // 前端静态资源目录
+	Paths   PathsConfig  `json:"paths"`    // v6.1.0（方案㉑）：引擎资源目录（heads/prompts/skills）——相对路径以 config 文件所在目录为基准解析
 	LLM     LLMConfig    `json:"llm"`
 	Engine  EngineConfig `json:"engine"`
 	Guard   GuardConfig  `json:"guard"`
+	OOB     OOBConfig    `json:"oob"` // v7.0.0：OOB 回连通道三模式（盲态类 D3 语义验证基础设施）
 
 	// ---- 移植模块配置 ----
 	AuthToken         string  `json:"auth_token"`          // API 直连令牌（脚本/CI 用；Web 走账号密码+验证码）
@@ -28,6 +30,17 @@ type Config struct {
 	PricePer1MInput   float64 `json:"price_per_1m_input"`  // 成本核算：输入价（$/1M tokens）
 	PricePer1MOutput  float64 `json:"price_per_1m_output"` // 成本核算：输出价（$/1M tokens）
 	AutoApprove       string  `json:"auto_approve"`        // 全局默认审批策略：manual（默认，L1+ 全人工——未知命令不进自动通道）/l1（仅 L0/L1 自动批准并留痕）/all（L1+L2 自动批准），项目可覆盖
+
+	inlineSecrets bool `json:"-"` // v6.1.0（方案⑨）：Load 时记录「配置文件原文是否含明文凭据」（env 注入前的文件态）——迁移提示判定依据，不把 env 注入值误报为文件明文
+}
+
+// PathsConfig v6.1.0（S1 修复方案㉑）：引擎资源目录定位——空=默认相对路径（保持既有
+// 「cwd 下 heads/prompts/skills」兼容）；相对路径以 config 文件所在目录为基准解析，
+// 绝对路径直接使用。资源定位仅作部署解耦，不允许借路径配置关闭治理门。
+type PathsConfig struct {
+	HeadsDir   string `json:"heads_dir"`   // 阶段头目录（默认 heads）
+	PromptsDir string `json:"prompts_dir"` // 宪法目录（默认 prompts）
+	SkillsDir  string `json:"skills_dir"`  // 技能库目录（默认 skills）
 }
 
 // LLMConfig 模型接入：支持 OpenAI 协议（官方/中转站/本地推理）与 Anthropic 协议双栈。
@@ -52,6 +65,38 @@ type LLMConfig struct {
 }
 
 // EngineConfig 执行循环与并发控制。
+// v7.0.0 OOB 回连通道三模式（盲态类 D3 语义验证基础设施）：
+// local=A 本机自建（A1 自托管 interactsh-server / A2 本地监听器）、public=B 公共 interactsh、
+// custom=C 用户自设（interactsh|dnslog|webhook）。auto=回退链 A1→C→A2→B→盲态禁测。
+// 所有模式只收回连记录（存在性证明口径），不投递破坏载荷——与 production_safe 零冲突。
+type OOBConfig struct {
+	Mode                   string          `json:"mode"`                      // auto|local|public|custom|off（默认 auto）
+	Local                  OOBLocalConfig  `json:"local"`                     // A 本机自建
+	Public                 OOBCustomConfig `json:"public"`                    // B 公共通道（Server=逗号分隔候选，自动健康序）
+	Custom                 OOBCustomConfig `json:"custom"`                    // C 用户自设
+	RequireChannelForBlind *bool           `json:"require_channel_for_blind"` // 盲态类前置门：无健康通道禁止派发盲态技能且 ruled_out 自动降级（默认 true）
+	PollIntervalSec        int             `json:"poll_interval_sec"`         // 回连轮询间隔秒（默认 30；公共通道记录留存短，勿超 60）
+}
+
+// OOBLocalConfig A 本机自建：A1=自托管 interactsh-server（有公网入站+自有域时首选，
+// 回连域名可伪装业务域、交互不出第三方）；A2=本地 HTTP/DNS 监听器（内网/靶场，目标可直连本机）。
+type OOBLocalConfig struct {
+	SubMode   string `json:"sub_mode"`         // auto|interactsh|listener（默认 auto：配置了 server_url 走 A1，否则 A2 监听器）
+	ServerURL string `json:"server_url"`       // A1：自托管 interactsh-server URL（空=A2 本地监听器）
+	Secret    string `json:"secret"`           // A1：server secret/token（可空）
+	HTTPPort  int    `json:"listen_http_port"` // A2 本地 HTTP 回连监听端口（默认 8899）
+	DNSPort   int    `json:"listen_dns_port"`  // A2 本地 DNS 回连监听端口（0=不启；需 root 且 53 常被占用）
+}
+
+// OOBCustomConfig B/C 共用：B（public）只填 Server 候选；C（custom）按 Kind 接线
+// interactsh（自托管 server）/ dnslog（dnslog.cn 兼容 API）/ webhook（通用收集器，写 URL+读 API）。
+type OOBCustomConfig struct {
+	Server    string `json:"server"`     // B：公共 interactsh server 候选，逗号分隔（默认 oast.pro,oast.me,oast.live）
+	Kind      string `json:"kind"`       // C：interactsh|dnslog|webhook
+	ServerURL string `json:"server_url"` // C：通道服务地址
+	Secret    string `json:"secret"`     // C：token/cookie/API key（可空）
+}
+
 type EngineConfig struct {
 	MaxStageIterations int `json:"max_stage_iterations"` // 每阶段 Agent 循环上限（预算封顶）
 	MaxConcurrentExec  int `json:"max_concurrent_exec"`  // 每项目并发命令执行上限
@@ -80,7 +125,7 @@ type EngineConfig struct {
 	MaxSubagents      int `json:"max_subagents"`       // 每项目并发子代理上限（默认 3；0=禁用扇出）
 	MaxSubagentRounds int `json:"max_subagent_rounds"` // 单个子代理轮次预算（默认 12，硬上限 30）
 
-	// v4.4 多目标轮次自适应（方向二B）：S2/S4/S5 阶段预算 = base + (目标数-1)*PerTargetRounds，封顶 3×base
+	// v4.4 多目标轮次自适应（方向二B）：s1/s2/s3/s4/s5/s6/s8 阶段预算 = base + (目标数-1)*PerTargetRounds，封顶 3×base（v6.1.0 方案⑤ s1 纳入、v6.3.0 S3-② s3 纳入、v6.7.0 S6-⑩ s6 纳入、v6.9.0 S8-④ s8 纳入——多目标报告按目标组织，分组合并工作量随目标数线性增长；s7 不入选：收尾按条目不按目标）
 	PerTargetRounds int `json:"per_target_rounds"` // 每增 1 个目标追加的轮次（默认 10；<=0 视为默认）
 
 	// v5.5.0 能力修复（docs/repair-plan-capability-20261118.md 方案 D/E）：
@@ -122,6 +167,43 @@ type GuardConfig struct {
 	ReadOnly       []string `json:"read_only"`       // L0：可自动执行的只读命令前缀（v3.2.0 起为段首词锚定语义）
 	Sensitive      []string `json:"sensitive"`       // v3.2.0：敏感面特征（命中即从 L0 降级为 L1，防引擎自身密钥/凭据被只读白名单读出）
 	ScopeAllowlist []string `json:"scope_allowlist"` // v5.2.0：strict_scope 范围校验的良性外部白名单扩充
+
+	// v6.1.0（S1 修复方案）：治理硬门开关（三态 *bool：nil 经 applyDefaults 归一为 true，
+	// 显式 false 才回退——回滚是事故手段，须记录配置变更与重启时间，缺字段不允许静默关闭）。
+	EnforceAuthorization *bool `json:"enforce_authorization"` // ①授权硬门：创建/启动/命令三级拒绝未授权项目
+	BlockShadowAssets    *bool `json:"block_shadow_assets"`   // ②影子资产门：shadow_pending/unknown 资产在任何通道拦截测试流量
+	EnforceAssetScope    *bool `json:"enforce_asset_scope"`   // ㉒/②资产范围门：strict_scope 资产 allowlist 只收有依据的 in_scope
+	EnforceS1L0          *bool `json:"enforce_s1_l0"`         // ③S1 阶段门：仅被动查询，目标侧探测一律拒绝
+	EnforceS1Closure     *bool `json:"enforce_s1_closure"`    // ④/⑤S1 确定性收口门：四件套+逐目标对账
+	EnforceS2Closure     *bool `json:"enforce_s2_closure"`    // v6.2.0 S2-①S2 确定性收口门：攻击面地图/拓扑重建+checklist 可解析+多目标逐目标归宿
+	EnforceBatchScope    *bool `json:"enforce_batch_scope"`   // v6.2.0 S2-②批量通道范围门：run_batch 逐目标与工作区 -l 清单过影子资产/范围校验
+	EnforceS3Closure     *bool `json:"enforce_s3_closure"`    // v6.3.0 S3-①S3 确定性收口门：威胁模型/测试计划存在性+上游承接留痕+判定表证据指针核存
+	EnforceTargetClassMatrix *bool `json:"enforce_target_class_matrix"` // v6.3.0 S3-②判定表目标列复合键：多目标 (类×目标) 覆盖完备+执行卡口径统一（false 回退单目标旧口径）
+	EnforcePlanHandover  *bool `json:"enforce_plan_handover"` // v6.3.0 S3-④T-xx 计划承接门：s3-测试计划条目在 S4 收口前须显式归宿
+	EnforceEndpointMatrix *bool `json:"enforce_endpoint_matrix"` // v6.3.0 S3-⑤端点表↔覆盖矩阵运行时门：diffed/total+total=N 一致性（原 eval 离线门上移）
+	EnforceS5V3Handover   *bool `json:"enforce_s5_v3_handover"`   // v6.4.0 S4-⑤⑥S4 移交承接门：S4 V3 清单+browser-auth 路线移交项在 S5 收口前须有承接留痕（承接反蒸发机械对账）
+	EnforceTHBackfill     *bool `json:"enforce_th_backfill"`      // v6.4.0 S4-⑦威胁清单回填对账门：S4 交付物须有《威胁清单回填记录》小节+extends/replaces 引用真实 TH 编号
+	EnforceS3EndpointTable *bool `json:"enforce_s3_endpoint_table"` // v6.4.0 S4-②端点表生产端契约：S3 收口时端点表存在或计划含「未产出端点表」声明
+	EnforceS5TargetRecon  *bool `json:"enforce_s5_target_recon"`   // v6.4.0 S4-⑨S5 逐目标对账门：多目标项目 S5 收口时 targetCoverageRecon（与 S4 批次6 同口径）
+	EnforceSpecTargetRecon *bool `json:"enforce_spec_target_recon"` // v6.6.0 SP-①专项逐目标对账门：多目标项目 specA/specB1/specB2 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=本专项覆盖 notes+交付物）
+	EnforceS6TargetRecon  *bool `json:"enforce_s6_target_recon"`   // v6.7.0 S6-④s6 逐目标对账门：多目标项目 S6 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=s6 覆盖 notes+交付物排除 s4-/s5- 上游分组产物）
+	EnforceS6Deliverables *bool `json:"enforce_s6_deliverables"`  // v6.7.0 S6-⑥s6 命名交付物条件核验：有立足点信号的项目收口要求权限矩阵+横向路径图或 N/A 声明（无立足点零要求）
+	EnforceS7StrictFollowUpPool *bool `json:"enforce_s7_strict_followup_pool"` // v6.8.0 S7-①G3 待续清单回灌门 strict pool：处置池=s7- 前缀交付物∪s7 开工后新增/修改文件∪report.md（false 回退 deliverables 全目录旧池口径——上游交付物端点关键词不再天然满足处置对账）
+	EnforceS8FindingReportRecon *bool `json:"enforce_s8_finding_report_recon"` // v6.9.0 S8-③反向对账门：逐条 findings 的归一化标题前缀或 F- 编号须在 report.md 有归宿留痕（R- 条目/待验证小节/定级表映射并入 R-xx）——报告↔findings 1:1 的另一半（正向门 R≤findings 只拦多记，本门拦漏报；false 回退旧口径仅正向门）
+	EnforceSpecClosure    *bool `json:"enforce_spec_closure"`     // v6.6.0 SP-②专项确定性收口门：前置契约登记+点名交付物+条目三态清单存在性（豁免：无适用资产走前提不成立路径）
+	EnforceROERuntime    *bool `json:"enforce_roe_runtime"`   // ⑧ROE 运行时门：时间窗/连接预算/冷却（rotation 未接入时标注 unenforced）
+	RequireS1ROEAck      *bool `json:"require_s1_roe_ack"`    // ⑩ROE 红线确认门：确认前任何命令通道拒绝
+	RequireS1OOBChannel  *bool `json:"require_s1_oob_channel"` // ⑪OOB 条件收口门：项目要求 OOB 时核验 channel 产物
+	LessonBehaviorPerTarget *bool `json:"lesson_behavior_per_target"` // ⑮教训行为类逐目标检索（false 恢复全局单值旧排序）
+	AssetMetadataValidation *bool `json:"asset_metadata_validation"` // ⑳资产台账字段校验（APP/小程序/云账号按类型必填最小字段集）
+}
+
+// FlagOrDefault 三态布尔取值：nil=默认值；显式 false 才回退（v6.1.0 配置约定）。
+func FlagOrDefault(p *bool, def bool) bool {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 // DefaultGuard 返回默认护栏特征库（Forbidden/HighRisk/MedRisk/ReadOnly/Sensitive）。
@@ -151,9 +233,32 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
+	// v6.1.0（方案⑨）：在 applyEnv 之前记录文件态明文凭据存在性——env 注入的值不属于
+	// "配置文件明文"，不得误报迁移提示。
+	c.inlineSecrets = c.LLM.APIKey != "" || c.AuthToken != "" || c.AdminPassword != ""
 	c.applyDefaults()
 	c.applyEnv()
+	if err := c.validateSecrets(); err != nil {
+		return nil, err
+	}
 	return c, nil
+}
+
+// validateSecrets v6.1.0（S1 修复方案⑨）：启动前凭据存在性校验（fail-fast）。
+// ①管理员凭据（密码或哈希）缺失 → 拒绝启动（公开默认口令不再回填）；
+// ②配置文件仍存明文凭据 → 输出迁移提示（不含值，不回显原文）并继续——硬拒绝会破坏
+// 已部署环境，明文风险由「移除默认回填 + README 迁移指引 + env 覆盖」渐进收敛。
+func (c *Config) validateSecrets() error {
+	if strings.TrimSpace(c.AdminPassword) == "" && strings.TrimSpace(c.AdminPasswordHash) == "" {
+		return fmt.Errorf("管理员凭据未配置：请设置 ADMIN_PASSWORD_HASH（推荐，sha256(jiutouniao$v1:密码)）或 ADMIN_PASSWORD 环境变量后启动")
+	}
+	return nil
+}
+
+// HasInlineSecrets v6.1.0：配置**文件原文**是否含明文凭据（env 注入不算——供启动日志
+// 迁移提示判定，不打印值）。
+func (c *Config) HasInlineSecrets() bool {
+	return c.inlineSecrets
 }
 
 // applyEnv 环境变量覆盖：AUTH_TOKEN / HEXSTRIKE_URL / MAX_PROJECT_TOKENS /
@@ -167,6 +272,8 @@ func (c *Config) applyEnv() {
 	setStr(&c.AuthToken, "AUTH_TOKEN")
 	setStr(&c.AdminUser, "ADMIN_USER")
 	setStr(&c.AdminPassword, "ADMIN_PASSWORD")
+	// v6.1.0（S1 修复方案⑨）：管理员密码哈希环境变量注入——配置文件不落明文口令。
+	setStr(&c.AdminPasswordHash, "ADMIN_PASSWORD_HASH")
 	setStr(&c.HexStrikeURL, "HEXSTRIKE_URL")
 	setStr(&c.AutoApprove, "AUTO_APPROVE")
 	setStr(&c.LLM.BaseURL, "LLM_BASE_URL")
@@ -270,6 +377,34 @@ func (c *Config) applyDefaults() {
 	if c.Engine.ContextKeepRecent <= 0 {
 		c.Engine.ContextKeepRecent = 10
 	}
+	// v7.0.0：OOB 回连通道默认值（mode=auto 回退链；轮询 30s；A2 HTTP 监听 8899；B 候选健康序）
+	if strings.TrimSpace(c.OOB.Mode) == "" {
+		c.OOB.Mode = "auto"
+	}
+	c.OOB.Mode = strings.ToLower(strings.TrimSpace(c.OOB.Mode))
+	switch c.OOB.Mode {
+	case "auto", "local", "public", "custom", "off":
+	default:
+		c.OOB.Mode = "auto"
+	}
+	if c.OOB.PollIntervalSec <= 0 {
+		c.OOB.PollIntervalSec = 30
+	}
+	if c.OOB.PollIntervalSec < 5 {
+		c.OOB.PollIntervalSec = 5 // 限频下限：公共通道轮询不得打爆 API
+	}
+	if strings.TrimSpace(c.OOB.Local.SubMode) == "" {
+		c.OOB.Local.SubMode = "auto"
+	}
+	if c.OOB.Local.HTTPPort <= 0 {
+		c.OOB.Local.HTTPPort = 8899
+	}
+	if strings.TrimSpace(c.OOB.Public.Server) == "" {
+		c.OOB.Public.Server = "oast.pro,oast.me,oast.live,webhook.site"
+	}
+	if strings.TrimSpace(c.OOB.Custom.Kind) == "" {
+		c.OOB.Custom.Kind = "interactsh"
+	}
 	if c.Engine.BarrierTimeoutSec <= 0 {
 		c.Engine.BarrierTimeoutSec = 1800 // v3.4.1 修复：默认必须真实生效（此前未配置时=0 即无限等待，与文档承诺相悖）
 	}
@@ -314,12 +449,45 @@ func (c *Config) applyDefaults() {
 		t := true
 		c.Engine.AutoResume = &t // v3.7.7：默认自动续跑（重启/部署不再丢任务）
 	}
+	// v6.1.0（S1 修复方案）：治理硬门缺省开启——显式 false 才回退，缺字段不允许静默关闭。
+	setTrue := func(p **bool) {
+		if *p == nil {
+			t := true
+			*p = &t
+		}
+	}
+	setTrue(&c.Guard.EnforceAuthorization)
+	setTrue(&c.Guard.BlockShadowAssets)
+	setTrue(&c.Guard.EnforceAssetScope)
+	setTrue(&c.Guard.EnforceS1L0)
+	setTrue(&c.Guard.EnforceS1Closure)
+	setTrue(&c.Guard.EnforceS2Closure)
+	setTrue(&c.Guard.EnforceBatchScope)
+	setTrue(&c.Guard.EnforceS3Closure)
+	setTrue(&c.Guard.EnforceTargetClassMatrix)
+	setTrue(&c.Guard.EnforcePlanHandover)
+	setTrue(&c.Guard.EnforceEndpointMatrix)
+	setTrue(&c.Guard.EnforceS5V3Handover)
+	setTrue(&c.Guard.EnforceTHBackfill)
+	setTrue(&c.Guard.EnforceS3EndpointTable)
+	setTrue(&c.Guard.EnforceS5TargetRecon)
+	setTrue(&c.Guard.EnforceSpecTargetRecon)
+	setTrue(&c.Guard.EnforceS6TargetRecon)
+	setTrue(&c.Guard.EnforceS6Deliverables)
+	setTrue(&c.Guard.EnforceS7StrictFollowUpPool)
+	setTrue(&c.Guard.EnforceS8FindingReportRecon)
+	setTrue(&c.Guard.EnforceSpecClosure)
+	setTrue(&c.Guard.EnforceROERuntime)
+	setTrue(&c.Guard.RequireS1ROEAck)
+	setTrue(&c.Guard.RequireS1OOBChannel)
+	setTrue(&c.Guard.LessonBehaviorPerTarget)
+	setTrue(&c.Guard.AssetMetadataValidation)
 	if c.AdminUser == "" {
 		c.AdminUser = "admin"
 	}
-	if c.AdminPassword == "" {
-		c.AdminPassword = "jiutou@2026" // 部署后务必修改
-	}
+	// v6.1.0（S1 修复方案⑨）：移除默认管理员密码回填——公开文档化默认口令不再允许
+	// 空配置静默生效；凭据缺失时 Load fail-fast（见 validateSecrets），运维经
+	// ADMIN_PASSWORD_HASH（推荐，配置零明文）或 ADMIN_PASSWORD 环境变量注入。
 	if c.AutoApprove != "manual" && c.AutoApprove != "l1" && c.AutoApprove != "all" {
 		// v5.2.0 P1-2（外部审计）：默认 manual——L1（含未知命令兜底）也人工审批，
 		// 杜绝"未知命令经默认策略自动执行"；自动化需求由项目级显式配置 l1/all。
@@ -373,6 +541,9 @@ var defaultReadOnly = []string{
 	"whoami", "id", "uname", "ifconfig", "ip a", "ip addr", "hostname", "pwd",
 	"ls ", "cat", "head", "tail", "file", "echo ", "which", "wait", "true", "false",
 	"nmap -sV", "nmap -sn", "dig", "host", "curl -s", "httpx",
+	// v6.1.0（S1 修复方案⑦）：WHOIS 注册信息查询是 S1 被动情报清单必查项（纯文本查询，
+	// 网络对端是 RIR/注册商 WHOIS 服务器而非目标服务）
+	"whois",
 	"subfinder", "nuclei -list", "git log", "find ", "grep", "wc",
 	"python3 --version", "pip list", "ls -", "cat/", "sort", "uniq",
 	"cut", "tr", "ps", "ss -", "netstat ", "stat", "diff",

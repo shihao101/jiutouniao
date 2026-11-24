@@ -89,7 +89,7 @@ func TestV572BuildInstallAttemptsNoProxyDirectOnly(t *testing.T) {
 
 func TestV572ScopeGateIgnoresProxyAssignments(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V572", Target: "https://iop.example.edu.cn/", StrictScope: true}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V572", Target: "https://iop.example.edu.cn/", StrictScope: true}
 	_ = st.SaveProject(p)
 	// install_tool 代理兜底命令形态：代理地址（docker 网桥 IP）+ 白名单 kali 源 → 放行
 	cmd := "export http_proxy=http://172.17.0.1:8118 https_proxy=http://172.17.0.1:8118; unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; apt-get update -qq; apt-get install -y wafw00f"
@@ -97,7 +97,7 @@ func TestV572ScopeGateIgnoresProxyAssignments(t *testing.T) {
 		t.Fatalf("代理赋值应剥离后再做目标匹配，install_tool 代理兜底命令不应被 strict_scope 误拦")
 	}
 	// loop-core 教的 env http_proxy=$TOOL_PROXY 前缀 + 白名单源 → 放行（既有潜伏误拦面）
-	if blocked, _ := o.scopeGate(p, "env http_proxy=http://192.168.56.1:7897 curl -s https://crt.sh/?q=x"); blocked {
+	if blocked, _ := o.scopeGate(p, "env http_proxy=http://192.0.2.1:7897 curl -s https://crt.sh/?q=x"); blocked {
 		t.Fatalf("env 代理前缀+白名单源不应被误拦")
 	}
 	// 代理赋值不豁免业务目标：范围外 URL 仍拦截

@@ -38,12 +38,18 @@ def parse_md(text):
     return out
 
 
+def _js_unescape(s):
+    """JS 单引号字符串反转义（v6.6.0 修复：此前 \\' 原样参与比对，含单引号的条目
+    （如 v6.5.0 「'.'/'-' 不拒绝」）在 md 侧无反斜杠而 vue 侧带转义——文本被误判漂移）。"""
+    return re.sub(r"\\(['\\])", r"\1", s)
+
+
 def parse_vue(text):
     """ChangelogPage.vue CHANGELOG 数组 → [(version, date, [item...])]。"""
     out = []
     for m in VUE_HEAD.finditer(text):
         raw_items = re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(3))
-        out.append((m.group(1), m.group(2), [it.strip() for it in raw_items if it.strip()]))
+        out.append((m.group(1), m.group(2), [_js_unescape(it).strip() for it in raw_items if it.strip()]))
     return out
 
 

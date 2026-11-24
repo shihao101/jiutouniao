@@ -15,12 +15,37 @@ func TestSortQueueFindings(t *testing.T) {
 	}
 	// B(高,疑似,无rank) A(高,确证,rank3) C(中,确证,rank1) D(高,确证,无rank) E(高,确证,rank1)
 	in := []*store.Finding{mk("B", "高", "疑似", 0), mk("A", "高", "确证", 3), mk("C", "中", "确证", 1), mk("D", "高", "确证", 0), mk("E", "高", "确证", 1)}
-	got := sortQueueFindings(in)
+	got := sortQueueFindings(in, false)
 	want := []string{"E", "C", "A", "D", "B"} // rank升序(1→1按严重度高前→3)；未标注按置信度→严重度
 	for i := range want {
 		if got[i].ID != want[i] {
 			t.Fatalf("排序第 %d 位 got=%s want=%s（全序列 %v）", i+1, got[i].ID, want[i], ids(got))
 		}
+	}
+	// v6.4.0（S4-④）：无凭证项目（anonymousFirst=true）access=anonymous 项第 0 排序键置前
+	anon := []*store.Finding{
+		{ID: "R1", Severity: "高", Confidence: "确证", ImpactRank: 1},
+		{ID: "A1", Severity: "中", Confidence: "疑似", ImpactRank: 5, Access: "anonymous"},
+		{ID: "R2", Severity: "高", Confidence: "确证", ImpactRank: 2, Access: "post-auth"},
+	}
+	gotAnon := sortQueueFindings(anon, true)
+	if gotAnon[0].ID != "A1" {
+		t.Fatalf("无凭证项目匿名项应置前（全序列 %v）", ids(gotAnon))
+	}
+	// 有凭证项目（anonymousFirst=false）不按 access 排序——R2(rank2) 仍在 A1(rank5) 前
+	gotAuth := sortQueueFindings(anon, false)
+	if gotAuth[0].ID != "R1" || gotAuth[1].ID != "R2" {
+		t.Fatalf("有凭证项目排序不应含 access 键（全序列 %v）", ids(gotAuth))
+	}
+	// v6.4.0 S4-④ 回归清单：rank=6（其余）排在 rank=1-5 之后、rank=0（未标注）之前
+	ranks := []*store.Finding{
+		{ID: "N0", Severity: "高", Confidence: "确证"},
+		{ID: "R6", Severity: "高", Confidence: "确证", ImpactRank: 6},
+		{ID: "R5", Severity: "高", Confidence: "确证", ImpactRank: 5},
+	}
+	gotR := sortQueueFindings(ranks, false)
+	if gotR[0].ID != "R5" || gotR[1].ID != "R6" || gotR[2].ID != "N0" {
+		t.Fatalf("rank 5<6<未标注 顺序不符（全序列 %v）", ids(gotR))
 	}
 	// 原列表不被修改（稳定排序返回副本）
 	if in[0].ID != "B" {
@@ -81,7 +106,7 @@ func TestEvidenceCriteriaIssuesDowngrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues := o.evidenceCriteriaIssues(&store.Project{ID: "P4C"}, "s4")
+	issues := o.evidenceCriteriaIssues(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P4C"}, "s4")
 	if len(issues) != 1 {
 		t.Fatalf("期望 1 条判据抽查 issue，实际 %d: %v", len(issues), issues)
 	}
@@ -100,7 +125,7 @@ func TestEvidenceCriteriaIssuesDowngrade(t *testing.T) {
 		t.Error("中危条目不应被降级")
 	}
 	// 降级后不应再触发（幂等，防重复拦截）
-	if again := o.evidenceCriteriaIssues(&store.Project{ID: "P4C"}, "s4"); len(again) != 0 {
+	if again := o.evidenceCriteriaIssues(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P4C"}, "s4"); len(again) != 0 {
 		t.Errorf("降级后不应再次触发: %v", again)
 	}
 }

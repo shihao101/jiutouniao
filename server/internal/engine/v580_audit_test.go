@@ -21,7 +21,7 @@ func TestV580BundleExpansionOnHit(t *testing.T) {
 	// evidence-standard 被 api-idor/authz-diff 声明为 handoff_to——主命中 api-idor 应扩展出配套
 	// v5.8.0 语义：精确 id 走 Get 快路径（全文）；组合扩展发生在关键词检索路径——
 	// 用 query 形态触发 Bundle（审计 Top#1 的实际修复点）。
-	res := o.dispatch(context.Background(), &store.Project{ID: "P-B", StageStates: map[string]*store.StageState{}},
+	res := o.dispatch(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B", StageStates: map[string]*store.StageState{}},
 		"s4", llm.ToolCall{Name: "load_skill", Arguments: `{"query":"越权 IDOR"}`})
 	if !strings.Contains(res, "api-idor") {
 		t.Fatalf("主命中应返回: %s", truncateText(res, 120))
@@ -38,7 +38,7 @@ func TestV580LoopbackRerunsDownstream(t *testing.T) {
 	for _, sid := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"} {
 		states[sid] = &store.StageState{Status: "done"}
 	}
-	p := &store.Project{ID: "P-LD", StageStates: states}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-LD", StageStates: states}
 	_ = st.SaveProject(p)
 	// 触发 loopback 到 s4（第 1 次，额度内）
 	res := o.dispatch(context.Background(), p, "s7", llm.ToolCall{Name: "loopback",
@@ -59,7 +59,7 @@ func TestV580LoopbackRerunsDownstream(t *testing.T) {
 // ③ W4 上下文不再引导索取身份（#5）
 func TestV580NoAskIdentityInContext(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-NA", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-NA", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	_, _ = st.AddAsset(&store.Asset{ProjectID: p.ID, Type: "登录面", Value: "http://t/login"})
 	pack := o.buildContextPack(p, "s4")
@@ -76,7 +76,7 @@ func TestV580NoAskIdentityInContext(t *testing.T) {
 // ④ 子代理系统消息含阶段头正文（#7）
 func TestV580SubagentGetsHeadBody(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-SH", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-SH", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	head := o.heads["s4"]
 	if head == nil || head.Body == "" {
@@ -92,7 +92,7 @@ func TestV580SubagentGetsHeadBody(t *testing.T) {
 // ⑤ 收口门证据语义：vulnerable 无证据关联被拦（#9）
 func TestV580VulnerableEvidenceGate(t *testing.T) {
 	o, st := v550Orchestrator(t)
-	p := &store.Project{ID: "P-VE", StageStates: map[string]*store.StageState{}}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-VE", StageStates: map[string]*store.StageState{}}
 	_ = st.SaveProject(p)
 	_, _ = o.store.UpsertCoverage(&store.CoverageEntry{ProjectID: p.ID, Endpoint: "GET /api/u",
 		VulnClass: "越权", Status: "vulnerable", Notes: "疑似越权（无证据引用）"})

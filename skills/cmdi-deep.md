@@ -5,7 +5,7 @@ tags: cmdi,命令注入,rce,回连,s4,s5
 ---
 # 命令注入深度手册
 
-> 前置：injection-points（入口完整性）+ oob-interactsh（回连通道）。**验证全程无害判据；确证 RCE 后利用级动作转 S5 审批**。
+> 前置：injection-points（入口完整性）+ oob_check（v7.0.0 引擎工具：回连通道自检，盲态载荷回连经 oob_poll 收取）。**验证全程无害判据；确证 RCE 后利用级动作转 S5 审批**。
 
 ## 一、语法探针矩阵（按操作系统分族）
 
@@ -40,6 +40,12 @@ tags: cmdi,命令注入,rce,回连,s4,s5
 
 - 确证（回连/时间/算术双判据）→ record_finding（cwe-78，注明 OS 语境与可执行边界）。
 - 利用级（反弹 shell/写文件/提权探测）→ S5 审批执行，本手册不固化载荷。
+
+## 五、Execution Profile 分层（v5.3.2，与 sqli-deep 同口径——v6.4.0 S4-⑭ 补节）
+
+- **production_safe（默认）**：本手册全部探针按存在性证明口径执行（无害回连/算术/时延双判据）；「disable_functions 六路径」「组件级 RCE」「EXP 回显截取」「批量遍历」等利用级配方**只作面识别与登记**（record_finding exploitability=untested / record_vt 待 S5），不在本阶段投递。
+- **isolated_lab（项目显式声明）**：利用级配方可在受控环境完整验证（快照可恢复前提），投递前仍走审批矩阵；载荷原文留证据文件。
+- M6 通道声明：本技能涉及 cmdi 探针与 OOB 回连——chain-proxy/盲注裁决按 sqli-deep 同款通道纪律执行（挑战型 WAF 先 chain-proxy 快照再批量）。
 
 ## disable_functions 六路径与组件注入
 

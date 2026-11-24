@@ -10,7 +10,7 @@ import (
 
 func TestV532RerankSubtasks(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V532-P1", Name: "优先级"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V532-P1", Name: "优先级"}
 	_ = st.SaveProject(p)
 	mk := func(title, detail string) string {
 		id, err := st.AddSubtask(&store.Subtask{ProjectID: p.ID, Stage: "s4", Title: title, Detail: detail, Status: "created"})
@@ -73,7 +73,7 @@ func TestV532RerankSubtasks(t *testing.T) {
 
 func TestV532PlanSubtasksPriorityResponse(t *testing.T) {
 	o, st := v48Orchestrator(t)
-	p := &store.Project{ID: "P-V532-P2", Name: "建档响应"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V532-P2", Name: "建档响应"}
 	_ = st.SaveProject(p)
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: p.ID, Stage: "s4", Endpoint: "/api/admin", VulnClass: "越权", Status: "needs_follow_up", Notes: "n"})
 	got := o.dispatch(testCtx(), p, "s4", mkCall("plan_subtasks",

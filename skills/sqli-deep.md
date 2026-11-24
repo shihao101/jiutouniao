@@ -1,7 +1,7 @@
 ---
 id: sqli-deep
 title: SQL 注入深度手册（联合/布尔/时间/报错/堆叠/NoSQL）
-tags: sqli,sqlmap,注入,布尔,时间,waf,s4
+tags: sqli,sqlmap,注入,布尔,时间,waf,s4,s5
 ---
 # SQL 注入深度手册
 

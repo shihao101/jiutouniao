@@ -31,7 +31,7 @@ func testOrchestratorForCreate(t *testing.T) *Orchestrator {
 
 func TestV540CreateProjectCarriesModelID(t *testing.T) {
 	o := testOrchestratorForCreate(t)
-	p, err := o.CreateProject(&store.Project{
+	p, err := o.CreateProject(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",
 		Name: "模型选择回归", Target: "http://127.0.0.1:1", Authorized: true,
 		ModelID: "m-deepseek-test",
 	})
@@ -53,7 +53,7 @@ func TestV540CreateProjectCarriesModelID(t *testing.T) {
 
 func TestV540CreateProjectEmptyModelIDOK(t *testing.T) {
 	o := testOrchestratorForCreate(t)
-	p, err := o.CreateProject(&store.Project{Name: "默认模型", Target: "http://127.0.0.1:1", Authorized: true})
+	p, err := o.CreateProject(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",Name: "默认模型", Target: "http://127.0.0.1:1", Authorized: true})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestV540ClientForFallbackWarnOnce(t *testing.T) {
 	o := testOrchestratorForCreate(t)
 	o.cfg = &config.Config{}
 	o.llm = llm.NewMock()
-	p, err := o.CreateProject(&store.Project{Name: "fallback", Target: "http://127.0.0.1:1", Authorized: true, ModelID: "gone"})
+	p, err := o.CreateProject(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",Name: "fallback", Target: "http://127.0.0.1:1", Authorized: true, ModelID: "gone"})
 	if err != nil {
 		t.Fatal(err)
 	}

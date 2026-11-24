@@ -31,14 +31,16 @@ func v46bOrchestrator(t *testing.T) (*Orchestrator, *store.Store) {
 // E5：无样本强度教训在上下文中必须带 provisional 标记；K2：行为类命中教训优先注入。
 func TestV46bLessonProvisionalAndBehavior(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B1"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B1"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddLesson(&store.LessonRecord{Text: "限速目标冷却必须完全静默", BehaviorClass: "rate-limited", SampleSize: "3 样本"})
 	_, _ = st.AddLesson(&store.LessonRecord{Text: "批量 dump-dom 触发渐进式降级"}) // 无 SampleSize/behavior_class
 	_, _ = st.UpsertFact(&store.FactRecord{ProjectID: p.ID, Key: "behavior." + p.ID, Value: "rate-limited", Confidence: "confirmed"})
 	ctx := o.buildContextPack(p, "s4")
-	if !strings.Contains(ctx, "provisional：样本强度未标注/单次实验") {
-		t.Fatalf("无 SampleSize 教训应带 provisional 标记")
+	// v6.0.6 语义变更（codex 审计 §2.5）：SampleSize 缺失 ≠ 单次实验——
+	// 旧全库 provisional 降格改为「证据强度未记录」三态（区分 schema 缺参与真实单次）
+	if !strings.Contains(ctx, "证据强度未记录") {
+		t.Fatalf("无 SampleSize 教训应带「证据强度未记录」标记（v6.0.6 三态口径）")
 	}
 	if !strings.Contains(ctx, "【行为类命中 rate-limited】限速目标冷却必须完全静默") {
 		t.Fatalf("行为类命中教训应优先注入: %s", ctx[:0])
@@ -48,7 +50,7 @@ func TestV46bLessonProvisionalAndBehavior(t *testing.T) {
 // K5-lite：跨阶段空闲 >30min 且进入对抗敏感阶段 → 注入通道基线自检提醒。
 func TestV46bIdleGapReminder(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B2", StageStates: map[string]*store.StageState{
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B2", StageStates: map[string]*store.StageState{
 		"s4": {Status: "done", EndedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)},
 	}}
 	_ = st.SaveProject(p)
@@ -57,7 +59,7 @@ func TestV46bIdleGapReminder(t *testing.T) {
 		t.Fatalf("空闲 >30min 应注入提醒")
 	}
 	// 空闲 5min → 不提醒
-	p2 := &store.Project{ID: "P-B2b", StageStates: map[string]*store.StageState{
+	p2 := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B2b", StageStates: map[string]*store.StageState{
 		"s4": {Status: "done", EndedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
 	}}
 	ctx2 := o.buildContextPack(p2, "s5")
@@ -70,7 +72,7 @@ func TestV46bIdleGapReminder(t *testing.T) {
 // ②历史数据（原始键漂移已落库）由 s7 门拦截要求合并回填。
 func TestV46bCoverageNormalizeMergeAndZombieGate(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B3"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B3"}
 	_ = st.SaveProject(p)
 	// ① 归一化合并：两种写法两次登记 → 单一单元 count=2
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: p.ID, Stage: "s2", Endpoint: "https://www.example.com/x/", VulnClass: "越权", Status: "needs_follow_up", Notes: "早期登记"})
@@ -94,7 +96,7 @@ func TestV46bCoverageNormalizeMergeAndZombieGate(t *testing.T) {
 // A2：VT 全生命周期——登记→s7 门拦截开放项→处置（closed-roe 缺理由拒绝）→门放行。
 func TestV46bVTLifecycle(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B4"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B4"}
 	_ = st.SaveProject(p)
 	vid := ""
 	{
@@ -133,7 +135,7 @@ func TestV46bVTLifecycle(t *testing.T) {
 // 复核走 complete_stage 的 confirm_quality_review 显式确认（applyQualityReviewConfirm 清除标记）。
 func TestV46bGateQualityPending(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B5", StageStates: map[string]*store.StageState{
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B5", StageStates: map[string]*store.StageState{
 		"s4": {Status: "done", Review: "反思门调用失败（重试 3 次）；确定性质量门通过放行【quality-pending：S8 收口前须复核本阶段交付物】"},
 	}}
 	_ = st.SaveProject(p)
@@ -158,7 +160,7 @@ func TestV46bGateQualityPending(t *testing.T) {
 // B4：报告引用不存在的 evidence 路径 → s8 门拦截；存在则不报。
 func TestV46bGateReportEvidence(t *testing.T) {
 	o, st := v46bOrchestrator(t)
-	p := &store.Project{ID: "P-B6"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-B6"}
 	_ = st.SaveProject(p)
 	_, _ = o.exec.WriteFile(p.ID, "evidence/exists.txt", "ok")
 	_, _ = o.exec.WriteFile(p.ID, "report.md", "### R-01 x\n证据 evidence/missing.txt 与 evidence/exists.txt\n")

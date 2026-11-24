@@ -9,6 +9,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,6 +33,11 @@ func main() {
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("加载配置: %v", err)
+	}
+	// v6.1.0（S1 修复方案⑨）：配置文件明文凭据迁移提示（不含值）——凭据请经环境变量
+	// ADMIN_PASSWORD_HASH（推荐）/ADMIN_PASSWORD/AUTH_TOKEN/LLM_API_KEY 注入，配置文件留空。
+	if cfg.HasInlineSecrets() {
+		log.Printf("⚠ 配置文件仍含明文凭据字段（llm.api_key/auth_token/admin_password）——v6.1.0 起默认密码不再回填；请迁移至环境变量并清空配置文件后重启（本提示不显示具体值）")
 	}
 
 	st, err := store.Open(cfg.DataDir)
@@ -81,7 +87,18 @@ func main() {
 	bus := events.NewBus()
 	ap := engine.NewApprover(st, bus, cfg.AutoApprove)
 	ap.SetWaitTimeout(cfg.Engine.BarrierTimeoutSec) // v3.4.0：人工审批/提问屏障超时（默认 1800，配置可覆盖）
-	orch, err := engine.NewOrchestrator(cfg, st, client, exec, ap, bus, "heads", "prompts", "skills")
+	// v6.1.0（S1 修复方案㉑）：资源目录由 config.paths 定位（相对路径以 config 文件所在目录
+	// 为基准；空值=默认相对路径兼容旧部署）——启动时存在性检查 fail-fast，防止带病加载过期提示词。
+	headsDir := engine.ResolveResourceDir(*cfgPath, cfg.Paths.HeadsDir, "heads")
+	promptsDir := engine.ResolveResourceDir(*cfgPath, cfg.Paths.PromptsDir, "prompts")
+	skillsDir := engine.ResolveResourceDir(*cfgPath, cfg.Paths.SkillsDir, "skills")
+	for _, d := range map[string]string{"heads": headsDir, "prompts": promptsDir, "skills": skillsDir} {
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			log.Fatalf("资源目录不存在或不可读（%s=%s）——检查 config.paths 配置或恢复默认目录布局", d, d)
+		}
+	}
+	log.Printf("资源目录: heads=%s prompts=%s skills=%s", headsDir, promptsDir, skillsDir)
+	orch, err := engine.NewOrchestrator(cfg, st, client, exec, ap, bus, headsDir, promptsDir, skillsDir)
 	if err != nil {
 		log.Fatalf("初始化编排器: %v", err)
 	}

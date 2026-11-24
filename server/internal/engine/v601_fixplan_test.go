@@ -15,7 +15,7 @@ import (
 // v601Project 建测试项目（工作区由 v48Orchestrator 装配对齐）。
 func v601Project(t *testing.T, o *Orchestrator, id string) *store.Project {
 	t.Helper()
-	p := &store.Project{ID: id, Target: "t1.example\nt2.example"}
+	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: id, Target: "t1.example\nt2.example"}
 	if err := o.store.SaveProject(p); err != nil {
 		t.Fatal(err)
 	}
@@ -230,4 +230,55 @@ func TestV601IncompleteBatchGate(t *testing.T) {
 	if issues := o.incompleteBatchIssues(p); len(issues) != 0 {
 		t.Fatalf("VT 留痕后应通过: %v", issues)
 	}
+}
+
+// ---------- v6.0.4 P11 验收测试 ----------
+
+// S8 成功标准对照门三态：无章节→拦截 / 有引用→通过 / 未填写→跳过
+func TestV604SuccessCriteriaGate(t *testing.T) {
+	o, _ := v48Orchestrator(t)
+	p := v601Project(t, o, "P-V604SC")
+	p.SuccessCriteria = "测试目的：验证投单系统鉴权有效性；成功标准：每条结论有可复现 POC 与影响说明"
+	if err := o.store.SaveProject(p); err != nil {
+		t.Fatal(err)
+	}
+	// ① 报告不引用成功标准 → 拦截
+	_, _ = o.exec.WriteFile(p.ID, "report.md", "# 报告\n## 执行摘要\n- 完成。\n")
+	issues := o.successCriteriaIssuesForTest(p)
+	if len(issues) == 0 || !strings.Contains(issues[0], "P11") {
+		t.Fatalf("未对照成功标准应拦截: %v", issues)
+	}
+	// ② 报告含对照小节 → 通过
+	_, _ = o.exec.WriteFile(p.ID, "report.md", "# 报告\n## 结论对照成功标准\n- 已逐条说明。\n")
+	if issues := o.successCriteriaIssuesForTest(p); len(issues) != 0 {
+		t.Fatalf("含对照小节应通过: %v", issues)
+	}
+	// ③ 未填写成功标准 → 跳过
+	p2 := v601Project(t, o, "P-V604SC2")
+	_, _ = o.exec.WriteFile(p2.ID, "report.md", "# 报告\n- 完成。\n")
+	if issues := o.successCriteriaIssuesForTest(p2); len(issues) != 0 {
+		t.Fatalf("未填写成功标准应跳过: %v", issues)
+	}
+}
+
+// cappedText 行为：多行保留 / 截断标记 / 空值占位
+func TestV604CappedText(t *testing.T) {
+	multi := "第一行纪律\n第二行纪律\n第三行纪律"
+	got := cappedText(multi, 1500)
+	if !strings.Contains(got, "第二行纪律") || !strings.Contains(got, "第三行纪律") {
+		t.Fatalf("多行内容必须全量保留（firstLine 缺陷回归）: %q", got)
+	}
+	long := strings.Repeat("字", 2000)
+	got2 := cappedText(long, 1500)
+	if !strings.HasPrefix(got2, "字字字") || !strings.HasSuffix(got2, "…（余略，全文见项目档案）") || len([]rune(got2)) <= 1500 {
+		t.Fatalf("截断行为不符: len=%d head=%q", len([]rune(got2)), []rune(got2)[:min(20, len([]rune(got2)))])
+	}
+	if cappedText("", 100) != "（未填写）" {
+		t.Fatal("空值应返回占位")
+	}
+}
+
+// successCriteriaIssuesForTest 测试直接调用抽出的方法
+func (o *Orchestrator) successCriteriaIssuesForTest(p *store.Project) []string {
+	return o.successCriteriaIssues(p)
 }

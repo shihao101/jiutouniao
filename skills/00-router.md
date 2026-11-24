@@ -18,6 +18,9 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 已知组件版本（任何） | cve-weaponization | nuclei-usage |
 | 登录口/后台/默认口令面 | weak-cred-bruteforce | — |
 | 登录口加密协议（JS/WASM 加密/动态挑战 token/验证码渲染/UA 指纹过滤） | browser-auth | auth-bypass |
+| 验证码/密码重置/OAuth/注册/锁定 全链（C-01..06 逐问） | identity-flow-audit | auth-flow-deep, weak-cred-bruteforce |
+| 多步业务流程（下单/审批/工单——非法状态转移/幂等/竞态/配额，C-18..20） | business-state-machine | 工具脚本 tools-extra/logic-invariant.py（容器路径 /opt/tools/logic-invariant.py；默认 dry-run）, race-condition |
+| 安全响应头缺口（CSP/HSTS/Cookie 属性/框架泄露，C-25 头面） | http-security-headers | tls-deep-audit |
 | 测试项需要登录态（登录后注入/越权矩阵/存储型/逻辑滥用/注册面评估） | session-state-chain | auth-bypass |
 | 前端 bundle/依赖/ source map | frontend-sca | — |
 | 侦察/资产测绘/子域与端口方法论总纲（S2） | recon-playbook | intel-factory |
@@ -50,6 +53,7 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 安全设备/管理面（自签证书、登录加密、UA 过滤） | appliance-mgmt-playbook | browser-auth |
 | 通道快照/cookie 重放/通道失效判定 | channel-snapshot | browser-auth |
 | 主 bundle/chunk/运行时配置/source map 情报提取 | intel-factory | frontend-sca |
+| s3 四件套产出（端点表 evidence/s3-api-endpoints.txt # total=N / 密钥材料 / 业务状态机 / 隐藏路由内网拓扑——S4 Authz-Diff 直接输入） | intel-factory（第二节四件套表） | hypothesis-matrix（判定表证据指针） |
 | 前端加密/签名协议（MD5 拼接/SM4/WASM）已还原待投递 | crypto-offensive | authz-diff |
 | 鉴权差分矩阵（无 token 端点批量判读） | authz-diff | api-idor |
 | 教育信息化族（金智 ehall/正方/青果教务、VSB/博达网站群、超星） | edu-family | anon-attack-surface |
@@ -89,6 +93,15 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | iOS APP（IPA） | app-ios-audit | app-static-audit |
 | 小程序服务端 API（解包后） | miniapp-server | api-idor |
 | Agent/Function calling/MCP 后端 | llm-agent-toolchain | specA 头 |
+| MCP/A2A 协议层委托边界（受众绑定/令牌透传/工具描述替换/出站路径） | llm-agent-protocol-boundaries | llm-agent-toolchain / specA 头 |
+| Agent 记忆与目标完整性（记忆投毒/跨会话隔离/删除闭环） | llm-agent-memory-integrity | rag-attack / specA 头 |
+| LLM 网关与策略链（四通道覆盖差分/fail-open/遥测在场） | llm-gateway-policy-chain | llm-top10 / specA 头 |
+| APP 完整性信号面（Play Integrity/App Attest 服务端判定与重放） | app-integrity-server-verify | app-dynamic-audit |
+| APP 隐私清单与 SDK 数据行为（声明 vs 运行时数据流） | app-sdk-privacy-behavior | app-privacy-compliance |
+| 小程序平台登录态（授权码生命周期/身份绑定/会话撤销） | miniapp-platform-login | miniapp-server |
+| 宿主能力与跨小程序隔离（桥接授权/三态矩阵/负对照） | miniapp-host-isolation | miniapp-audit |
+| 云资源身份与部署边界（HTTP 暴露/服务身份 IAM/环境差异） | miniapp-cloud-identity | miniapp-server / cloud-security |
+| 备案、隐私披露与 SDK 治理证据（治理检查·与技术分开） | miniapp-privacy-governance | app-privacy-compliance |
 | 多模态（图片/PDF/语音注入） | llm-multimodal | rag-attack |
 | RAG/知识库/向量库 | rag-attack | llm-top10 |
 | APP/小程序个人信息合规取证 | app-privacy-compliance | report-writing |
@@ -97,8 +110,11 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | WAF/过滤器特征识别 | waf-fingerprint | payload-mutation-algebra |
 | 网关统一路由/多异构后端确证（前置代理+多栈指纹） | request-smuggling | intranet-lateral |
 | JWT/会话令牌机制确证或密钥材料泄露（预览/部分密钥） | jwt-crypto | auth-flow-deep |
+| 登录/会话机制缺陷泛查（默认口令/绕过面/会话固定/验证码逻辑，无 JWT 密钥材料） | auth-bypass | jwt-crypto, auth-flow-deep |
 | SSO/票据/扫码登录机制确证（ticket/QR/回调） | auth-flow-deep | jwt-crypto |
 | 同应用多实例/多节点（灰度/双活/同构换实例） | instance-diff | authz-diff |
+| S6 收口产出《27类收口对账表》（行格式/处置态五态定义/多目标复合键——引擎 C27 收口件门校验的模板） | c27-reconciliation | hypothesis-matrix（判定表来源） |
+| S7 收尾：影响量化 / 清理移交登记 / 只读复核 / 待续三选一处置（四件套模板——v6.8.0） | cleanup-handover | persistence（四元组登记上游视角） |
 | authz-diff 200 JSON 行（对象详情/列表数据） | api-field-exposure | authz-diff / api-idor |
 | HTTPS/TLS 服务（任何项目默认含） | tls-deep-audit | ssrf-deep / app-static-audit |
 | 桌面客户端/Electron 应用（非移动 APP） | thick-client | whitebox-source-audit |
@@ -111,7 +127,8 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 有安全公告/修复 commit 但无公开 PoC（Nday 反推机理） | patch-diffing | cve-weaponization / hypothesis-0day |
 | 解析器/协议/文件处理类自建环境可编译（可插桩） | fuzzing-workflow | fuzz-harness-go |
 | 已获多身份会话（客户账号/两角色，做越权生命周期矩阵） | authz-diff（v5.5.0 凭据注入节） | api-idor / session-state-chain |
-| 泄露情报源（HIBP 预筛/GitHub dork/密钥扫描/测绘四平台 Key） | osint-leak-intel | recon-playbook |
+| 泄露情报源（HIBP 预筛/GitHub dork/密钥扫描/测绘五平台 Key） | osint-leak-intel | recon-playbook |
+| S1/S2 被动域名与网络归属盘点（WHOIS/注册商/主体隐私、DNS 全谱 A/AAAA/CNAME/MX/NS/TXT/SOA/CAA、ASN/网段、历史 IP/被动 DNS） | recon-playbook（被动域名与网络归属测绘节：whois/DNS 全谱/whois.cymru.com ASN/被动 DNS 降级口径）+ osint-leak-intel（测绘/泄露源） | subdomain-takeover（s1 适配）；v6.1.0 S1-6 清单强制 |
 | Wayback 历史 URL/旧版本 API 前缀/影子接口候选 | history-recon | authz-diff / api-doc-leak |
 | 已获会话（客户账号/L2-L6 命中，测"会话怎么死"） | session-lifecycle | jwt-crypto / session-state-chain |
 | 分享面（share/sign/expires/keyId/分享二维码） | share-link-abuse | capability-primitive-search / crypto-offensive |
@@ -144,12 +161,15 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | payload 被拦截/过滤/403/改了没差异 | payload-mutation-algebra（先指纹 12 探针再按七步链变异）+ waf-fingerprint |
 | 疑似高危待确证（record_finding 定级前） | evidence-standard（逐类判据+反例）+ hypothesis-0day |
 | 无凭证且认证后项待测 | identity-bootstrapping（L1 评估轨→L6 决策树；L2-L6 命中即 session-state-chain；全轨未命中按无凭证口径移交，不主动询问用户） |
-| 代理配置后工具怎么走代理（$TOOL_PROXY/$JT_EXIT_POOL/工具旗标） | proxy-channels（v5.0 代理通道手册） | exit-pool / rate-limit-playbook |
-| s3 威胁建模（筛查矩阵判定/假设三态判定表） | hypothesis-matrix（K3 假设模式库：27 类×三态判定+判定表规范） | industry-templates / framework-priors |
+| 代理配置后工具怎么走代理（$TOOL_PROXY/$JT_EXIT_POOL/工具旗标） | proxy-channels（v5.0 代理通道手册；exit-pool 为 /opt/tools/exit-pool.py 工具脚本非技能） | rate-limit-playbook / tool-channels |
+| s3 威胁建模（筛查矩阵判定/假设三态判定表/多目标逐目标判定） | hypothesis-matrix（K3 假设模式库：27 类×三态判定+目标列判定表规范+刻度） | industry-templates / framework-priors |
 | 行业目标（医疗/金融/教育/政务/企业/互联网）优先级升格与数据类具象 | industry-templates（K1 行业模板六件） | hypothesis-matrix |
 | 框架指纹命中（Java/PHP/Python/Node 系）先验假设与首查清单 | framework-priors（K2 框架先验卡四件） | hypothesis-matrix / cve-weaponization |
 | 200 JSON 响应疑似多吐字段（密码哈希/手机号/内部字段回显） | api-field-exposure（field-exposure.py 角色间字段集合 diff） | api-idor / evidence-standard |
-| 需判定口令是否真实泄露过/源码配置是否泄密/测绘历史端口 | osint-leak-intel（HIBP range 免 key 预筛+gitleaks+四平台） | weak-cred-bruteforce / recon-playbook |
+| 需判定口令是否真实泄露过/源码配置是否泄密/测绘历史端口 | osint-leak-intel（HIBP range 免 key 预筛+gitleaks+五平台） | weak-cred-bruteforce / recon-playbook |
+| 网盘与文档泄露/招聘与技术博客/组织架构与邮箱格式（S2-2 OSINT 子项） | osint-leak-intel（第三节 通用 OSINT 情报面：dork 模板矩阵/组织画像/邮箱 pattern） | recon-playbook（被动节） |
+| 目标自述面/功能清单对账（S2-9 checklist.json 与 S4 覆盖下限） | anon-attack-surface（自述面对账联动）+ history-recon（影子接口差分引用 checklist.json） | intel-factory（端点表） |
+| 拓扑重建/内网引用/多端口同构差分（S2-11 拓扑重建-V1 四源累积） | instance-diff（同构判定+行为差分）+ intel-factory（产物④隐藏路由/内网拓扑） | request-smuggling（前置网关信号，S2 只登记） |
 | 端点表测完仍不放心（旧接口/已下线功能/老版本前缀） | history-recon（历史路径−自述面=影子接口候选矩阵） | authz-diff / api-idor |
 | 登出/改密/移除成员后旧 token 仍可用 | session-lifecycle（T1-T3/T9 复放矩阵）+ org-member-abuse（T3/T4） | jwt-crypto / session-state-chain |
 | 分享链接可改参看他人对象/过期仍可用/可离线伪造签名 | share-link-abuse（T2/T3/T4 矩阵） | api-idor / crypto-offensive |
@@ -163,6 +183,15 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 工业协议端口暴露（502/102/20000） | ics-ot（被动指纹→台架写验证） | cve-weaponization |
 | 授权含员工钓鱼演练 | social-engineering（命中率口径+Canary） | phishing-infra |
 | LLM/Agent 应用出现异常行为（越权工具调用/提示注入疑似） | llm-top10（v5.6.0 正负对照四件套） | llm-agent-toolchain / specA 头 |
+| Agent 委托链可疑（错误身份调用工具/工具描述悄悄变了/出站到陌生域） | llm-agent-protocol-boundaries（A12 正负对照三联判据） | evidence-standard / api-idor |
+| Agent 记忆异常（跨会话残留/记忆改变授权/删了还能检索到） | llm-agent-memory-integrity（A13 五层落点表） | rag-attack / evidence-standard |
+| 网关声称拦截但实测放行（防护有效性存疑） | llm-gateway-policy-chain（A14 四通道决策矩阵） | llm-top10 / llm-payloads |
+| APP 交易/风控被拒疑与完整性信号有关（Play Integrity/App Attest） | app-integrity-server-verify（D7 判定链五段） | app-dynamic-audit / evidence-standard |
+| SDK 收集了清单外数据/同意前出网/撤回无效 | app-sdk-privacy-behavior（D8 声明-运行时比对） | app-privacy-compliance / evidence-standard |
+| 小程序登录链异常（code 复用/会话不吊销/跨用户数据） | miniapp-platform-login（W7 三平台分型矩阵） | miniapp-server / session-lifecycle |
+| 宿主能力被越权调用/跨小程序数据可见 | miniapp-host-isolation（W8 三态矩阵·负对照纪律） | miniapp-audit / api-idor |
+| 云函数/规则面疑点（HTTP 暴露/服务角色过宽/环境混用） | miniapp-cloud-identity（W9 五入口矩阵） | miniapp-server / cloud-security |
+| 备案/隐私披露/SDK 治理证据缺失（治理检查） | miniapp-privacy-governance（W10 一致性证据表） | app-privacy-compliance / report-writing |
 | Android 动态验证被卡（设备/Frida/抓包链不可用） | app-dynamic-audit v5.6.0 探针表（逐项降级口径） | app-static-audit |
 | iOS 应用只有静态候选无动态验证 | app-ios-audit v5.6.0 动态轨分级 | app-dynamic-audit |
 | 云凭据在手不知权限边界 | cloud-security v5.6.0 分云 IAM 矩阵（simulate/can-i） | k8s-attack |
@@ -172,3 +201,17 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 ## 三、开工三件套
 
 project-warmup（预热）→ scan-tiering（分级扫描）→ parallel-execution（后台化/并行）；全程纪律见 loop-core「深度测试纪律 / 速度纪律」。
+
+## 四、症状相似分流决策表（v6.0.5——先分类再分流，防选错技能）
+
+| 症状组 | 候选技能 | 分流判据 |
+|---|---|---|
+| APP 组 | app-static-audit / app-dynamic-audit / app-hardening-bypass / app-ios-audit | 有包先 static（解包审计）→ 有设备/运行时走 dynamic → 检测到加固壳走 hardening-bypass → iOS 走 ios-audit；输出互相 handoff |
+| 小程序组 | miniapp-audit / miniapp-server | 客户端解包/前端逻辑=audit；服务端 API/云侧=server——解包产物里的 API 密钥与签名逻辑交接给 server |
+| 网关/封闭站组 | authz-diff / gateway-filter-playbook / closed-site-playbook / appliance-mgmt-playbook | 端点级角色差分=authz-diff；入口路由变异/边缘绕过=gateway-filter；无路由整体封闭=closed-site 分类；设备管理面=appliance-mgmt——**先按 403/502 响应源分类再分流** |
+| 执行编排组 | parallel-execution / scan-tiering / project-warmup | 通用并行/超时规则=parallel；扫描层级与降档=scan-tiering；开工预检与环境自检=warmup |
+| LLM 组 | llm-agent-toolchain / rag-attack / llm-multimodal / llm-payloads / llm-agent-protocol-boundaries / llm-agent-memory-integrity / llm-gateway-policy-chain | Agent 工具链滥用=toolchain；向量库/检索污染=rag；多模态输入=multimodal；提示注入载荷构造=payloads；协议层委托信任边界=protocol-boundaries；记忆持久化与隔离=memory-integrity；网关四通道覆盖=gateway-policy-chain——按数据来源与执行能力边界分流 |
+| APP 完整性组 | app-static-audit / app-dynamic-audit / app-hardening-bypass / app-ios-audit / app-integrity-server-verify / app-sdk-privacy-behavior | 客户端绕过与运行时观测=static/dynamic/hardening/ios；服务端完整性判定链（信号缺失/绑定错位是否被接受）=integrity-server-verify；隐私清单与 SDK 数据行为=sdk-privacy-behavior——**客户端绕过≠服务端缺陷，判定链结论以服务端行为为准** |
+| 小程序身份组 | miniapp-audit / miniapp-server / miniapp-platform-login / miniapp-host-isolation / miniapp-cloud-identity / miniapp-privacy-governance | 解包与前端=audit；解包 API 与云侧=server；授权码生命周期与身份绑定=platform-login；宿主桥接与跨小程序隔离=host-isolation；云资源身份与部署边界=cloud-identity；备案披露与 SDK 治理（独立定性）=privacy-governance——登录链结论作为 server 面越权矩阵的会话基线，治理类不进漏洞计数 |
+| 状态机组 | business-state-machine / logic-csrf-deser / race-condition | 多步流程非法转移=state-machine；CSRF/token=logic-csrf-deser；纯并发窗口=race-condition |
+| 身份流程组 | identity-flow-audit / auth-flow-deep / weak-cred-bruteforce / auth-bypass | 验证码/重置/OAuth/注册逐问=identity-flow-audit；完整认证流与 MFA=auth-flow-deep；口令面与拆分=weak-cred-bruteforce；认证机制泛查与绕过面（无密钥材料、无完整流程图）=auth-bypass |
