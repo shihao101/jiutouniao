@@ -52,6 +52,33 @@ type lessonScored struct {
 // 选取策略：①全部 score>0 的教训按分数 desc、时间 desc 排序，占前 (limit-2) 槽；
 // ②其余槽位由最近未命中教训补齐（保底 ≥2 条最近上下文）；
 // ③最终列表按分数 desc、时间 desc 排序渲染。total=全库条数，hits=全库命中条数。
+// duplicateLesson v7.4.0 D1 判重：归一化（小写/去空白）文本等值 → 返回既有教训编号。
+func (o *Orchestrator) duplicateLesson(text string) string {
+	norm := func(x string) string {
+		var b strings.Builder
+		for _, r := range strings.ToLower(x) {
+			if !strings.ContainsRune(" \t\n，。；、,.;:", r) {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	key := norm(text)
+	if key == "" {
+		return ""
+	}
+	lessons, err := o.store.ListLessons(0)
+	if err != nil {
+		return ""
+	}
+	for _, l := range lessons {
+		if norm(l.Text) == key {
+			return l.ID
+		}
+	}
+	return ""
+}
+
 func selectLessonsForContext(lessons []*store.LessonRecord, fpJoined, behaviorClass string, limit int) (selected []lessonScored, total, hits int) {
 	if limit <= 0 {
 		limit = 8
@@ -67,6 +94,21 @@ func selectLessonsForContext(lessons []*store.LessonRecord, fpJoined, behaviorCl
 			rest = append(rest, lessonScored{l, 0}) // ListLessons(0) 已按时间倒序，rest 保持近期优先
 		}
 	}
+	// v7.4.0 D1 注入质量门：未命中槽内结构化完整（stack/behavior_class 至少一项）的教训
+	// 优先于全空记录（稳定分区保持各自组内时间倒序）——老库存量全空记录自然沉底。
+	structured := rest[:0:0]
+	for _, sl := range rest {
+		if sl.lesson.Stack != "" || sl.lesson.BehaviorClass != "" {
+			structured = append(structured, sl)
+		}
+	}
+	unstructured := rest[:0:0]
+	for _, sl := range rest {
+		if sl.lesson.Stack == "" && sl.lesson.BehaviorClass == "" {
+			unstructured = append(unstructured, sl)
+		}
+	}
+	rest = append(structured, unstructured...)
 	sort.Slice(hitList, func(i, j int) bool {
 		if hitList[i].score != hitList[j].score {
 			return hitList[i].score > hitList[j].score

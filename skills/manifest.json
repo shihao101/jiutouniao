@@ -3,7 +3,7 @@
  "generated": "2026-11-14",
  "description": "机器可读技能清单（v5.3.2：gen_skill_manifest.py 单源生成——aliases/depends_on/handoff_to/stage_fit/lab_only 全量结构化，引擎 SkillRegistry 消费；重新生成请跑 scripts/gen_skill_manifest.py）",
  "route_file": "skills/00-router.md",
- "count": 140,
+ "count": 146,
  "skills": [
   {
    "id": "00-router",
@@ -443,6 +443,36 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "autonomy-proposal",
+   "file": "skills/autonomy-proposal.md",
+   "title": "PAE 自主决策提议手册（九类提议写法/证据引用/裁决收敛）",
+   "tags": [
+    "方法论",
+    "自主决策",
+    "propose",
+    "提议",
+    "裁决",
+    "升维",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8"
+   ],
+   "stage_fit": [
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "browser-auth",
    "file": "skills/browser-auth.md",
    "title": "浏览器认证实战手册（真实浏览器登录 + CLI 接管混合流水线）",
@@ -535,6 +565,29 @@
    ],
    "stage_fit": [
     "s4",
+    "s5",
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "chain-planning",
+   "file": "skills/chain-planning.md",
+   "title": "链路级计划手册（chain_plan 提议：每步命令/判据/回滚/无害性声明）",
+   "tags": [
+    "方法论",
+    "自主决策",
+    "chain_plan",
+    "链路",
+    "凑链",
+    "s5",
+    "s6"
+   ],
+   "depends_on": [
+    "autonomy-proposal",
+    "capability-primitive-search"
+   ],
+   "stage_fit": [
     "s5",
     "s6"
    ],
@@ -986,6 +1039,26 @@
     "s5",
     "s6",
     "s8"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "explorer-mission",
+   "file": "skills/explorer-mission.md",
+   "title": "探索代理任务书（explorer_mission：异常产出最大化）",
+   "tags": [
+    "方法论",
+    "探索",
+    "explorer_mission",
+    "异常",
+    "候选",
+    "s4"
+   ],
+   "depends_on": [
+    "hypothesis-0day"
+   ],
+   "stage_fit": [
+    "s4"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -1664,6 +1737,26 @@
    "execution_profile_default": "production_safe"
   },
   {
+   "id": "lateral-graph",
+   "file": "skills/lateral-graph.md",
+   "title": "横向决策图消费（lateral_edge 逐边提议-裁决-执行）",
+   "tags": [
+    "方法论",
+    "横向",
+    "lateral_edge",
+    "决策图",
+    "s6"
+   ],
+   "depends_on": [
+    "intranet-lateral",
+    "windows-lateral"
+   ],
+   "stage_fit": [
+    "s6"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
    "id": "llm-agent-memory-integrity",
    "file": "skills/llm-agent-memory-integrity.md",
    "title": "\"Agent 记忆与目标完整性（写入者/保留期/隔离与删除控制——低信任内容不得持久改变授权行为）\"",
@@ -2169,6 +2262,29 @@
    "stage_fit": [
     "s4",
     "specB2"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "mutation-campaign",
+   "file": "skills/mutation-campaign.md",
+   "title": "WAF 变异攻坚闭环（mutation_campaign 提议：变异-观察-再变异）",
+   "tags": [
+    "方法论",
+    "WAF",
+    "变异",
+    "mutation_campaign",
+    "对抗",
+    "s4",
+    "s5"
+   ],
+   "depends_on": [
+    "payload-mutation-algebra",
+    "waf-fingerprint"
+   ],
+   "stage_fit": [
+    "s4",
+    "s5"
    ],
    "execution_profile_default": "production_safe"
   },
@@ -2749,6 +2865,25 @@
    "stage_fit": [
     "s2",
     "s4"
+   ],
+   "execution_profile_default": "production_safe"
+  },
+  {
+   "id": "retest-card",
+   "file": "skills/retest-card.md",
+   "title": "复测卡手册（retest_card：四要素与价值分入队）",
+   "tags": [
+    "方法论",
+    "复测",
+    "retest_card",
+    "移交",
+    "s7"
+   ],
+   "depends_on": [
+    "evidence-standard"
+   ],
+   "stage_fit": [
+    "s7"
    ],
    "execution_profile_default": "production_safe"
   },

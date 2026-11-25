@@ -94,12 +94,43 @@ func compactMsgsWithArchive(msgs []llm.Message, budget, keepRecent int, archiveT
 				if len(m.Content) <= 2000 {
 					continue
 				}
+				// v7.1.0 P5（方案 §3.1 A5）：压缩前助手消息原文同样经回调归档（与工具回执同通道，
+				// receipt:<id> 可检索）——计划意图与分析过程不再随压缩不可逆丢失（三处审计重复指出的缺口）。
+				if archiveToolReceipt != nil {
+					if rid := archiveToolReceipt(stage, m.Content); rid != "" {
+						out[i].Content = truncateRunes(m.Content, 400) +
+							fmt.Sprintf("\n[已压缩 receipt=%s：压缩前分析原文已归档，search_memory query=\"receipt:%s\" 可取回]", rid, rid)
+						total++
+						continue
+					}
+				}
 				out[i].Content = truncateRunes(m.Content, 400) + "\n[已压缩]"
 			}
 			total++
 		}
 		if estimateTokens(out) <= budget {
 			break
+		}
+	}
+	// v7.1.0 E4'（确定性兜底，零 LLM 调用）：两遍压缩后仍超预算 → 紧急裁剪模式——
+	// 按最旧优先把中段 tool 内容置 stub、超长 assistant 再截半，预算保证单调收敛；
+	// 替代旧「压无可压即返回超预算链 → 上游 4xx → 项目 failed」的失败路径（runtime-audit R2 尾巴）。
+	if estimateTokens(out) > budget {
+		for i := 2; i < len(out)-keepRecent && estimateTokens(out) > budget; i++ {
+			// 已带归档指针的存根（receipt=…）不得再裁——那是原文的唯一可检索指针（P5 不变量）
+			alreadyArchived := strings.Contains(out[i].Content, "[已压缩 receipt=")
+			switch out[i].Role {
+			case "tool":
+				if len(out[i].Content) > 0 && !alreadyArchived && !strings.HasSuffix(out[i].Content, "（预算紧急裁剪）]") {
+					out[i].Content = "[已裁剪（预算紧急裁剪）]"
+					total++
+				}
+			case "assistant":
+				if len(out[i].Content) > 200 && !alreadyArchived && !strings.HasSuffix(out[i].Content, "（预算紧急裁剪）]") {
+					out[i].Content = truncateRunes(out[i].Content, 200) + "\n[已裁剪（预算紧急裁剪）]"
+					total++
+				}
+			}
 		}
 	}
 	return out, total

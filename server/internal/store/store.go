@@ -42,7 +42,44 @@ var (
 	// v6.0.1 P5（fix-plan 20261122）：未定性候选账本——实证"待评估"悬空态（GetCaptchaImg 案：
 	// 非 finding/非 VT/非排除，收口时无人负责）是漏报温床；候选必须三态归档有归宿。
 	bucketCandidates = []byte("candidates")
+	bucketAutonomy   = []byte("autonomy") // v7.1.0 PAE 自主决策账本：提议→裁决→结果三元组全程留痕（Web「自主决策」页 / S8 复盘章 / autonomy.json 同源）
+	bucketCards      = []byte("cards")   // v7.1.0 A2 执行卡状态机（P1-lite）：引擎维护的 (stage×C-xx×target) 投影账本——模型零簿记，收口五态统计由状态机直出
 )
+
+// CardRecord v7.1.0 A2 执行卡状态机记录：C-xx 引用（来自 update_coverage Endpoint/Notes
+// 或 record_vt title/启动条件）即卡片键的一部分。状态机：queued（VT 登记）→
+// dispatched（覆盖投递）→ evidence_linked（结论附证据）→ dispositioned（结论态落账）。
+type CardRecord struct {
+	ID        string    `json:"id"` // EC- 前缀
+	ProjectID string    `json:"project_id"`
+	Stage     string    `json:"stage"`
+	Class     string    `json:"class"`  // C-xx（27 类编号）
+	Target    string    `json:"target"` // 目标/组（多目标复合键；单目标可空）
+	State     string    `json:"state"`  // queued/dispatched/evidence_linked/dispositioned
+	Outcome   string    `json:"outcome,omitempty"`
+	Evidence  string    `json:"evidence,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AutonomyRecord v7.1.0 PAE（提议-裁决-升维）自主决策账本单条记录：
+// LLM 经 propose 工具提交结构化提议，引擎裁决器按确定性规则集核验并落 verdict，
+// 结果经 update_proposal 回写 outcome——全链无人工裁决点，用户事后在账本可见效果。
+type AutonomyRecord struct {
+	ID        string     `json:"id"`                      // PR-xxxx（提议编号）
+	ProjectID string     `json:"project_id"`
+	Stage     string     `json:"stage"`                   // 提议所在阶段
+	Kind      string     `json:"kind"`                    // loopback_focus/budget_transfer/replan_delta/depth_extend/mutation_campaign/chain_plan/explorer_mission/lateral_edge/retest_card
+	Rationale string     `json:"rationale"`               // 一句话可证伪理由
+	Evidence  []string   `json:"evidence_refs,omitempty"` // 证据引用（evidence/ 路径 / fact: / F- / VT- / CD-）
+	Focus     string     `json:"focus,omitempty"`         // 聚焦范围摘要（目标/类/端点）
+	CostNote  string     `json:"cost_note,omitempty"`     // 成本预估（轮次/请求）
+	Verdict   string     `json:"verdict"`                 // approved/modified/denied/conservative_fallback/shadow_recorded/cancelled
+	Rules     []string   `json:"rule_hits,omitempty"`     // 命中的规则 id
+	Reason    string     `json:"reason,omitempty"`        // 原因码与说明（机读原因码 + 人类可读）
+	Outcome   string     `json:"outcome,omitempty"`       // 结果回填（update_proposal：产出 F-/VT-/coverage 归宿）
+	CreatedAt time.Time  `json:"created_at"`
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
+}
 
 // ---------- 记录结构 ----------
 
@@ -109,6 +146,9 @@ type StageState struct {
 	// buildContextPack 注入「回环重入原因」块（S4 二次进入直击回环线索，不再靠模型翻时间线）；
 	// 该阶段收口成功后清空。
 	ReentryReason string `json:"reentry_reason,omitempty"`
+	// v7.2.0 B3 planDelta：测试中新 in_scope 资产触发计划重排的版本计数——每次 planDelta
+	// 执行卡生成 Bump +1，S4 上下文注入「计划版本」供逐类对账表版本化追溯（P2 计划版本化）。
+	PlanVersion int `json:"plan_version,omitempty"`
 	// v6.5.0（S5-⑥）：预算冲刺预警已注入标记——触发条件从 remain == budget/3 精确等于
 	// 改为进入「剩 ≤1/3」阈值区间后首轮触发一次（budget 非 3 的倍数时旧条件永不命中，
 	// 多目标放大后最常见的预算形态整段丢失 V3 就绪投递引导）；runStage 启动复位
@@ -321,7 +361,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts, bucketCandidates} {
+		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts, bucketCandidates, bucketAutonomy, bucketCards} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -650,6 +690,14 @@ func getProjectID(rec any) string {
 		return r.ProjectID
 	case *Candidate:
 		return r.ProjectID
+	case AutonomyRecord: // v7.1.0 PAE 自主决策账本
+		return r.ProjectID
+	case *AutonomyRecord:
+		return r.ProjectID
+	case CardRecord: // v7.1.0 A2 执行卡状态机
+		return r.ProjectID
+	case *CardRecord:
+		return r.ProjectID
 	}
 	return ""
 }
@@ -729,6 +777,137 @@ func (s *Store) ListApprovals(projectID string) ([]*Approval, error) {
 	out, err := listBy[Approval](s, bucketApprovals, projectID)
 	sort.Slice(out, func(i, j int) bool { return out[i].RequestedAt.After(out[j].RequestedAt) })
 	return out, err
+}
+
+// ---------- v7.1.0 自主决策账本（PAE：提议→裁决→结果全程留痕） ----------
+
+func (s *Store) AddAutonomy(r *AutonomyRecord) (string, error) {
+	r.ID = newID("PR")
+	r.CreatedAt = time.Now()
+	return r.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketAutonomy, r.ID, r) })
+}
+
+func (s *Store) SaveAutonomy(r *AutonomyRecord) error {
+	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketAutonomy, r.ID, r) })
+}
+
+func (s *Store) GetAutonomy(id string) (*AutonomyRecord, error) {
+	var r AutonomyRecord
+	err := s.db.View(func(tx *bolt.Tx) error { return getJSON(tx, bucketAutonomy, id, &r) })
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (s *Store) ListAutonomy(projectID string) ([]*AutonomyRecord, error) {
+	out, err := listBy[AutonomyRecord](s, bucketAutonomy, projectID)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, err
+}
+
+// AutonomyStats v7.1.0：自主决策效果统计（Web「自主决策」页顶部面板与 S8《自主决策复盘》章
+// 与 autonomy.json 三处同源，禁手写）。转化率口径：outcome 非空的 approved 提议占比。
+func (s *Store) AutonomyStats(projectID string) map[string]any {
+	recs, err := s.ListAutonomy(projectID)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	byKind := map[string]map[string]int{}
+	verdicts := map[string]int{}
+	approved, approvedWithOutcome, escalations := 0, 0, 0
+	for _, r := range recs {
+		verdicts[r.Verdict]++
+		if _, ok := byKind[r.Kind]; !ok {
+			byKind[r.Kind] = map[string]int{}
+		}
+		byKind[r.Kind][r.Verdict]++
+		if r.Verdict == "approved" || r.Verdict == "modified" {
+			approved++
+			if strings.TrimSpace(r.Outcome) != "" {
+				approvedWithOutcome++
+			}
+		}
+		lc := strings.ToLower(r.Reason)
+		if strings.Contains(lc, "escalated") || strings.Contains(r.Reason, "升维") {
+			escalations++
+		}
+	}
+	conversion := 0.0
+	if approved > 0 {
+		conversion = float64(approvedWithOutcome) / float64(approved)
+	}
+	return map[string]any{
+		"total":                  len(recs),
+		"verdicts":               verdicts,
+		"by_kind":                byKind,
+		"approved":               approved,
+		"approved_with_outcome":  approvedWithOutcome,
+		"conversion":             conversion,
+		"escalations":            escalations,
+		"note":                   "引擎统计（v7.1.0）——提议/裁决/结果全程留痕，本表为唯一事实来源，禁止手写",
+	}
+}
+
+// ---------- v7.1.0 A2 执行卡状态机（P1-lite 投影账本） ----------
+
+// UpsertCard 按 (project, stage, class, target) 幂等更新执行卡状态；不存在即建卡。
+func (s *Store) UpsertCard(c *CardRecord) error {
+	var existing *CardRecord
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketCards).ForEach(func(_, v []byte) error {
+			var r CardRecord
+			if json.Unmarshal(v, &r) == nil && r.ProjectID == c.ProjectID && r.Stage == c.Stage && r.Class == c.Class && r.Target == c.Target {
+				existing = &r
+				return nil
+			}
+			return nil
+		})
+	})
+	if existing != nil {
+		existing.State = c.State
+		if c.Outcome != "" {
+			existing.Outcome = c.Outcome
+		}
+		if c.Evidence != "" {
+			existing.Evidence = c.Evidence
+		}
+		existing.UpdatedAt = time.Now()
+		return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCards, existing.ID, existing) })
+	}
+	c.ID = newID("EC")
+	c.UpdatedAt = time.Now()
+	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketCards, c.ID, c) })
+}
+
+func (s *Store) ListCards(projectID string) ([]*CardRecord, error) {
+	return listBy[CardRecord](s, bucketCards, projectID)
+}
+
+// CardStats 五态统计（状态机直出——逐类对账表由此降级为只读投影）：
+// tested=dispatched/evidence_linked/dispositioned；queued_vt=queued；blocked/deferred 按 outcome 归类。
+func (s *Store) CardStats(projectID string) map[string]int {
+	recs, _ := s.ListCards(projectID)
+	out := map[string]int{"total": len(recs), "queued_vt": 0, "dispatched": 0, "evidence_linked": 0, "dispositioned": 0, "blocked": 0, "deferred": 0}
+	for _, r := range recs {
+		switch r.State {
+		case "queued":
+			out["queued_vt"]++
+		case "dispatched":
+			out["dispatched"]++
+		case "evidence_linked":
+			out["evidence_linked"]++
+		case "dispositioned":
+			out["dispositioned"]++
+		}
+		switch r.Outcome {
+		case "waf_blocked":
+			out["blocked"]++
+		case "needs_follow_up", "skipped":
+			out["deferred"]++
+		}
+	}
+	return out
 }
 
 // ---------- 证据 ----------

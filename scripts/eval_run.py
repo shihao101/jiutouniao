@@ -219,6 +219,91 @@ BLIND_THRESHOLDS = {"hidden_recall_min": 0.4, "high_risk_anonymous_recall_min": 
                     "findings_precision_min": 0.3}
 
 
+
+# ---------- v7.4.0 D2/D3：技能迭代工单 + 自主性计量（学习环） ----------
+
+# D2：漏洞类 → 候选技能映射（来自 skills/00-router.md 主干路径的静态摘录；
+# 未命中映射的类由人工归类——工单是迭代输入不是自动改动）。
+CLASS_SKILL = {
+    "SQL注入": "sqli-deep", "XSS": "xss-context", "SSRF": "ssrf-deep", "命令注入": "cmdi-deep",
+    "路径穿越": "path-traversal", "文件上传": "upload-bypass", "XXE": "xxe-full", "SSTI": "ssti-engine-map",
+    "反序列化": "java-deser-playbook", "越权": "api-idor", "未授权": "authz-diff", "认证": "auth-flow-deep",
+    "会话": "session-lifecycle", "JWT": "jwt-crypto", "逻辑": "business-state-machine", "支付": "logic-purchase-limit",
+    "竞态": "race-condition", "限次": "rate-limit-playbook", "提示注入": "llm-top10", "信息泄露": "api-doc-leak",
+    "GraphQL": "graphql-websocket", "缓存": "cache-poisoning", "走私": "request-smuggling", "CORS": "cors-redirect-hostheader",
+    "重定向": "cors-redirect-hostheader", "安全头": "http-security-headers", "TLS": "tls-deep-audit", "弱口令": "weak-cred-bruteforce",
+}
+
+
+def skill_for_item(it):
+    cls = it.get("class") or it.get("vuln_class") or ""
+    for k, sk in CLASS_SKILL.items():
+        if k in str(cls):
+            return sk
+    kws = " ".join(it.get("keywords", []) or [])
+    for k, sk in CLASS_SKILL.items():
+        if k in kws:
+            return sk
+    return "（待人工归类）"
+
+
+def skill_workorder(miss, extras, out_dir, project_id):
+    """D2：未命中清单 → 技能迭代工单（eval/results/skill-iteration-<ts>.md）——
+    每条 miss 给出候选技能与建议动作（增补剧本节/阴阳判据/claims 模板），
+    作为技能库迭代的直接输入（v4.8 设计意图的管线化落地）。"""
+    if not miss:
+        return None
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"skill-iteration-{ts}.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(f"# 技能迭代工单（v7.4.0 D2）\n\n项目: {project_id}  生成: {ts}\n\n")
+        f.write("> 本工单由 eval 判分自动生成——未命中项即技能库迭代输入；建议动作需人工复核后落地（改技能剧本而非改判分）。\n\n")
+        f.write("## 未命中项（按候选技能分组）\n\n")
+        groups = {}
+        for it in miss:
+            groups.setdefault(skill_for_item(it), []).append(it)
+        for sk, items in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            f.write(f"### {sk}（{len(items)} 条）\n\n")
+            for it in items:
+                f.write(f"- [{it.get('mode', 'declared')}/{it.get('weight', '-')}] {it.get('desc') or it.get('keywords')}: {it.get('keywords')}\n")
+            f.write("  建议动作: 对照技能剧本补「最小探针 + 阴阳判据 + claims 模板」三件套；已覆盖则补 depends_on 路由。\n\n")
+        f.write("## 清单外发现复核（extras，D3 转化率分子来源）\n\n")
+        for e in extras or []:
+            f.write(f"- [{e.get('severity', '?')}] {e.get('title', '')[:80]}\n")
+        if not extras:
+            f.write("（无）\n")
+    return out
+
+
+def autonomy_section(project_id):
+    """D3：自主性计量——读 projects/<id>/autonomy.json（v7.1.0 账本导出）+ 覆盖矩阵
+    假设命中率（vuln_class 含「假设」的单元 vulnerable 占比）。autonomy.json 缺失（旧项目）
+    返回 None。"""
+    path = os.path.join(ROOT, "projects", project_id, "autonomy.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        au = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return None
+    stats = au.get("stats") or {}
+    return {
+        "proposals": stats.get("total", 0),
+        "approved": stats.get("approved", 0),
+        "conversion": stats.get("conversion", 0.0),
+        "escalations": stats.get("escalations", 0),
+    }
+
+
+def assumption_metrics(coverage):
+    """D3：假设命中率（确证假设 / 已测假设）——vuln_class 含「假设」的覆盖单元统计。"""
+    units = [c for c in coverage if "假设" in str(c.get("vuln_class", ""))]
+    hit = [c for c in units if c.get("status") == "vulnerable"]
+    rate = (len(hit) / len(units)) if units else None
+    return {"units": len(units), "hit": len(hit), "rate": rate}
+
+
 def blind_report(findings, coverage, expected, project_id, out_dir):
     """P2-2：盲测召回（declared/hidden/mock/hidden_high 沿用 score 口径）+ 精确率侧新增。
     精确率：findings_precision = 命中预期项的 findings / 全部 findings——清单外 extras
@@ -239,6 +324,9 @@ def blind_report(findings, coverage, expected, project_id, out_dir):
     }
     ts = time.strftime("%Y%m%d-%H%M%S")
     os.makedirs(out_dir, exist_ok=True)
+    wo = skill_workorder(miss, extras, out_dir, project_id)  # v7.4.0 D2
+    am = autonomy_section(project_id)                         # v7.4.0 D3
+    asm = assumption_metrics(coverage)                        # v7.4.0 D3
     out = os.path.join(out_dir, f"blind-{ts}.md")
     with open(out, "w", encoding="utf-8") as f:
         f.write(f"# 高危盲测召回/精确率报告（v5.3.3 P2-2）\n\n项目: {project_id}  生成: {ts}\n\n")
@@ -257,6 +345,17 @@ def blind_report(findings, coverage, expected, project_id, out_dir):
                 f.write(f"- [{e.get('severity', '?')}/{e.get('confidence', '?')}] {e.get('title', '')[:80]}\n")
         else:
             f.write("（无）\n\n")
+        f.write("\n## 自主性计量（v7.4.0 D3）\n\n")
+        if am:
+            f.write(f"- 提案总数: {am['proposals']}｜批准: {am['approved']}｜转化率: {am['conversion']:.0%}｜升维: {am['escalations']}\n")
+        else:
+            f.write("- autonomy.json 缺失（v7.1.0 前旧项目）\n")
+        if asm["units"]:
+            f.write(f"- 假设命中率: {asm['rate']:.0%}（确证 {asm['hit']}/{asm['units']} 单元）\n")
+        else:
+            f.write("- 假设命中率: 无假设单元（本轮未走 0day 假设工作流）\n")
+        if wo:
+            f.write(f"- 技能迭代工单: {os.path.basename(wo)}\n")
         f.write("\n## 阈值门\n\n")
         ok_all = True
         for k, (v, th) in gates.items():
@@ -457,6 +556,9 @@ def main():
     # v4.8 三指标：S3 判定表 ↔ expected matrix_class（常驻输出，§5.3）
     mm = matrix_metrics(os.path.join(ROOT, "projects", project_id,
                                      "deliverables", "s3-筛查矩阵判定表.md"), expected)
+    wo = skill_workorder(miss, extras, os.path.join(ROOT, "eval", "results"), project_id)  # v7.4.0 D2
+    am = autonomy_section(project_id)   # v7.4.0 D3
+    asm = assumption_metrics(coverage)  # v7.4.0 D3
 
     ts = time.strftime("%Y%m%d-%H%M%S")
     os.makedirs(os.path.join(ROOT, "eval", "results"), exist_ok=True)
@@ -468,6 +570,12 @@ def main():
         f.write(f"- 自述面召回: **{stats['declared_recall']:.0%}**（{stats['declared_hit']}/{stats['declared_total']}，覆盖下限）\n")
         f.write(f"- 清单外盲挖: **{stats['hidden_recall']:.0%}**（{stats['hidden_hit']}/{stats['hidden_total']}，隐藏项=0day 能力度量）\n")
         f.write(f"- mock 面召回: **{stats['mock_recall']:.0%}**（{stats['mock_hit']}/{stats['mock_total']}，OAuth/对抗 mock=C-04/10/11/27）\n")
+        if am:
+            f.write(f"- 自主性计量（D3）: 提案 {am['proposals']}｜批准 {am['approved']}｜转化率 {am['conversion']:.0%}｜升维 {am['escalations']}\n")
+        if asm["units"]:
+            f.write(f"- 假设命中率（D3）: **{asm['rate']:.0%}**（确证 {asm['hit']}/{asm['units']}）\n")
+        if wo:
+            f.write(f"- 技能迭代工单（D2）: {os.path.basename(wo)}\n")
         f.write(f"- 匿名高危召回: **{stats['high_risk_anonymous_recall']:.0%}**（{stats['hidden_high_hit']}/{stats['hidden_high_total']}，weight=high 隐藏项=无凭证高危能力度量）\n")
         # 三指标段
         if mm.get("available"):

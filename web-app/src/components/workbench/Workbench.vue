@@ -47,7 +47,8 @@ onUnmounted(() => clearInterval(boardPoll))
 .wb{display:flex;flex:1;min-height:0;overflow:hidden}
 .wb-left{width:208px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;background:var(--bg2)}
 .wb-center{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)}
-.wb-right{width:368px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2)}
-@media (max-width:1280px){ .wb-right{width:320px} }
-@media (max-width:1100px){ .wb-right{width:288px} .wb-left{width:172px} }
+/* v7.4.1：右栏加宽（368→452，页签七项竖线分隔后不再拥挤） */
+.wb-right{width:452px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2)}
+@media (max-width:1280px){ .wb-right{width:404px} }
+@media (max-width:1100px){ .wb-right{width:348px} .wb-left{width:172px} }
 </style>

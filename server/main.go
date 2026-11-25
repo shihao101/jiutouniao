@@ -87,6 +87,8 @@ func main() {
 	bus := events.NewBus()
 	ap := engine.NewApprover(st, bus, cfg.AutoApprove)
 	ap.SetWaitTimeout(cfg.Engine.BarrierTimeoutSec) // v3.4.0：人工审批/提问屏障超时（默认 1800，配置可覆盖）
+	// v7.1.0：engine 审批档 L2 裁决配额（config.autonomy.engine_l2_*，默认 20/10min、200/项目）
+	ap.SetEngineQuota(cfg.Autonomy.EngineL2Per10Min, cfg.Autonomy.EngineL2Total)
 	// v6.1.0（S1 修复方案㉑）：资源目录由 config.paths 定位（相对路径以 config 文件所在目录
 	// 为基准；空值=默认相对路径兼容旧部署）——启动时存在性检查 fail-fast，防止带病加载过期提示词。
 	headsDir := engine.ResolveResourceDir(*cfgPath, cfg.Paths.HeadsDir, "heads")

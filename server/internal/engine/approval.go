@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,23 +20,47 @@ type Approver struct {
 	store *store.Store
 	bus   *events.Bus
 
-	defPolicy   string        // 全局默认审批策略：manual/l1/all（项目可覆盖）
+	defPolicy   string        // 全局默认审批策略：engine（v7.1.0 默认）/manual/l1/all（项目可覆盖）
 	waitTimeout time.Duration // v3.4.0：人工审批等待上限（0=不限；实证空等 115 分钟无意义）
-	mu          sync.Mutex
-	waiters     map[string]chan string   // approvalID -> 决策通道
-	killCh      map[string]chan struct{} // projectID -> 熔断广播
+
+	// v7.1.0 engine 档 L2 裁决配额（方案 §3.5：滑动窗口 + 项目总数，防引擎自动批准失控）
+	engMu         sync.Mutex
+	engL2Per10Min int
+	engL2Total    int
+	engL2Win      map[string][]time.Time // projectID -> 窗口内 L2 裁决时间戳
+	engL2TotalN   map[string]int         // projectID -> L2 裁决总数
+
+	mu      sync.Mutex
+	waiters map[string]chan string   // approvalID -> 决策通道
+	killCh  map[string]chan struct{} // projectID -> 熔断广播
 }
 
 func NewApprover(st *store.Store, bus *events.Bus, defPolicy string) *Approver {
-	if defPolicy != "l1" && defPolicy != "all" {
-		defPolicy = "manual"
+	// v7.1.0：engine 加入合法策略集并作为缺省兜底；显式传入的 manual/l1/all 原样保留
+	//（既有测试与已部署项目的行为契约不变——旧默认 manual 的归一化语义由 config 层负责）。
+	if defPolicy != "engine" && defPolicy != "manual" && defPolicy != "l1" && defPolicy != "all" {
+		defPolicy = "engine" // v7.1.0（用户决策）：默认 engine——L1 自动/L2 存在性证明语义裁决，拒绝即保守路径不进人工屏障
 	}
 	return &Approver{
-		store:     st,
-		bus:       bus,
-		defPolicy: defPolicy,
-		waiters:   map[string]chan string{},
-		killCh:    map[string]chan struct{}{},
+		store:       st,
+		bus:         bus,
+		defPolicy:   defPolicy,
+		waiters:     map[string]chan string{},
+		killCh:      map[string]chan struct{}{},
+		engL2Win:    map[string][]time.Time{},
+		engL2TotalN: map[string]int{},
+	}
+}
+
+// SetEngineQuota 设置 engine 档 L2 裁决配额（接线 config.autonomy.engine_l2_*；默认 20/10min、200/项目）。
+func (a *Approver) SetEngineQuota(per10Min, total int) {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if per10Min > 0 {
+		a.engL2Per10Min = per10Min
+	}
+	if total > 0 {
+		a.engL2Total = total
 	}
 }
 
@@ -50,7 +75,7 @@ func (a *Approver) SetWaitTimeout(sec int) {
 func (a *Approver) policyFor(projectID string) string {
 	if p, err := a.store.GetProject(projectID); err == nil {
 		switch strings.TrimSpace(p.AutoApprove) {
-		case "l1", "all":
+		case "engine", "l1", "all":
 			return p.AutoApprove
 		case "manual":
 			return "manual"
@@ -171,6 +196,43 @@ func (a *Approver) Request(ctx context.Context, projectID, stage, action, risk s
 		return "auto-approved", nil
 	}
 
+	// v7.1.0 engine 裁决档（用户决策：全项目默认 engine——零人工裁决点）：
+	// L1 直接自动批准（执行档/治理九门已在本函数之前确定性拦截，能到这里的最小影响写可放）；
+	// L2 按「存在性证明语义白名单 + 配额」确定性裁决——拒绝即落 rejected 留痕并返回错误原因码
+	// （消费方把原因带回给模型走保守路径），不进人工屏障。
+	if policy := a.policyFor(projectID); policy == "engine" {
+		verdict, why := a.engineAdjudicate(projectID, action, risk)
+		now := time.Now()
+		if verdict == "approved" {
+			ap.Mode = "auto"
+			ap.Status = "approved"
+			ap.DecidedAt = &now
+			ap.DecidedBy = "engine-adjudicator(" + why + ")"
+			if err := a.store.SaveApproval(ap); err != nil {
+				return "", err
+			}
+			a.bus.Publish(projectID, "approval", ap)
+			a.bus.Publish(projectID, "log", map[string]string{
+				"level": "info", "stage": stage,
+				"text": fmt.Sprintf("🤖 引擎裁决批准 [%s]（engine 档，%s）：%s", risk, why, firstLineText(action)),
+			})
+			return "auto-approved", nil
+		}
+		ap.Mode = "auto"
+		ap.Status = "rejected"
+		ap.DecidedAt = &now
+		ap.DecidedBy = "engine-adjudicator(" + why + ")"
+		if err := a.store.SaveApproval(ap); err != nil {
+			return "", err
+		}
+		a.bus.Publish(projectID, "approval", ap)
+		a.bus.Publish(projectID, "log", map[string]string{
+			"level": "warn", "stage": stage,
+			"text": fmt.Sprintf("⛔ 引擎裁决拒绝 [%s]（engine 档，%s）：%s", risk, why, firstLineText(action)),
+		})
+		return "", fmt.Errorf("引擎裁决拒绝 [%s]（engine 档，原因码 %s）——请改为存在性证明/最小影响形态（无害回显/随机标记/受控 OOB/计数哈希），或拆分为只读步骤后重试；详见自主决策账本", risk, why)
+	}
+
 	// 人工批准路径：通知并阻塞等待决策。
 	a.bus.Publish(projectID, "approval", ap)
 	a.bus.Publish(projectID, "log", map[string]string{
@@ -208,6 +270,98 @@ func (a *Approver) Request(ctx context.Context, projectID, stage, action, risk s
 		}
 		return "timeout", nil
 	}
+}
+
+// engineL2QuotaOK engine 档 L2 配额检查（10 分钟滑窗 + 项目总数；超限 fail-closed 拒绝）。
+func (a *Approver) engineL2QuotaOK(projectID string) (bool, string) {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if a.engL2Per10Min <= 0 && a.engL2Total <= 0 {
+		return true, ""
+	}
+	now := time.Now()
+	win := a.engL2Win[projectID][:0]
+	for _, ts := range a.engL2Win[projectID] {
+		if now.Sub(ts) < 10*time.Minute {
+			win = append(win, ts)
+		}
+	}
+	a.engL2Win[projectID] = win
+	if a.engL2Per10Min > 0 && len(win) >= a.engL2Per10Min {
+		return false, "ENGINE_L2_WINDOW_QUOTA"
+	}
+	if a.engL2Total > 0 && a.engL2TotalN[projectID] >= a.engL2Total {
+		return false, "ENGINE_L2_TOTAL_QUOTA"
+	}
+	a.engL2Win[projectID] = append(win, now)
+	a.engL2TotalN[projectID]++
+	return true, ""
+}
+
+// engine 硬拒语义（全档位通用——数据破坏/驻留类即使 isolated_lab 也不放行，对齐清理铁律）。
+var engineHardDeny = []string{
+	`(?i)delete\s+from`, `(?i)update\s+["']?\w+["']?\s+set`, `(?i)insert\s+into`,
+	`(?i)drop\s+(table|database)`, `(?i)truncate\s+(table\s+)?`,
+	`(?i)rm\s+(-[a-za-z]*f|--force)`, `(?i)mkfs`, `shutdown|reboot|halt\b`,
+	`(?i)webshell|内存马|冰蝎|哥斯拉|蚁剑`,
+	`(?i)useradd|net\s+user\s+\S+\s+/add|新增账号`,
+	`(?i)schtasks\s+/create|crontab\s+-l?\s*[<]*-|systemctl\s+enable`,
+	`(?i)ssh-copy-id|authorized_keys`,
+}
+
+// engine 存在性证明语义白名单（production_safe 档 L2 唯一放行口径——方案 §3.5；
+// 逐关键词 Contains 匹配，命中任一即视为无害存在性证明形态）。
+var engineExistenceProof = []string{
+	"存在性", "存在证明", "无害", "随机标记", "随机数标记", "canary", "CANARY",
+	"OOB", "回连", "回显", "计数", "哈希", "摘要", "差分", "基线", "探针", "探测", "枚举", "只读",
+}
+
+// engineAdjudicate engine 档核心裁决（方案 §3.5）：
+// L1 → 放行（治理九门/profile 前置已拦截，能到审批的最小影响写可自动执行）；
+// L2 → isolated_lab 档：硬拒语义之外放行（完整 PoC 链 + 快照回滚兜底）；
+//
+//	production_safe 档：仅放行「存在性证明语义」命中的动作，其余 fail-closed 拒绝
+//	（原因码 L2_NOT_EXISTENCE_PROOF——模型应改为无害回显/随机标记/受控 OOB 形态）。
+func (a *Approver) engineAdjudicate(projectID, action, risk string) (string, string) {
+	// v7.1.0 核对修复（逐项核对审计①）：L1 自动批准同样过硬拒语义扫描——分级正则
+	// （Forbidden/HighRisk）之外的漏网写语义在此兜底，清理铁律不变式对 L1/L2 一体生效。
+	for _, re := range engineHardDeny {
+		if matchSimple(re, action) {
+			return "denied", "ENGINE_HARD_DENY(" + re + ")"
+		}
+	}
+	if risk != "L2" {
+		return "approved", "ENGINE_L1_WRITE"
+	}
+	if ok, why := a.engineL2QuotaOK(projectID); !ok {
+		return "denied", why
+	}
+	for _, re := range engineHardDeny {
+		if matchSimple(re, action) {
+			return "denied", "ENGINE_HARD_DENY(" + re + ")"
+		}
+	}
+	profile := "production_safe"
+	if p, err := a.store.GetProject(projectID); err == nil && p.ExecutionProfile == "isolated_lab" {
+		profile = "isolated_lab"
+	}
+	if profile == "isolated_lab" {
+		return "approved", "ENGINE_L2_ISOLATED_LAB"
+	}
+	for _, kw := range engineExistenceProof {
+		if strings.Contains(action, kw) {
+			return "approved", "ENGINE_L2_EXISTENCE_PROOF"
+		}
+	}
+	return "denied", "L2_NOT_EXISTENCE_PROOF"
+}
+
+// matchSimple 极简正则/子串双模匹配（| 交替与 (?i) 前缀由 regexp 处理，纯字面串退化为 Contains）。
+func matchSimple(pattern, s string) bool {
+	if re, err := regexp.Compile(pattern); err == nil {
+		return re.MatchString(s)
+	}
+	return strings.Contains(s, pattern)
 }
 
 // Decide 人工决策（留痕：mode=manual、decided_by、decided_at）。

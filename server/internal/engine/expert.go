@@ -613,7 +613,11 @@ var adversarialHypRe = regexp.MustCompile(`(?m)^\s*[-*]\s*(.+)$`)
 // 确认后转 ready）。约束（总案 §2.2）：对抗清单同样受证据溯源纪律（每条附证据指针
 // 或显式标注「纯推测」）。非阻塞增强项：LLM 失败只留痕不拦收口（§七.2）。
 // 返回（收口附注, 新增交付物相对路径）。
-func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.Project, stageID string) (string, string) {
+// adversarialAssumptionPass 单轮对抗假设（v7.3.0 C1 红蓝对抗环的轮次原语）：
+// round=1 首轮独立复查；round≥2 携带 prior（此前轮次假设清单）专攻未覆盖角度。
+// 差异 VT 登记规则升级（方案 C1）：证据指针可核存的差异项直接 status=ready
+//（红蓝对抗环差异项不再等人工确认——证据在场即就绪），「纯推测」仍 pending。
+func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.Project, stageID string, round int, prior []string) (string, string, []string) {
 	// 主清单语料 = s3 交付物文本（判定表+威胁清单在列）
 	mainCorpus := o.deliverablesText(p.ID)
 	// v6.3.0（S3-② 配套修复）：diff 语料归一化不再截断——原实现 normForKey(mainCorpus)
@@ -650,24 +654,35 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 ### 交付物语料（内含主清单，仅作证据源，不要复述其假设）
 %s`, assetLines, corpus)
 
+	// v7.3.0 C1：round≥2 注入此前轮次假设——红方第 2 轮专攻蓝方与第 1 轮都未覆盖的角度
+	priorLines := ""
+	if round >= 2 && len(prior) > 0 {
+		priorLines = "\n## 此前轮次已覆盖的假设（禁止重复，专攻不同进入角度）\n"
+		for _, h := range prior {
+			priorLines += "- " + h + "\n"
+		}
+	}
 	cli, modelName := o.clientFor(p)
+	if cli == nil {
+		return "", "", nil
+	}
 	pctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	resp, usage, err := cli.Chat(pctx, modelName, []llm.Message{
-		{Role: "system", Content: "[[R7-ADVERSARIAL]] 独立红队视角审查员：输出对抗假设清单，每条附证据指针或「纯推测」标注。"},
-		{Role: "user", Content: prompt},
+		{Role: "system", Content: fmt.Sprintf("[[R7-ADVERSARIAL]] 独立红队视角审查员（红蓝对抗环第 %d 轮）：输出对抗假设清单，每条附证据指针或「纯推测」标注。", round)},
+		{Role: "user", Content: prompt + priorLines},
 	}, nil, 0.4, 1024)
 	if err != nil {
-		o.log(p, stageID, "⚠ R7 对抗假设 pass 调用失败（非阻塞，留痕）: "+err.Error())
+		o.log(p, stageID, fmt.Sprintf("⚠ 红蓝对抗环 R%d 调用失败（非阻塞，留痕）: %s", round, err.Error()))
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
-			Event: "R7 对抗假设", Detail: "独立会话调用失败（非阻塞）: " + truncateText(err.Error(), 120)})
-		return "", ""
+			Event: "红蓝对抗环", Detail: fmt.Sprintf("R%d 独立会话调用失败（非阻塞）: %s", round, truncateText(err.Error(), 120))})
+		return "", "", nil
 	}
 	o.accountUsage(p, stageID, usage)
 	hyps := parseAdversarialHypotheses(resp.Content)
 	if len(hyps) == 0 {
-		o.log(p, stageID, "R7 对抗假设 pass：独立会话无可解析假设（留痕）")
-		return "", ""
+		o.log(p, stageID, fmt.Sprintf("红蓝对抗环 R%d：独立会话无可解析假设（留痕）", round))
+		return "", "", nil
 	}
 
 	// diff：归一化后未出现在主清单语料的 → 差异项 → record_vt（pending）
@@ -683,10 +698,19 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 		if strings.Contains(h.raw, "纯推测") {
 			note = "（对抗 pass 标注：纯推测，防噪声）"
 		}
+		// v7.3.0 C1 就绪规则：证据指针可核存的差异项直接 ready（不再等确认——证据在场即就绪）
+		status := "pending"
+		cond := fmt.Sprintf("红蓝对抗环 R%d 差异项：主头确认后转 ready", round)
+		if strings.Contains(h.raw, "evidence/") {
+			if _, rerr := o.exec.ReadFile(p.ID, evidenceRefIn(h.raw)); rerr == nil {
+				status = "ready"
+				cond = fmt.Sprintf("红蓝对抗环 R%d 差异项（证据指针已核存，自动就绪）", round)
+			}
+		}
 		vt := &store.VerificationTask{ProjectID: p.ID, Stage: stageID,
-			Title:           "[R7对抗] " + truncateText(h.content, 90),
-			StartConditions: "主头/人工确认后转 ready（R7 第二层差异项）",
-			CostNote:        "对抗 pass 自动登记", Priority: 3, Status: "pending",
+			Title:           fmt.Sprintf("[R%d对抗] ", round) + truncateText(h.content, 90),
+			StartConditions: cond,
+			CostNote:        "红蓝对抗环自动登记", Priority: 3, Status: status,
 			Note: note,
 		}
 		id, verr := o.store.AddVT(vt)
@@ -702,7 +726,7 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 
 	// 交付物留痕：对抗假设审查记录（全量清单+处置）
 	var b strings.Builder
-	b.WriteString("# s3 对抗假设审查（R7 第二层引擎钩子，独立 LLM 会话）\n\n")
+	b.WriteString(fmt.Sprintf("# s3 对抗假设审查（v7.3.0 红蓝对抗环 R%d，独立 LLM 会话）\n\n", round))
 	b.WriteString("> 红队视角独立复查；差异项已自动入验证队列（status=pending，主头/人工确认后转 ready）。\n\n")
 	b.WriteString("## 对抗假设清单（独立会话原始输出）\n\n" + strings.TrimSpace(resp.Content) + "\n\n")
 	b.WriteString("## 处置\n\n")
@@ -722,15 +746,60 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 	}
 	raw := b.String()
 	delivPath := "deliverables/s3-对抗假设审查.md"
+	if round >= 2 {
+		delivPath = fmt.Sprintf("deliverables/s3-对抗假设审查-R%d.md", round)
+	}
 	if _, werr := o.exec.WriteFile(p.ID, delivPath, raw); werr != nil {
 		o.log(p, stageID, "⚠ R7 对抗假设审查交付物写入失败（非阻塞）: "+werr.Error())
 		delivPath = ""
 	}
-	o.log(p, stageID, fmt.Sprintf("🥷 R7 对抗假设 pass：独立会话 %d 条假设，差异 %d 条入 VT（pending）", len(hyps), vtCreated))
+	o.log(p, stageID, fmt.Sprintf("🥷 红蓝对抗环 R%d：独立会话 %d 条假设，差异 %d 条入 VT（证据核存即 ready）", round, len(hyps), vtCreated))
 	_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
-		Event: "R7 对抗假设", Detail: fmt.Sprintf("独立会话假设 %d 条，差异项登记 VT %d 条（pending，待确认转 ready）", len(hyps), vtCreated)})
-	note := fmt.Sprintf("🥷 R7 第二层对抗假设 pass 已执行（独立 LLM 会话）：解析假设 %d 条，与主清单 diff 后差异 %d 条已自动 record_vt（status=pending，确认后转 ready）；全量记录见 deliverables/s3-对抗假设审查.md。", len(hyps), vtCreated)
-	return note, delivPath
+		Event: "红蓝对抗环", Detail: fmt.Sprintf("R%d 独立会话假设 %d 条，差异项登记 VT %d 条（证据核存即 ready，纯推测 pending）", round, len(hyps), vtCreated)})
+	note := fmt.Sprintf("🥷 红蓝对抗环 R%d 已执行（独立 LLM 会话）：解析假设 %d 条，diff 后差异 %d 条已自动 record_vt（证据核存即 ready，纯推测 pending）；全量记录见 %s。", round, len(hyps), vtCreated, delivPath)
+	out := make([]string, 0, len(hyps))
+	for _, h := range hyps {
+		out = append(out, h.content)
+	}
+	return note, delivPath, out
+}
+
+// evidenceRefIn 从假设行提取首个 evidence/ 引用路径（就绪规则核存用）。
+func evidenceRefIn(raw string) string {
+	i := strings.Index(raw, "evidence/")
+	if i < 0 {
+		return ""
+	}
+	rest := raw[i:]
+	end := len(rest)
+	for j, c := range rest {
+		if c == ' ' || c == '|' || c == '\n' || c == '\t' || c == ')' || c == ',' || c == ';' ||
+			c == '，' || c == '）' || c == '。' || c == '；' {
+			end = j
+			break
+		}
+	}
+	return strings.TrimRight(strings.TrimLeft(rest[:end], "（("), "。，,；)")
+}
+
+// redBlueAssumptionLoop v7.3.0 C1 红蓝对抗环：R1 独立复查 → R2 携带 R1 假设专攻剩余角度
+//（2 轮迭代，替代旧一次性 R7；每轮独立留痕与 VT 登记，fail-open）。
+func (o *Orchestrator) redBlueAssumptionLoop(ctx context.Context, p *store.Project, stageID string) (string, string) {
+	note1, file1, hyps1 := o.adversarialAssumptionPass(ctx, p, stageID, 1, nil)
+	if len(hyps1) == 0 {
+		return note1, file1
+	}
+	note2, file2, _ := o.adversarialAssumptionPass(ctx, p, stageID, 2, hyps1)
+	// v7.3.0 核对修复（审计 M）：R2 失败（note2 空）时不再拼接孤儿分号
+	file := file2
+	if file == "" {
+		file = file1
+	}
+	if strings.TrimSpace(note2) == "" {
+		return strings.TrimSpace(note1), file
+	}
+	merged := strings.TrimSpace(strings.TrimSuffix(note1, "。") + "；" + strings.TrimPrefix(note2, "🥷 "))
+	return merged, file
 }
 
 // adversarialHyp 单条对抗假设：content=剥离标签/证据尾巴后的正文（diff 键与 VT 标题），

@@ -62,10 +62,10 @@ func TestV49CompleteStageSummaryFallback(t *testing.T) {
 	if strings.Contains(got, "缺少必填清单") {
 		t.Fatalf("summary 带中文注释的空数组应放行 V3: %s", got)
 	}
-	// 两通道都取不到 → 拦截且文案教正确提交方式
+	// v7.1.0 E1'：两通道都取不到 → 引擎按台账代填放行 V3（收口继续到后续门），不再拦截
 	got = call(t, o, p, "s4", "complete_stage", `{"summary":"x"}`)
-	if !strings.Contains(got, "缺少必填清单") || !strings.Contains(got, "顶层字段") {
-		t.Fatalf("双通道皆缺应拦截并给出提交方式: %s", got)
+	if strings.Contains(got, "缺少必填清单") {
+		t.Fatalf("v7.1.0 E1' 后双通道皆缺应引擎代填放行 V3: %s", got)
 	}
 }
 

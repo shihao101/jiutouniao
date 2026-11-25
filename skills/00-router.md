@@ -134,6 +134,12 @@ tags: 路由,索引,总览,s2,s3,s4,s5
 | 分享面（share/sign/expires/keyId/分享二维码） | share-link-abuse | capability-primitive-search / crypto-offensive |
 | 组织/团队/成员管理功能（邀请/角色/层级） | org-member-abuse | api-idor / instance-diff |
 | 登录态不可得（六轨走完仍无账号） | observable-degradation | session-state-chain |
+| 深化/变异/回环/链路等跨单元资源决策（v7.1.0 PAE 提议-裁决-升维，九类提议写法与收敛策略） | autonomy-proposal | loop-core 自主决策纪律 |
+| 凑链缺口 ≥2 环打包提交（chain_plan 提议工单格式与两档模板） | chain-planning | capability-primitive-search / autonomy-proposal |
+| waf_blocked 后变异攻坚（mutation_campaign 闭环协议：族设计/观察/再变异） | mutation-campaign | payload-mutation-algebra / waf-fingerprint |
+| 空隙期异常探索（explorer_mission 任务书：候选入账本禁自判） | explorer-mission | hypothesis-0day |
+| S6 横向决策图逐边编排（lateral_edge 提议协议） | lateral-graph | intranet-lateral / windows-lateral |
+| needs_follow_up 结构化续接（retest_card 四要素与价值分入队） | retest-card | evidence-standard |
 
 ## 二、按症状
 

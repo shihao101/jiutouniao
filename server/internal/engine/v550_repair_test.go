@@ -218,6 +218,9 @@ func TestV550CompactArchiveAndReceiptRetrieval(t *testing.T) {
 
 func TestV550LoopbackOverLimit(t *testing.T) {
 	o, st := v550Orchestrator(t)
+	// v7.1.0：本用例锁定旧固定上限语义——显式关闭自主框架（动态额度见 v710_autonomy_test）
+	f := false
+	o.cfg.Autonomy.Enabled = &f
 	states := map[string]*store.StageState{}
 	for _, sid := range []string{"s1", "s2", "s4", "s5", "s7"} {
 		states[sid] = &store.StageState{Status: "done"}

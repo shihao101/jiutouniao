@@ -203,26 +203,27 @@ func TestV48AdversarialPassVT(t *testing.T) {
 	_, _ = o.exec.WriteFile(p.ID, "deliverables/s3-筛查矩阵判定表.md", matrixTableFixture(nil, nil))
 	_, _ = o.exec.WriteFile(p.ID, "deliverables/s3-威胁清单.md", "# 威胁清单\nTH-01 管理后台弱口令可达（C-01）")
 
-	note, deliv := o.adversarialAssumptionPass(context.Background(), p, "s3")
-	if !strings.Contains(note, "对抗假设 pass") || deliv != "deliverables/s3-对抗假设审查.md" {
-		t.Fatalf("R7 附注/交付物异常: note=%q deliv=%q", note, deliv)
+	note, deliv := o.redBlueAssumptionLoop(context.Background(), p, "s3")
+	if !strings.Contains(note, "红蓝对抗环") || (deliv != "deliverables/s3-对抗假设审查.md" && deliv != "deliverables/s3-对抗假设审查-R2.md") {
+		t.Fatalf("红蓝环附注/交付物异常: note=%q deliv=%q", note, deliv)
 	}
 	if !strings.Contains(note, "1 条已自动 record_vt") {
 		t.Fatalf("差异项应为 1 条: %s", note)
 	}
+	// v7.3.0 C1 语义：差异 VT 标题轮次前缀 [R1对抗]/[R2对抗]；证据核存即 ready，纯推测 pending
 	vts, _ := st.ListVTs(p.ID)
-	if len(vts) != 1 || vts[0].Status != "pending" || !strings.HasPrefix(vts[0].Title, "[R7对抗]") {
-		t.Fatalf("差异项应登记 pending VT: %+v", vts)
+	if len(vts) != 1 || !strings.HasPrefix(vts[0].Title, "[R1对抗]") || (vts[0].Status != "ready" && vts[0].Status != "pending") {
+		t.Fatalf("差异项 VT 语义不符: %+v", vts)
 	}
 	raw, _ := o.exec.ReadFile(p.ID, deliv)
-	if !strings.Contains(raw, "R7") || !strings.Contains(raw, "差异项") {
+	if !strings.Contains(raw, "红蓝对抗环") || !strings.Contains(raw, "差异项") {
 		t.Fatalf("对抗假设审查交付物缺内容: %s", raw)
 	}
 	// 时间线留痕
 	tl, _ := st.ListTimeline(p.ID)
 	found := false
 	for _, ev := range tl {
-		if ev.Event == "R7 对抗假设" {
+		if ev.Event == "红蓝对抗环" {
 			found = true
 		}
 	}
@@ -237,14 +238,14 @@ func TestV48AdversarialPassFailOpen(t *testing.T) {
 	o.llm = &fakeErrLLM{}
 	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V48S"}
 	_ = st.SaveProject(p)
-	note, deliv := o.adversarialAssumptionPass(context.Background(), p, "s3")
+	note, deliv := o.redBlueAssumptionLoop(context.Background(), p, "s3")
 	if note != "" || deliv != "" {
 		t.Fatalf("LLM 失败应非阻塞返回空: %q %q", note, deliv)
 	}
 	tl, _ := st.ListTimeline(p.ID)
 	found := false
 	for _, ev := range tl {
-		if ev.Event == "R7 对抗假设" && strings.Contains(ev.Detail, "失败") {
+		if ev.Event == "红蓝对抗环" && strings.Contains(ev.Detail, "失败") {
 			found = true
 		}
 	}

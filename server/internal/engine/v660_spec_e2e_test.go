@@ -24,16 +24,32 @@ func v660SpecProject(t *testing.T, o *Orchestrator, id, target, spec string) *st
 	return p
 }
 
-// TestV660E2ESpecV3GateDispatch 真实链路第 1 层：specB1 收口缺 V3 双清单 → V3 拦截
-// （与 s4/s5 同款文案，V3 门位于专项确定性门之前）。
+// TestV660E2ESpecV3GateDispatch 真实链路第 1 层：specB1 收口缺 V3 双清单 →
+// v7.1.0 E1' 引擎代填（原 v4.6 拦截文案在 48 项目实测中 93 次收口 0 次通过、只堵不导烧尽预算，
+// runtime-audit R1）——收口越过 V3 门继续，被下一道专项确定性门拦截，且代填行为入时间线可审计。
 func TestV660E2ESpecV3GateDispatch(t *testing.T) {
 	o, _ := v48Orchestrator(t)
 	p := v660SpecProject(t, o, "P-V660-E1", "app-a.test", "specB1")
 	_, _ = o.store.AddAsset(&store.Asset{ProjectID: p.ID, Stage: "s1", Type: "APP",
 		Value: "com.example.app", ScopeStatus: "in_scope", ScopeEvidence: "授权清单"})
 	resp := o.dispatch(context.Background(), p, "specB1", llm.ToolCall{Name: "complete_stage", Arguments: `{"summary":"B1 静态链完成"}`})
-	if !strings.Contains(resp, "收口被拦截（v4.6 V3）") {
-		t.Fatalf("specB1 收口缺 V3 双清单应被真实链路拦截: %s", resp)
+	if strings.Contains(resp, "收口被拦截（v4.6 V3）") {
+		t.Fatalf("v7.1.0 E1' 后缺 V3 清单不应再拦截（引擎代填）: %s", resp)
+	}
+	for _, want := range []string{"前置契约未登记", "缺少核心交付物", "专项条目清单"} {
+		if !strings.Contains(resp, want) {
+			t.Fatalf("specB1 应回落专项确定性门拦截（文案含 %s）: %s", want, resp)
+		}
+	}
+	tl, _ := o.store.ListTimeline(p.ID)
+	filled := false
+	for _, ev := range tl {
+		if strings.Contains(ev.Event, "E1' V3 引擎代填") {
+			filled = true
+		}
+	}
+	if !filled {
+		t.Fatalf("E1' 引擎代填应落时间线留痕")
 	}
 }
 

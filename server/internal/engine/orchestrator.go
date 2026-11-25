@@ -83,6 +83,18 @@ type Orchestrator struct {
 	// v4.8 W5 行为预算器：批量动作配额/空壳即停/冷却协议（引擎级，进程内状态）
 	batchMu    sync.Mutex
 	batchStats map[string]*batchBudgetState
+
+	// v7.1.0 PAE 自主决策框架进程内状态（提议配额/深化硬顶/升维计数——账本事实在 bbolt autonomy 桶）
+	autoMu        sync.Mutex
+	autoStageN    map[string]int // project|stage -> 本阶段已提交提议数
+	autoUnitDepth map[string]int // project|focus -> 单元深化提议计数（depth_extend）
+	autoDenyN     map[string]int // project|stage|kind -> 同族被拒次数（≥3 触发升维提示）
+	autoExplorer  map[string]int // project -> 在途 explorer_mission 数
+	autoTransfers map[string]int // project -> budget_transfer 提议数
+	autoReplan    map[string]int // project|stage -> replan_delta 提议数
+
+	healthMu    sync.Mutex                // v7.1.0 P7 工具通道健康归因（进程内计数，stage_metrics/冲刺注入消费）
+	healthStats map[string]map[string]int // project|stage -> 类别(timeout/refused/dns/waf403/tool_error) -> 次数
 }
 
 // batchBudgetState 单项目批量动作预算状态（窗口时间戳 + 冷却 + 空壳连击）。
@@ -1829,7 +1841,8 @@ func (o *Orchestrator) ensureReportContract(p *store.Project, stageID string) (b
 
 // applyPostExploitGate v5.3.7：s6 后渗透勾选门。创建时未勾选 post_exploit（默认）→ s6 整段
 // 置 skipped（Summary 记录决策原因，工作台手动重跑 s6 不受此门限制）。返回 true=已跳过。
-func (o *Orchestrator) applyPostExploitGate(p *store.Project, stageID string, state *store.StageState) bool {	if stageID != "s6" || p.PostExploit {
+func (o *Orchestrator) applyPostExploitGate(p *store.Project, stageID string, state *store.StageState) bool {
+	if stageID != "s6" || p.PostExploit {
 		return false
 	}
 	state.Status = "skipped"
@@ -1978,6 +1991,13 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 					}
 				}
 			}
+			// v7.1.0 P7/A2：冲刺指令随附通道健康归因与执行卡漏斗（引擎直出，模型零翻找）
+			if hs := o.toolHealthSummary(p.ID, stageID); hs != "" {
+				sprintMsg += "\n\n🩺 " + hs
+			}
+			if cf := o.cardFunnelLine(p); cf != "" {
+				sprintMsg += "\n🃏 " + cf
+			}
 			msgs = append(msgs, llm.Message{Role: "user", Content: sprintMsg})
 			o.log(p, stageID, "⏳ 迭代预算预警（剩约 1/3），已注入收口开始提醒（目标感知版）")
 		} else if remain == 2 {
@@ -2068,6 +2088,40 @@ func (o *Orchestrator) runStage(ctx context.Context, p *store.Project, stageID s
 		}
 		if finished {
 			o.log(p, stageID, fmt.Sprintf("■ 阶段[%s]完成，共 %d 轮", stageID, iter+1))
+			// v7.2.0 B1 真头作战参谋：收口自动评审一次，三类有限裁决建议经 PAE 裁决器落账本
+			o.campaignBrainReview(ctx, p, stageID)
+			// v7.3.0 C3 PoC 预生成工厂：s4 收口把自带 POC 的确证发现导出为就绪 PoC 文件
+			if stageID == "s4" {
+				o.pocFactory(p, stageID)
+			}
+			// v7.1.0 P9 stage_metrics：阶段收口结构化指标（轮次/token/自主提案/引擎代填次数）——
+			// runtime-audit R1 的可观测数据面（效率与自主产出转化的基线），时间线留痕供 S8/审计消费。
+			stageTokens := int64(0)
+			if u, err := o.store.GetUsage(p.ID); err == nil {
+				stageTokens = u.ByStage[stageID]
+			}
+			proposals, e1Fills := 0, 0
+			if recs, err := o.store.ListAutonomy(p.ID); err == nil {
+				for _, r := range recs {
+					if r.Stage == stageID {
+						proposals++
+					}
+				}
+			}
+			if tl, err := o.store.ListTimeline(p.ID); err == nil {
+				for _, ev := range tl {
+					if ev.Stage == stageID && strings.Contains(ev.Event, "E1' V3 引擎代填") {
+						e1Fills++
+					}
+				}
+			}
+			metrics := fmt.Sprintf("rounds=%d stage_tokens=%d proposals=%d e1_autofill=%d", iter+1, stageTokens, proposals, e1Fills)
+			if hs := o.toolHealthSummary(p.ID, stageID); hs != "" {
+				metrics += " " + hs
+			}
+			_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+				Event:  "v7.1.0 stage_metrics",
+				Detail: metrics})
 			return nil
 		}
 	}
@@ -2554,7 +2608,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			Title: title0, Severity: s("severity"), Detail: detail0, Confidence: conf0,
 			CWE:    s("cwe"), // v2.7 A4：标准编号（CWE-89/CWE-79…），以检索/知识为准，不确定留空
 			Access: access, ImpactRank: rank, Route: route,
-			TargetRef:      targetRef, // v6.9.0 S8-⑤ 逐目标归属
+			TargetRef:      targetRef,                           // v6.9.0 S8-⑤ 逐目标归属
 			Exploitability: s("exploitability"), Claims: claims, // v4.6 E1/E4
 		}
 		if f.Exploitability != "" && f.Exploitability != "verified" && f.Exploitability != "conditional" && f.Exploitability != "untested" {
@@ -2696,6 +2750,8 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if verr != nil {
 			return "错误: " + verr.Error()
 		}
+		// v7.1.0 A2 执行卡状态机：VT 登记即建卡（queued 态，已有卡不降级）
+		o.trackCardFromVT(p, stageID, vt.Title, vt.StartConditions)
 		o.log(p, stageID, fmt.Sprintf("🧾 VT 登记[%s] %s", vt.Status, vt.Title))
 		return "已登记验证任务 " + id + "（status=" + vt.Status + "；S7 收口前须三选一处置：executed/closed-roe/deferred）"
 	case "update_vt": // v4.6 A2：VT 流转（ready / executed / closed-roe / deferred），closed-roe 与 deferred 强制理由
@@ -2827,6 +2883,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if err != nil {
 			return "错误: " + err.Error()
 		}
+		// v7.2.0 B3 planDelta：测试中新登记的 in_scope 资产（非 S1 初始界定）自动建卡入 S4 计划
+		if a.EffectiveScope() == "in_scope" {
+			o.planDeltaOnScope(p, stageID, a.Value, "record_asset 直接登记 in_scope（"+truncateText(a.ScopeEvidence, 60)+"）")
+		}
 		o.bus.Publish(p.ID, "finding", a)
 		return "已登记资产 " + id + "（scope_status=" + a.EffectiveScope() + "）"
 	case "update_asset":
@@ -2857,6 +2917,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		_ = o.store.UpdateAsset(a)
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
 			Event: fmt.Sprintf("资产范围状态变更 %s：A-%s %s→%s", aid, aid, old, newStatus), Detail: reason})
+		// v7.2.0 B3 planDelta：流转为 in_scope（非 S1、非原 in_scope）→ 自动建卡入 S4 计划
+		if newStatus == "in_scope" && old != "in_scope" {
+			o.planDeltaOnScope(p, stageID, a.Value, "update_asset 流转（"+truncateText(s("scope_evidence"), 60)+"）")
+		}
 		return "资产 " + aid + " 范围状态已更新：" + old + " → " + newStatus
 	case "record_timeline":
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID, Event: s("event"), Detail: s("detail")})
@@ -3005,6 +3069,8 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			return fmt.Sprintf("覆盖矩阵已更新（该单元累计测试 %d 次）: %s | %s | %s → %s%s\n（本阶段 %d 项子任务优先级已按覆盖账本重排，update_subtask 列表可查新序）",
 				entry.Count, entry.Endpoint, entry.VulnClass, entry.Param, entry.Status, downgraded, len(ranked))
 		}
+		// v7.1.0 A2 执行卡状态机：C-xx 引用即卡片推进（引擎维护投影，模型零簿记）
+		o.trackCardFromCoverage(p, stageID, entry.Endpoint, entry.Param, entry.Notes, entry.Status)
 		return fmt.Sprintf("覆盖矩阵已更新（该单元累计测试 %d 次）: %s | %s | %s → %s%s", entry.Count, entry.Endpoint, entry.VulnClass, entry.Param, entry.Status, downgraded)
 	case "search_memory": // 记忆检索（pentagi/VulnBot 简化版：关键词扫描）
 		rawQ := strings.TrimSpace(s("query"))
@@ -3228,7 +3294,23 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 				missing = append(missing, field)
 			}
 			if len(missing) > 0 {
-				return fmt.Sprintf("收口被拦截（v4.6 V3）：缺少必填清单 %s。正确提交方式（二选一）：①在 complete_stage 调用参数中新增顶层字段 %s（JSON 数组，与 summary 同级，无内容传空数组 []）；②在 summary 文本中按字面格式写一行 %s=[] 或 %s=[\"条目\"]。ready_but_unexecuted 逐条列入有就绪脚本/PoC 而未投递的待验证项（附就绪资产路径与启动条件），l2_approved_unused 列入已批准未使用的 L2 工单——两者均无内容也必须显式传空数组 []。不要把清单写进交付物文件或时间线登记，引擎只读调用参数与 summary。", strings.Join(missing, "、"), missing[0], missing[0], missing[0])
+				// v7.1.0 E1'（runtime-audit R1：实证 93 次 s4 收口 0 次顶层传参、92 次拦截文案
+				// 零变化烧尽预算）——由「拦截重试拉锯」改为「引擎代填 + 留痕」：
+				// ready_but_unexecuted 按台账代填（harvestV3Lists 既有口径：本阶段 pending/ready
+				// VT 扣除已被后台作业执行项）；l2_approved_unused 无法机械判定「已批未用」，
+				// 代填空数组并显式记账（S8 质量注记承接）。模型跳过 V3 显式提交的行为入时间线可审计。
+				readyAuto, _ := o.harvestV3Lists(p, stageID, harvestedJobs)
+				for _, field := range missing {
+					if field == "ready_but_unexecuted" {
+						v3Lists[field] = readyAuto
+					} else {
+						v3Lists[field] = []string{}
+					}
+					_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+						Event:  "v7.1.0 E1' V3 引擎代填",
+						Detail: fmt.Sprintf("%s 既未传参也未按字面格式写入 summary → 引擎按台账代填 %d 条；模型应改为显式提交（顶层参数或 summary 字面格式）", field, len(v3Lists[field]))})
+					o.log(p, stageID, fmt.Sprintf("⚙ v7.1.0 E1'：%s 引擎代填 %d 条（模型跳过 V3 显式提交已记账）", field, len(v3Lists[field])))
+				}
 			}
 			for _, field := range []string{"ready_but_unexecuted", "l2_approved_unused"} {
 				if items := v3Lists[field]; len(items) > 0 {
@@ -3425,7 +3507,8 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		// 增强项非阻塞：LLM 失败只留痕不拦收口（§七.2 成本/噪声约束——VT 需主头确认才转 ready）。
 		var r7Note, r7File string
 		if stageID == "s3" {
-			r7Note, r7File = o.adversarialAssumptionPass(ctx, p, stageID)
+			// v7.3.0 C1 红蓝对抗环：R1 独立复查 + R2 专攻剩余角度（2 轮迭代替代旧一次性 R7）
+			r7Note, r7File = o.redBlueAssumptionLoop(ctx, p, stageID)
 			if r7File != "" {
 				seen[r7File] = true
 				state.Deliverables = append(state.Deliverables, r7File)
@@ -3447,6 +3530,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			return "阶段已收口\n\n" + r7Note
 		}
 		return "阶段已收口"
+	case "propose": // v7.1.0 PAE：自主决策提议 → 引擎裁决（规则集见 autonomy.go，账本全程留痕）
+		return o.toolPropose(p, stageID, args)
+	case "update_proposal": // v7.1.0 PAE：提议结果回写账本（自主产出转化统计来源）
+		return o.toolUpdateProposal(p, args)
 	case "loopback":
 		to := s("to_stage")
 		st, ok := p.StageStates[to]
@@ -3480,13 +3567,22 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			o.loopTotal[p.ID] = p.LoopUsed
 		}
 		total := o.loopTotal[p.ID] + len(q)
-		queued := total < o.cfg.Engine.LoopbackMaxRuns
+		// v7.1.0：自主框架启用时上限放宽至动态额度 loopback_cap_max（默认 8）——聚焦回环成本
+		// 已降一个量级，固定 3 是多目标 needs_follow_up 沉淀的成因之一（实拍项目 34 项）。
+		loopCap := o.loopbackCap()
+		queued := total < loopCap
 		if queued {
 			o.loops[p.ID] = append(q, to)
 			// v6.4.0（S4-⑩）：重入原因随回环登记写入目标阶段——重跑阶段开工由上下文包
 			//「回环重入原因」块直击线索（原实现 reason 只落时间线，S4 重入须自行翻找）。
+			// v7.1.0 B2：focus 参数（目标/类/端点聚焦范围）随重入原因下发——聚焦回环成本
+			// 降一个量级的载体，重入阶段不再全量重扫。
+			reentry := s("reason")
+			if f := s("focus"); f != "" {
+				reentry += "｜聚焦范围: " + f
+			}
 			if st2 := p.StageStates[to]; st2 != nil {
-				st2.ReentryReason = s("reason")
+				st2.ReentryReason = reentry
 			}
 		}
 		o.loopMu.Unlock()
@@ -3494,9 +3590,9 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			// 超额：不改状态（保持 done/pending 原状），持久留痕 + 显式告知未排队。
 			_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
 				Event:  "回环超额拒绝（v5.5.0 方案 D）",
-				Detail: fmt.Sprintf("to=%s reason=%s——已达单项目自动补跑上限 %d 次，未入补跑队列；请人工在「阶段流水线」重跑 %s 或评估新线索价值后手动触发", to, s("reason"), o.cfg.Engine.LoopbackMaxRuns, to)})
-			o.log(p, stageID, fmt.Sprintf("⚠ 回环请求超额未排队（上限 %d）：%s → %s（已留痕待人工处置）", o.cfg.Engine.LoopbackMaxRuns, stageID, to))
-			return fmt.Sprintf("回环未执行：本项目自动回环补跑已达上限（%d 次）。本请求已持久留痕（时间线「回环超额拒绝」），状态未改动。请人工决策：①在「阶段流水线」手动重跑 %s；②调用 record_vt 登记为移交/待验证项。不要再次调用 loopback。", o.cfg.Engine.LoopbackMaxRuns, to)
+				Detail: fmt.Sprintf("to=%s reason=%s——已达单项目自动补跑上限 %d 次，未入补跑队列；请人工在「阶段流水线」重跑 %s 或评估新线索价值后手动触发", to, s("reason"), loopCap, to)})
+			o.log(p, stageID, fmt.Sprintf("⚠ 回环请求超额未排队（上限 %d）：%s → %s（已留痕待人工处置）", loopCap, stageID, to))
+			return fmt.Sprintf("回环未执行：本项目自动回环补跑已达上限（%d 次）。本请求已持久留痕（时间线「回环超额拒绝」），状态未改动。可先用 propose(kind=loopback_focus) 登记价值提议再评估，或人工决策：①在「阶段流水线」手动重跑 %s；②调用 record_vt 登记为移交/待验证项。不要再次调用 loopback。", loopCap, to)
 		}
 		st.Status = "pending" // 回环：目标阶段重开
 		_ = o.store.SaveProject(p)
@@ -3609,6 +3705,11 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if strings.TrimSpace(objective) == "" {
 			return "错误: objective 必填（一句话说清测试单元：目标×漏洞类×判据）"
 		}
+		// v7.3.0 C2 探索代理模板（role=explorer）：与执行卡队列并行的异常猎手——
+		// 目标函数=单位轮次异常产出最大化，产出仅走 record_candidate/update_coverage。
+		if s("role") == "explorer" {
+			objective = "【探索任务 role=explorer】目标函数：最大化单位轮次的异常产出（响应长度/时延/状态码跳变、报错片段、同类参数处理不一致）。不限于执行卡队列；每轮结束把异常走 record_candidate 登记（禁止自判 finding）；范围门与 W5 行为预算器照常；禁 L2。【原目标】" + objective
+		}
 		rounds := 0
 		if n, err := strconv.Atoi(strings.TrimSpace(s("rounds"))); err == nil {
 			rounds = n
@@ -3641,11 +3742,22 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 		if bad := lessonSanitizeCheck(text); bad != "" {
 			return "拒绝登记（合规校验未通过）：教训必须脱敏，检测到 " + bad + "。请改写为不含目标标识的通用经验，如「对 WAF 前置目标，先指纹分型再选编码变体」。"
 		}
+		// v7.4.0 D1 质量门：结构化锚点强校验——stack 与 behavior_class 双空的方法论纯文本拒收
+		//（lessons-audit 实证：406/406 条结构化字段全空、96.3% 方法论型，stack 指纹检索结构性失灵）。
+		// 纯方法论沉淀请进技能库/loop-core，教训库只收可检索的结构化经验。
+		bc, st := truncateText(s("behavior_class"), 40), truncateText(s("stack"), 60)
+		if strings.TrimSpace(bc) == "" && strings.TrimSpace(st) == "" {
+			return "拒绝登记（v7.4.0 D1 质量门）：缺少结构化锚点——stack（技术栈，如 spring/php）与 behavior_class（行为类，如 rate-limited/js-challenge-waf）至少填一项。纯方法论经验请沉淀进对应技能剧本（load_skill 可检索），教训库只收按 stack+行为类可召回的实战经验。"
+		}
+		// v7.4.0 D1 判重：归一化文本等值拒收（防同义教训反复入库稀释检索）
+		if dup := o.duplicateLesson(text); dup != "" {
+			return "拒绝登记（v7.4.0 D1 判重）：与既有教训 " + dup + " 归一化等值——同源经验请在原教训语境下复核后增量使用，勿重复入库。"
+		}
 		id, lerr := o.store.AddLesson(&store.LessonRecord{Text: truncateText(text, 500), Tags: truncateText(tags, 100),
-			BehaviorClass: truncateText(s("behavior_class"), 40), // v4.6 E5/K2：行为类（rate-limited/js-challenge-waf/…）
-			Stack:         truncateText(s("stack"), 60),          // v4.6 E5：技术栈
-			SampleSize:    truncateText(s("sample_size"), 40),    // v4.6 E5：证据强度（单次实验→provisional）
-			ValidScope:    truncateText(s("valid_scope"), 80),    // v4.6 E5：适用范围
+			BehaviorClass: bc,
+			Stack:         st,
+			SampleSize:    truncateText(s("sample_size"), 40), // v4.6 E5：证据强度（单次实验→provisional）
+			ValidScope:    truncateText(s("valid_scope"), 80), // v4.6 E5：适用范围
 		})
 		if lerr != nil {
 			return "错误: " + lerr.Error()
@@ -3857,6 +3969,8 @@ func (o *Orchestrator) toolRunCommand(ctx context.Context, p *store.Project, sta
 	if err != nil {
 		resp += "\n执行错误: " + err.Error()
 	}
+	// v7.1.0 P7 工具通道健康归因：错误特征分类计数（timeout/refused/dns/waf403/tool_error）
+	o.trackToolHealth(p, stageID, errText(err, exit, out), exit)
 	if advice := errorAdvice(errText(err, exit, out)); advice != "" {
 		resp += "\n🩹 自愈建议: " + advice // v3.4.0 错误分类→处置建议（hexstrike 错误自愈思想）
 	}
@@ -4156,6 +4270,8 @@ func (o *Orchestrator) toolPollAsync(p *store.Project, stageID, jobID string) st
 			b.WriteString("\n（仍在运行：继续其他子任务，稍后再 poll_async；不要同步等待）")
 		}
 	case "killed":
+		// v7.1.0 P7 核对补线（第四轮审计 J）：后台任务被杀/超时同样计入通道健康归因
+		o.trackToolHealth(p, stageID, "timed out (async job killed)", 1)
 		b.WriteString("\n⚠ [P2 对账] 因超时被终止——产出不完整：必须 record_vt 登记（title 含本 job id，启动条件写复测前提），覆盖单元不得写 ruled_out/no_issue_found；收口时 C31 门会机械核对 job id 留痕。")
 	case "finished":
 		if logBytes < 32 {
@@ -5512,6 +5628,13 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 			}
 			b.WriteString("\n")
 		}
+		// v7.1.0（S8 复盘章）：自主决策复盘素材——引擎统计（账本同源禁手写），报告固定章节
+		//《自主决策复盘》从此誊写；本块只在 s8 注入（呈现性，不新增拦截）。
+		if stageID == "s8" {
+			if retro := o.autonomyRetrospective(p.ID); strings.TrimSpace(retro) != "" {
+				b.WriteString("\n### 自主决策复盘（v7.1.0：引擎统计——报告《自主决策复盘》章从此誊写，禁止手写）\n" + retro + "\n")
+			}
+		}
 		// v6.9.0（S8-⑤）：发现逐目标归属登记率（一行呈现）——报告按目标组织章节与反向对账
 		// 分组（S8-③）的结构化事实源覆盖度；未登记条目收口前用 update_finding target_ref 补登，
 		// 反向对账对未登记条目回退标题词边界匹配（与 v6.8.0 行为一致）。
@@ -5540,12 +5663,57 @@ func (o *Orchestrator) buildContextPack(p *store.Project, stageID string) string
 		}
 	}
 	// 覆盖度摘要（移植自 strix/PentesterFlow：回答“测过什么、还没测什么”）
+	// v7.3.0 C3/C4：PoC 就绪行与横向决策图注入——依赖 findings/交付物而非覆盖矩阵，
+	// 置于覆盖守卫之外（无覆盖单元的项目同样可见）
+	if stageID == "s5" {
+		if line := o.pocReadyLine(p); line != "" {
+			b.WriteString(line + "\n")
+		}
+	}
+	if stageID == "s6" {
+		// v7.3.0 核对修复（审计 L）：按需生成——旧序文件只在结项存在，注入恒为空
+		o.ensureAttackGraph(p, false)
+		if g, gerr := o.exec.ReadFile(p.ID, "deliverables/attack-graph.md"); gerr == nil && strings.TrimSpace(g) != "" {
+			b.WriteString("\n### 横向决策图（v7.3.0 C4：attack-path-stitcher 产物，图上做路径规划）\n")
+			b.WriteString(headTail(g, 1600, 400) + "\n")
+			b.WriteString("（消费纪律：每条候选边经 propose(kind=lateral_edge) 提议-裁决后执行；凭据/信任复用边优先查战利品库与黑板 fact 支撑；拓扑向量未覆盖面三态处置。）\n")
+		}
+		if line := o.pocReadyLine(p); line != "" {
+			b.WriteString(line + "\n")
+		}
+	}
+
+	// v7.3.0 核对修复（审计 P-1）：planDelta 注入移出覆盖守卫——依赖 cards/StageState 而非覆盖矩阵
+	// v7.2.0 B3 planDelta：新面承接卡注入（S4 逐类对账表须扩展行）
+	if stageID == "s4" {
+		if cards, err := o.store.ListCards(p.ID); err == nil {
+			var pd []string
+			for _, c := range cards {
+				if c.Outcome == "plan_delta" && c.State == "queued" {
+					pd = append(pd, c.Target+"（依据："+c.Evidence+"）")
+				}
+			}
+			if len(pd) > 0 {
+				b.WriteString(fmt.Sprintf("\n**planDelta 新面承接（v7.2.0 B3，计划版本 v%d）**：以下资产在测试中转 in_scope，已自动建卡——逐类对账表扩展该行并按最小探针层纳入轮转：\n", p.StageStates["s4"].PlanVersion))
+				for _, t := range pd {
+					b.WriteString("- " + t + "\n")
+				}
+			}
+		}
+	}
+
 	if cov, _ := o.store.ListCoverage(p.ID); len(cov) > 0 {
 		statCount := map[string]int{}
 		for _, c := range cov {
 			statCount[c.Status]++
 		}
 		b.WriteString(fmt.Sprintf("\n### 覆盖度矩阵（共 %d 单元）\n", len(cov)))
+		// v7.2.0 B4 预算账本：s4/s5 注入目标×类×深度占用一行式（防单点黑洞可视，P4-lite）
+		if stageID == "s4" || stageID == "s5" {
+			if line := budgetLedgerLine(cov); line != "" {
+				b.WriteString(line + "\n")
+			}
+		}
 		for _, st := range []string{"vulnerable", "no_issue_found", "ruled_out", "waf_blocked", "needs_follow_up", "skipped"} {
 			if statCount[st] > 0 {
 				b.WriteString(fmt.Sprintf("- %s: %d\n", st, statCount[st]))
@@ -5730,8 +5898,8 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"l2_approved_unused":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "s4/s5/三专项必填：已批准但未使用的 L2 审批工单；无内容传空数组 []"},
 			"confirm_quality_review": map[string]any{"type": "boolean", "description": "v5.3.8（仅 s8 需要时）：收口提示存在 quality-pending 复核标记时，复核相关阶段交付物后传 true——引擎清除标记并继续收口"},
 		}, "summary", "deliverables")},
-		{Name: "loopback", Description: "发现新攻击面需要前置阶段补充分析时触发回环（如回退到 s4 漏洞发现）。", Parameters: obj(map[string]any{
-			"to_stage": str("目标阶段 id，如 s4"), "reason": str("回环原因"),
+		{Name: "loopback", Description: "发现新攻击面需要前置阶段补充分析时触发回环（如回退到 s4 漏洞发现）。v7.1.0 B2：focus 填聚焦范围（目标/类/端点，如 \"C-13@login\"）——聚焦回环只补该范围，重入阶段不全量重扫，动态额度（默认 8）内高价值回环即用，勿囤积。", Parameters: obj(map[string]any{
+			"to_stage": str("目标阶段 id，如 s4"), "reason": str("回环原因"), "focus": str("聚焦范围（可选）：目标/类/端点——重入阶段按此收窄，不全量重扫"),
 		}, "to_stage", "reason")},
 		{Name: "plan_subtasks", Description: "把本阶段工作拆解为可跟踪的子任务计划（全量重建）。开工后第一步建议先建立 3-8 项子任务，随执行用 update_subtask 同步状态。", Parameters: obj(map[string]any{
 			"items": map[string]any{"type": "array", "description": "子任务数组，每项 {\"title\":\"…\",\"detail\":\"…\"}", "items": map[string]any{"type": "object"}},
@@ -5797,7 +5965,7 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 		{Name: "shell_close", Description: "关闭交互会话（进程组终止）。收口前必须关闭全部会话（引擎在流水线结束/熔断时也会强制清理）。", Parameters: obj(map[string]any{
 			"session": str("session id"),
 		}, "session")},
-		{Name: "record_lesson", Description: "登记组织级教训（跨项目复用，自动脱敏校验）：本次任务中什么打法有效/无效、什么坑要避开。必须去标识化——禁止目标域名/IP/单位名/真实凭据，写通用经验。收口前或关键失败复盘时调用。v6.0.6：stack/behavior_class 决定教训能否被未来项目的指纹检索命中——纯方法论教训可留空 stack，但涉及具体技术栈/厂商产品时务必填写（实证：HyLib export 类端点教训因缺 stack 未被同族任务召回）。", Parameters: obj(map[string]any{
+		{Name: "record_lesson", Description: "登记组织级教训（跨项目复用，自动脱敏校验）：本次任务中什么打法有效/无效、什么坑要避开。必须去标识化——禁止目标域名/IP/单位名/真实凭据，写通用经验。收口前或关键失败复盘时调用。v7.4.0 D1 质量门：stack（技术栈）与 behavior_class（行为类）至少填一项——双空的方法论纯文本拒收（实证：406/406 条结构化字段全空致指纹检索结构性失灵；纯方法论请沉淀进对应技能剧本）。同义教训会被归一化判重拒绝，增量经验请复核后换个角度表述。", Parameters: obj(map[string]any{
 			"text": str("一句话教训（脱敏）——背景+做法+判据尽量完整，超长会被截断"), "tags": str("类别标签，逗号分隔：方法论/工具/风控/报告/前端情报…（tags 决定未来项目能否命中本教训）"),
 			"stack":          str("可选·相关技术栈/组件/厂商产品名，逗号分隔（如 nextjs,spring,hylib）；纯方法论跨栈教训可留空"),
 			"behavior_class": str("可选·行为类，如 rate-limited/js-challenge-waf/closed-site/appliance-mgmt"),
@@ -5805,9 +5973,10 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"valid_scope":    str("可选·适用边界与反例（不含目标标识）"),
 		}, "text")},
 		// ---- v3.6.0 阶段内并行扇出 ----
-		{Name: "spawn_subagent", Description: "把相互独立的测试单元派发给并行子代理（如：3 个 endpoint×漏洞类单元同时测）。子代理有独立轮次预算与受限工具面，共享黑板/覆盖矩阵/审批矩阵；主头继续其他工作，用 poll_subagents 收结果。收口前必须确认全部子代理已结束。", Parameters: obj(map[string]any{
+		{Name: "spawn_subagent", Description: "把相互独立的测试单元派发给并行子代理（如：3 个 endpoint×漏洞类单元同时测）。子代理有独立轮次预算与受限工具面，共享黑板/覆盖矩阵/审批矩阵；主头继续其他工作，用 poll_subagents 收结果。收口前必须确认全部子代理已结束。v7.3.0 C2：role=explorer 为探索代理模板——目标函数是异常产出最大化（候选经 record_candidate 入账本，禁自判 finding），适合后台扫描等待期/收口前空隙的并行探索。", Parameters: obj(map[string]any{
 			"objective": str("测试单元目标（一句话：目标×漏洞类×成功判据）"),
 			"rounds":    str(fmt.Sprintf("轮次预算，可空（默认 engine.max_subagent_rounds=%d，上限 %d）", o.cfg.Engine.MaxSubagentRounds, subagentRoundsCap)),
+			"role":      str("可空；explorer=探索代理模板（异常猎手，产出仅 record_candidate）"),
 		}, "objective")},
 		{Name: "poll_subagents", Description: "收取子代理结果：运行中的报进度，已结束的报简报（结果已实时入黑板/覆盖矩阵/发现库）。", Parameters: obj(map[string]any{})},
 		// ---- v5.5.0 结构化凭据仓库与带态注入（修复方案 A：有凭证深度测试的地基）----
@@ -5849,6 +6018,20 @@ func (o *Orchestrator) toolDefs() []llm.ToolDef {
 			"credential_ref": str("凭据引用：cred-<id> 或 identity:<身份名>"),
 			"reason":         str("执行原因（展示给审批人）"),
 		}, "template", "credential_ref", "reason")},
+		// ---- v7.1.0 PAE 自主决策框架（提议-裁决-升维，零人工裁决点，账本全程留痕）----
+		{Name: "propose", Description: "v7.1.0 自主决策提议：跨单元资源动作（聚焦回环/预算转移/可达性重排/深化扩展/WAF 变异攻坚/链路计划/探索任务/横向边/复测卡）经本工具提交结构化提议，引擎按确定性规则集即时裁决（无人工等待）。提议三要素：rationale 一句话可证伪理由 + evidence_refs 证据引用（evidence/ 路径或 fact:/F-/VT-/CD- 编号，必须真实可达——空想提议被拒收）+ focus 聚焦范围。裁决 denied 时按原因码收敛后可重提；同族三次被拒触发升维提示（以更高抽象层重新提议或保守降级 record_vt）。批准后执行，结果用 update_proposal 回写账本。", Parameters: obj(map[string]any{
+			"kind":          str("提议类型：loopback_focus（聚焦回环额度）/budget_transfer（阶段间预算转移）/replan_delta（新 live 资产重排）/depth_extend（单单元深化扩展）/mutation_campaign（WAF 变异攻坚，前提=已登记 waf_blocked）/chain_plan（链路级计划，steps 每步一条命令）/explorer_mission（探索代理任务）/lateral_edge（横向决策边）/retest_card（复测卡入队）"),
+			"rationale":     str("一句话可证伪理由（假设+预期信号）"),
+			"evidence_refs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "证据引用（≥1 必填）：evidence/… 路径 / fact:键名 / F-/VT-/CD- 编号"},
+			"focus":         str("聚焦范围（目标/类/端点，如 C-13 或 api/user）"),
+			"cost":          str("成本预估（轮次/请求/token，可空）"),
+			"steps":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "chain_plan 专用：链上每步命令（≤6 步，逐条过执行档预检）"},
+			"plan":          str("chain_plan/lateral_edge 专用：计划文本（steps 缺省时用）"),
+		}, "kind", "rationale", "evidence_refs")},
+		{Name: "update_proposal", Description: "v7.1.0 提议结果回写：按批准提议执行后，把产出归宿回写自主决策账本（如「产出 F-3」「coverage vulnerable C-13@target」「转 VT-7」）——这是自主产出转化率的分子来源，S8《自主决策复盘》章按此统计，禁止漏写。", Parameters: obj(map[string]any{
+			"id":      str("propose 返回的 PR- 编号"),
+			"outcome": str("产出归宿（F-/VT-/coverage 单元/放弃原因）"),
+		}, "id", "outcome")},
 	}
 }
 
@@ -5885,13 +6068,17 @@ func (o *Orchestrator) projectTokens(projectID string) int64 {
 }
 
 // exportArtifacts 结项导出（strix/shannon 移植）：findings.json + findings.sarif 2.1.0。
-func (o *Orchestrator) exportArtifacts(p *store.Project) {
-	// v3.4.1 修复：攻击路径缝合器不再被「无漏洞早退」挡住——只有黑板事实/战利品
-	// 而暂无 findings 的项目（如情报链完备、利用队列待验证）同样需要攻击图。
-	if dot, md := o.buildAttackGraph(p); dot != "" {
-		_, _ = o.exec.WriteFile(p.ID, "deliverables/attack-graph.dot", dot)
-		_, _ = o.exec.WriteFile(p.ID, "deliverables/attack-graph.md", md)
-		// v3.7.0：graphviz 可用时同步渲染 SVG（报告页直接嵌入；不可用则静默跳过，UI 回退 md）
+// ensureAttackGraph v7.3.0 核对修复（审计 L）：攻击路径缝合器按需生成——旧实现只在
+// 结项导出时写 attack-graph.md，S6 横向决策图注入（C4）在阶段执行期永远读不到（死代码）。
+// S6 上下文构建按需调用；结项导出复用同一实现（withSVG 时渲染 SVG）。
+func (o *Orchestrator) ensureAttackGraph(p *store.Project, withSVG bool) {
+	dot, md := o.buildAttackGraph(p)
+	if dot == "" {
+		return
+	}
+	_, _ = o.exec.WriteFile(p.ID, "deliverables/attack-graph.dot", dot)
+	_, _ = o.exec.WriteFile(p.ID, "deliverables/attack-graph.md", md)
+	if withSVG {
 		if dotPath, err := exec.LookPath("dot"); err == nil {
 			ctxDot, cancelDot := context.WithTimeout(context.Background(), 20*time.Second)
 			cmdDot := exec.CommandContext(ctxDot, dotPath, "-Tsvg")
@@ -5902,8 +6089,28 @@ func (o *Orchestrator) exportArtifacts(p *store.Project) {
 				_, _ = o.exec.WriteFile(p.ID, "deliverables/attack-graph.svg", string(svg))
 			}
 		}
-		o.log(p, "", "🕸 已生成攻击路径图 deliverables/attack-graph.dot|.md")
 	}
+	o.log(p, "", "🕸 已生成攻击路径图 deliverables/attack-graph.dot|.md")
+}
+
+func (o *Orchestrator) exportArtifacts(p *store.Project) {
+	// v7.1.0：自主决策账本导出（autonomy.json——Web「自主决策」页与 S8 复盘章的数据同源，
+	// 供外部平台/审计消费；零提案时跳过避免空文件噪声）
+	if recs, err := o.store.ListAutonomy(p.ID); err == nil && len(recs) > 0 {
+		export := map[string]any{
+			"version": "7.1.0",
+			"model":   "PAE（提议-裁决-升维）：LLM 提议 → 引擎确定性裁决 → 升维/保守降级，全程无人工裁决点",
+			"stats":   o.store.AutonomyStats(p.ID),
+			"records": recs,
+		}
+		aj, _ := json.MarshalIndent(export, "", "  ")
+		_ = os.WriteFile(filepath.Join(o.cfg.DataDir, p.ID, "autonomy.json"), aj, 0o640)
+		o.log(p, "", fmt.Sprintf("📦 已导出 autonomy.json（%d 条自主决策记录）", len(recs)))
+	}
+	// v3.4.1 修复：攻击路径缝合器不再被「无漏洞早退」挡住——只有黑板事实/战利品
+	// 而暂无 findings 的项目（如情报链完备、利用队列待验证）同样需要攻击图。
+	// v7.3.0 核对修复（审计 L）：改走 ensureAttackGraph（与 S6 按需生成共用一份实现）
+	o.ensureAttackGraph(p, true)
 	findings, err := o.store.ListFindings(p.ID)
 	if err != nil || len(findings) == 0 {
 		return
@@ -6787,42 +6994,42 @@ func (o *Orchestrator) deterministicGate(p *store.Project, stageID string) []str
 		if o.cfg == nil || o.cfg.Engine.PerTargetRounds > 0 {
 			reconOn := stageID == "s4" ||
 				(stageID == "s5" && o.guardEnabled(func(g *config.GuardConfig) *bool { return g.EnforceS5TargetRecon }))
-		if reconOn {
-			if targets := splitProjectTargets(p); len(targets) > 1 {
-				if cov, _ := o.store.ListCoverage(p.ID); len(cov) > 0 {
-					var cb strings.Builder
-					for _, c := range cov {
-						cb.WriteString(c.Endpoint)
-						cb.WriteString("\x00")
-						cb.WriteString(c.Param)
-						cb.WriteString("\x00")
-						cb.WriteString(c.VulnClass)
-						cb.WriteString("\x00")
-						cb.WriteString(c.Notes)
-						cb.WriteString("\x00")
-					}
-					// v6.5.0（S5-①）：s5 语料排除 s4- 交付物——S4 分组交付物按 S4-9 门强制
-					// 逐目标产出，混入 S5 语料会让未动目标借 S4 留痕自动放行（同族问题
-					// v3HandoverIssues 已排除 s4 产物，本门补齐同款口径）；s4 门消费自己的
-					// 交付物语料不变。
-					deliv := o.deliverablesText(p.ID)
-					if stageID == "s5" {
-						deliv = o.deliverablesTextExcluding(p.ID, "s4-")
-					}
-					missing, matched := targetCoverageRecon(targets, cb.String(), deliv)
-					if matched == 0 {
-						// v6.5.0（S5-①）：逐目标零命中从静默放行改为提示级留痕（不拦截）——
-						// 语料完全不含目标串（CIDR/描述性目标常态）时门失效形态收口可见，
-						// 提示模型显式写目标-实例映射后门即恢复生效。
-						o.log(p, stageID, fmt.Sprintf("⚠ %s 逐目标对账零命中：%d 个目标的覆盖/交付物语料均未出现目标串——若目标以 CIDR/描述形态登记，请在覆盖 notes 或交付物显式写「目标-实例映射」（如「10.0.0.0/24 → 逐 IP」），否则逐目标门对本项目不生效", strings.ToUpper(stageID), len(targets)))
-					} else if matched >= 1 && len(missing) > 0 && len(missing) < len(targets) {
-						issues = append(issues, fmt.Sprintf(
-							"%s 分段收口对账：%d/%d 个目标既无覆盖登记也未列入待续清单/档案目标（%s）——按目标分组补测，或将未测目标写入待续清单（分组交付物约定 deliverables/%s-<目标或组名>.md，S8 报告承接合并），再收口",
-							strings.ToUpper(stageID), len(missing), len(targets), truncateText(strings.Join(missing, "、"), 120), stageID))
+			if reconOn {
+				if targets := splitProjectTargets(p); len(targets) > 1 {
+					if cov, _ := o.store.ListCoverage(p.ID); len(cov) > 0 {
+						var cb strings.Builder
+						for _, c := range cov {
+							cb.WriteString(c.Endpoint)
+							cb.WriteString("\x00")
+							cb.WriteString(c.Param)
+							cb.WriteString("\x00")
+							cb.WriteString(c.VulnClass)
+							cb.WriteString("\x00")
+							cb.WriteString(c.Notes)
+							cb.WriteString("\x00")
+						}
+						// v6.5.0（S5-①）：s5 语料排除 s4- 交付物——S4 分组交付物按 S4-9 门强制
+						// 逐目标产出，混入 S5 语料会让未动目标借 S4 留痕自动放行（同族问题
+						// v3HandoverIssues 已排除 s4 产物，本门补齐同款口径）；s4 门消费自己的
+						// 交付物语料不变。
+						deliv := o.deliverablesText(p.ID)
+						if stageID == "s5" {
+							deliv = o.deliverablesTextExcluding(p.ID, "s4-")
+						}
+						missing, matched := targetCoverageRecon(targets, cb.String(), deliv)
+						if matched == 0 {
+							// v6.5.0（S5-①）：逐目标零命中从静默放行改为提示级留痕（不拦截）——
+							// 语料完全不含目标串（CIDR/描述性目标常态）时门失效形态收口可见，
+							// 提示模型显式写目标-实例映射后门即恢复生效。
+							o.log(p, stageID, fmt.Sprintf("⚠ %s 逐目标对账零命中：%d 个目标的覆盖/交付物语料均未出现目标串——若目标以 CIDR/描述形态登记，请在覆盖 notes 或交付物显式写「目标-实例映射」（如「10.0.0.0/24 → 逐 IP」），否则逐目标门对本项目不生效", strings.ToUpper(stageID), len(targets)))
+						} else if matched >= 1 && len(missing) > 0 && len(missing) < len(targets) {
+							issues = append(issues, fmt.Sprintf(
+								"%s 分段收口对账：%d/%d 个目标既无覆盖登记也未列入待续清单/档案目标（%s）——按目标分组补测，或将未测目标写入待续清单（分组交付物约定 deliverables/%s-<目标或组名>.md，S8 报告承接合并），再收口",
+								strings.ToUpper(stageID), len(missing), len(targets), truncateText(strings.Join(missing, "、"), 120), stageID))
+						}
 					}
 				}
 			}
-		}
 		}
 		// v3.8.5 G1 探测→发现晋升对账器：evidence/ 中的成功信号必须归档（发现/覆盖/事实/交付物任一引用），
 		// 防「探测成功但漏斗漏液」（实测某任务宽字节/base64 延时探针命中却未晋升为发现）。

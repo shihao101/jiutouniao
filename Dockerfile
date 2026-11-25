@@ -242,7 +242,7 @@ COPY wheelhouse/ /tmp/wheelhouse/
 RUN /opt/venv/bin/pip install --no-cache-dir --no-index --find-links=/tmp/wheelhouse playwright && \
     rm -rf /tmp/wheelhouse && \
     /opt/venv/bin/python -c "from playwright.sync_api import sync_playwright; pw=sync_playwright().start(); b=pw.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']); assert b.new_page().evaluate('7*6')==42; b.close(); pw.stop(); print('browser smoke OK: playwright + system chromium')" && \
-    /opt/venv/bin/pip install --no-cache-dir ddddocr >/dev/null 2>&1 && echo "captcha OCR: ddddocr installed" || echo "captcha OCR: ddddocr unavailable (install_tool 兜底)"
+    /opt/venv/bin/pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple ddddocr >/dev/null 2>&1 && echo "captcha OCR: ddddocr installed" || echo "captcha OCR: ddddocr unavailable (install_tool 兜底)"
 COPY browser-kit/ /opt/tools/browser-kit/
 RUN chmod +x /opt/tools/browser-kit/*.py /opt/tools/browser-kit/selftest/*.py /opt/tools/browser-kit/selftest/*.sh
 

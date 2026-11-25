@@ -592,6 +592,9 @@ func TestV670S6K5MissingHint(t *testing.T) {
 //（留痕 + 不改状态——v5.5.0 方案 D 既有语义不变）。
 func TestV670LoopbackOverBudget(t *testing.T) {
 	o, st := v550Orchestrator(t)
+	// v7.1.0：本用例锁定旧固定上限语义——显式关闭自主框架（动态额度见 v710_autonomy_test）
+	f := false
+	o.cfg.Autonomy.Enabled = &f
 	states := map[string]*store.StageState{}
 	for _, sid := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"} {
 		states[sid] = &store.StageState{Status: "done"}

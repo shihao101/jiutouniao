@@ -54,7 +54,7 @@ func TestAutoApprovePolicy(t *testing.T) {
 	ap, st := testApprover(t)
 	ctx := context.Background()
 	// 项目 P4 策略 l1：L1 自动批准（mode=auto 留痕），L2 仍人工
-	if err := st.SaveProject(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P4", Name: "t", AutoApprove: "l1"}); err != nil {
+	if err := st.SaveProject(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P4", Name: "t", AutoApprove: "l1"}); err != nil {
 		t.Fatal(err)
 	}
 	decision, err := ap.Request(ctx, "P4", "s2", "nmap 扫描", "L1")
@@ -232,7 +232,7 @@ func TestBuildAttackGraph(t *testing.T) {
 	_, _ = st.UpsertFact(&store.FactRecord{ProjectID: "P1", Key: "http://t/api", Value: "primitive:AUTHZ 未鉴权遍历", Confidence: "confirmed", Links: []string{"db@t"}})
 	_, _ = st.UpsertFact(&store.FactRecord{ProjectID: "P1", Key: "db@t", Value: "primitive:CRED 数据库凭据面", Confidence: "confirmed"})
 	_, _ = st.AddLoot(&store.LootRecord{ProjectID: "P1", Type: "credential", Target: "db@t", Masked: "adm***23", Source: "db@t", Verified: "verified"})
-	dot, md := o.buildAttackGraph(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"})
+	dot, md := o.buildAttackGraph(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"})
 	if dot == "" {
 		t.Fatal("应产出 DOT")
 	}
@@ -245,7 +245,7 @@ func TestBuildAttackGraph(t *testing.T) {
 		t.Fatalf("边清单应含凭据复用边:\n%s", md)
 	}
 	// 空项目无图
-	if d2, _ := o.buildAttackGraph(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-none"}); d2 != "" {
+	if d2, _ := o.buildAttackGraph(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-none"}); d2 != "" {
 		t.Fatal("无事实项目应返回空图")
 	}
 }
@@ -282,13 +282,13 @@ func TestDeterministicGate(t *testing.T) {
 	dir := t.TempDir()
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus()}
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P1", Stage: "s4", Title: "未鉴权遍历", Detail: "可遍历全部用户", Severity: "高", Confidence: "确证"})
-	issues := o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4")
+	issues := o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4")
 	if len(issues) == 0 {
 		t.Fatal("高危确证无证据引用应被拦截")
 	}
 	// v4.4 判据抽查：有证据但未对照 evidence-standard 判据的高危确证 → 引擎降级为疑似
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P1", Stage: "s4", Title: "有证据的发现", Detail: "见 evidence/s4-exp01-log.txt", Severity: "高", Confidence: "确证"})
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4")
 	for _, iss := range issues {
 		if strings.Contains(iss, "有证据的发现") && strings.Contains(iss, "未引用任何证据") {
 			t.Fatalf("引用 evidence 的发现不应触发证据类拦截: %v", issues)
@@ -302,7 +302,7 @@ func TestDeterministicGate(t *testing.T) {
 	}
 	// 完全合规（证据 + 判据标记）不再触发任何拦截
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P1", Stage: "s4", Title: "合规确证发现", Detail: "见 evidence/s4-exp02.txt；判据：布尔差分 ≥2 组反向谓词 ×3 重放稳定", Severity: "高", Confidence: "确证"})
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4")
 	for _, iss := range issues {
 		if strings.Contains(iss, "合规确证发现") {
 			t.Fatalf("证据+判据齐备的确证发现不应被拦: %v", issues)
@@ -332,7 +332,7 @@ func TestOrphanProbeReconciliation(t *testing.T) {
 	mk("P9", "evidence/sqlmap-run.log", "current database: 'targetdb'\n[*] ending\n")
 	// 噪声：低时延不触发
 	mk("P9", "evidence/fast-baseline.log", "CODE=200 TIME=0.2s\n")
-	issues := o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P9"}, "s4")
+	issues := o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P9"}, "s4")
 	hit := 0
 	for _, iss := range issues {
 		if strings.Contains(iss, "s4-t03-sqli-probe2.log") || strings.Contains(iss, "sqlmap-run.log") {
@@ -346,7 +346,7 @@ func TestOrphanProbeReconciliation(t *testing.T) {
 		t.Fatalf("两个孤儿探测结果均应被拦截，实际命中 %d: %v", hit, issues)
 	}
 	// s5 同样生效
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P9"}, "s5")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P9"}, "s5")
 	if len(issues) == 0 {
 		t.Fatal("s5 收口同样应执行孤儿对账")
 	}
@@ -354,7 +354,7 @@ func TestOrphanProbeReconciliation(t *testing.T) {
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "P9", Stage: "s4", Endpoint: "GET /x.php", Param: "id", VulnClass: "SQLI", Status: "vulnerable", Notes: "宽字节延时确证 见 evidence/s4-t03-sqli-probe2.log"})
 	// 归档路径2：发现 Detail 引用文件名 → 对应孤儿放行
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P9", Stage: "s4", Title: "SQL 注入", Detail: "sqlmap 自动化确证 见 evidence/sqlmap-run.log", Severity: "高", Confidence: "确证"})
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P9"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P9"}, "s4")
 	for _, iss := range issues {
 		if strings.Contains(iss, "s4-t03-sqli-probe2.log") || strings.Contains(iss, "sqlmap-run.log") {
 			t.Fatalf("已归档的探测结果不应再被拦: %v", issues)
@@ -363,7 +363,7 @@ func TestOrphanProbeReconciliation(t *testing.T) {
 	// 归档路径3：交付物留痕排除（引用长主干）→ 放行
 	mk("P9", "evidence/http-slow-endpoint-1a2b.log", "CODE=200 TIME=2.6s\n")
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P9", Stage: "s4", Title: "慢端点排除", Detail: "http-slow-endpoint-1a2b 为业务慢端点，对照基线同为秒级，排除注入", Severity: "信息", Confidence: "确证"})
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P9"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P9"}, "s4")
 	for _, iss := range issues {
 		if strings.Contains(iss, "http-slow-endpoint-1a2b") {
 			t.Fatalf("交付物/发现留痕排除后不应被拦: %v", issues)
@@ -398,7 +398,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 		{"id":"C2","item":"反射性XSS","hint":"/payload/xss/reflex.php","class":"XSS"},
 		{"id":"C3","item":"目录遍历","hint":"/payload/dir/dirlist.php","class":"穿越"}]}`)
 	// 三个条目均无覆盖登记 → 3 条拦截
-	issues := o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "PC"}, "s4")
+	issues := o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "PC"}, "s4")
 	if got := countContains(issues, "无覆盖登记"); got != 3 {
 		t.Fatalf("3 条未覆盖条目应全部拦截，实际 %d: %v", got, issues)
 	}
@@ -406,7 +406,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 	// v5.8.0 证据语义门：结论条目 Notes 需 evidence/POC/判据/请求响应 引用
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/sql/number.php", Param: "id", VulnClass: "SQLI", Status: "vulnerable", Notes: "数字型注入延时确证，POC 见 evidence/s4/sqli.txt"})
 	_, _ = st.UpsertCoverage(&store.CoverageEntry{ProjectID: "PC", Stage: "s4", Endpoint: "GET /payload/dir/dirlist.php", Param: "-", VulnClass: "穿越", Status: "no_issue_found", Notes: "基线请求响应正常（负对照留证 evidence/s4/dir.txt）"})
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "PC"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "PC"}, "s4")
 	if got := countContains(issues, "无覆盖登记"); got != 1 {
 		t.Fatalf("C1/C3 归账后应仅剩 C2 未覆盖，实际 %d: %v", got, issues)
 	}
@@ -415,7 +415,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 		{"id":"C1","item":"数字型注入","hint":"/payload/sql/number.php","class":"SQLI"},
 		{"id":"C2","item":"反射性XSS","hint":"/payload/xss/reflex.php","class":"XSS","status":"deferred"},
 		{"id":"C3","item":"目录遍历","hint":"/payload/dir/dirlist.php","class":"穿越"}]}`)
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "PC"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "PC"}, "s4")
 	if got := countContains(issues, "缺 reason"); got != 1 {
 		t.Fatalf("deferred 缺 reason 应拦截，实际 %d: %v", got, issues)
 	}
@@ -423,7 +423,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 		{"id":"C1","item":"数字型注入","hint":"/payload/sql/number.php","class":"SQLI"},
 		{"id":"C2","item":"反射性XSS","hint":"/payload/xss/reflex.php","class":"XSS","status":"deferred","reason":"预算耗尽移交S5"},
 		{"id":"C3","item":"目录遍历","hint":"/payload/dir/dirlist.php","class":"穿越"}]}`)
-	if issues := o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "PC"}, "s4"); len(issues) != 0 {
+	if issues := o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "PC"}, "s4"); len(issues) != 0 {
 		t.Fatalf("全部条目归宿后应放行: %v", issues)
 	}
 	// 延期/排除超半数 → 广度不足拦截
@@ -431,7 +431,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 		{"id":"C1","item":"数字型注入","hint":"/payload/sql/number.php","class":"SQLI"},
 		{"id":"C2","item":"反射性XSS","hint":"/payload/xss/reflex.php","class":"XSS","status":"deferred","reason":"低优先"},
 		{"id":"C3","item":"目录遍历","hint":"/payload/dir/dirlist.php","class":"穿越","status":"excluded","reason":"范围外"}]}`)
-	issues = o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "PC"}, "s4")
+	issues = o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "PC"}, "s4")
 	if got := countContains(issues, "广度不足"); got != 1 {
 		t.Fatalf("延期/排除超半数应触发广度不足项，实际 %d: %v", got, issues)
 	}
@@ -439,7 +439,7 @@ func TestChecklistCoverageGate(t *testing.T) {
 
 // checkGate 调用确定性门（测试辅助，缩短行宽）。
 func checkGate(o *Orchestrator, projectID, stage string) []string {
-	return o.deterministicGate(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: projectID}, stage)
+	return o.deterministicGate(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: projectID}, stage)
 }
 
 // countContains 统计 issues 中包含子串的条数（测试辅助）。
@@ -567,7 +567,7 @@ func TestMonitorExemptPolling(t *testing.T) {
 	mon := &execMonitor{}
 	tc := llm.ToolCall{Name: "poll_async", Arguments: `{"job":"abc123def4"}`}
 	for i := 0; i < 8; i++ {
-		got := o.monitorCheck(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4", mon, tc, "running")
+		got := o.monitorCheck(context.Background(), &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4", mon, tc, "running")
 		if strings.Contains(got, "⚠") || strings.Contains(got, "⛔") || strings.Contains(got, "导师") {
 			t.Fatalf("合法轮询第 %d 次不应触发监控介入: %s", i+1, got[:60])
 		}
@@ -578,7 +578,7 @@ func TestMonitorExemptPolling(t *testing.T) {
 	mon2 := &execMonitor{}
 	hit := false
 	for i := 0; i < 3; i++ {
-		got := o2.monitorCheck(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4", mon2, tc2, "ok")
+		got := o2.monitorCheck(context.Background(), &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4", mon2, tc2, "ok")
 		if strings.Contains(got, "⚠") {
 			hit = true
 		}
@@ -592,7 +592,7 @@ func TestMonitorExemptPolling(t *testing.T) {
 func TestChatCtxKilledProject(t *testing.T) {
 	_, st := testApprover(t)
 	o := &Orchestrator{store: st, exec: newTestExec(t, t.TempDir())}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-K", Status: "killed"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-K", Status: "killed"}
 	_ = st.SaveProject(p)
 	ctx := o.chatCtx("P-K")
 	select {
@@ -602,7 +602,7 @@ func TestChatCtxKilledProject(t *testing.T) {
 		t.Fatal("已熔断项目的对话 ctx 应立即处于 Done 状态")
 	}
 	// 活跃项目正常注册
-	_ = st.SaveProject(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-A", Status: "running"})
+	_ = st.SaveProject(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-A", Status: "running"})
 	ctx2 := o.chatCtx("P-A")
 	select {
 	case <-ctx2.Done():
@@ -618,12 +618,12 @@ func TestMonitorExemptNoEarlyFire(t *testing.T) {
 	mon := &execMonitor{}
 	tc := llm.ToolCall{Name: "poll_async", Arguments: `{"job":"abc123def4"}`}
 	for i := 0; i < 3; i++ {
-		got := o.monitorCheck(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4", mon, tc, "running")
+		got := o.monitorCheck(context.Background(), &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4", mon, tc, "running")
 		if strings.Contains(got, "⏳") {
 			t.Fatalf("第 %d 次合法 poll 不应触发提醒（应第 4 次）", i+1)
 		}
 	}
-	got := o.monitorCheck(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4", mon, tc, "running")
+	got := o.monitorCheck(context.Background(), &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4", mon, tc, "running")
 	if !strings.Contains(got, "⏳") {
 		t.Fatal("第 4 次连续纯 poll 应触发确定性提醒")
 	}
@@ -636,7 +636,7 @@ func TestMonitorExemptSearchAndList(t *testing.T) {
 		mon := &execMonitor{}
 		tc := llm.ToolCall{Name: name, Arguments: `{"query":"login"}`}
 		for i := 0; i < 6; i++ {
-			got := o.monitorCheck(context.Background(), &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P1"}, "s4", mon, tc, "ok")
+			got := o.monitorCheck(context.Background(), &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P1"}, "s4", mon, tc, "ok")
 			if strings.Contains(got, "⚠") || strings.Contains(got, "⛔") {
 				t.Fatalf("%s 第 %d 次不应触发窗口介入", name, i+1)
 			}
@@ -674,7 +674,7 @@ func TestSubagentLifecycle(t *testing.T) {
 	ap, st := testApprover(t)
 	_ = st
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(), cfg: cfg, llm: llm.NewMock(), tokens: map[string]int64{}, approver: ap}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-SUB", Status: "running", Target: "http://127.0.0.1:1", AutoApprove: "all"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-SUB", Status: "running", Target: "http://127.0.0.1:1", AutoApprove: "all"}
 	_ = st.SaveProject(p)
 
 	msg, err := o.spawnSubAgent(context.Background(), p, "s4", "测试 /news?id= 数字型 SQL 注入（布尔差判据）", 4)
@@ -712,7 +712,7 @@ func TestSubagentConcurrencyLimit(t *testing.T) {
 	cfg.ApplyDefaultsForTest()
 	cfg.Engine.MaxSubagents = 1
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(), cfg: cfg}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-L", Status: "running"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-L", Status: "running"}
 	_ = st.SaveProject(p)
 	// 直接注入一个 running 档案占满槽位
 	o.subMu.Lock()
@@ -733,7 +733,7 @@ func TestDeterministicGateS8ReportFindingsConsistency(t *testing.T) {
 	_, st := testApprover(t)
 	dir := t.TempDir()
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(), cfg: func() *config.Config { c := &config.Config{}; c.ApplyDefaultsForTest(); return c }()}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-S8"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-S8"}
 	_ = st.SaveProject(p)
 	// 报告含 2 个 R 条目，findings 仅 1 条 → 应拦截
 	// v6.0.1 C29：报告夹具含合规《覆盖边界》章节（边界门单独有专项测试 v601）
@@ -757,7 +757,7 @@ func TestDeterministicGateS8DuplicateRoot(t *testing.T) {
 	_, st := testApprover(t)
 	dir := t.TempDir()
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(), cfg: func() *config.Config { c := &config.Config{}; c.ApplyDefaultsForTest(); return c }()}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-DUP"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-DUP"}
 	_ = st.SaveProject(p)
 	_, _ = st.AddFinding(&store.Finding{ProjectID: "P-DUP", Stage: "s4", Title: "登录接口无 CSRF 防护（无 token 校验）", Detail: "x", Severity: "低", Confidence: "确证"})
 	// v4.6 B1：归一化标题全等的同根因在入口层即被 AddFinding 拒绝（不再留到 s8 门兜底）
@@ -787,7 +787,7 @@ func TestDeterministicGateS8AlwaysApplies(t *testing.T) {
 	_, st := testApprover(t)
 	dir := t.TempDir()
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(), cfg: func() *config.Config { c := &config.Config{}; c.ApplyDefaultsForTest(); return c }()}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-ALW"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-ALW"}
 	_ = st.SaveProject(p)
 	// 双记 + R 条目(1) < findings(2)：两类硬校验均应命中
 	_, _ = o.exec.WriteFile("P-ALW", "report.md", "### R-01 明文传输\n### R-02 弱哈希\n### R-03 枚举\n")

@@ -804,6 +804,7 @@ func (o *Orchestrator) toolDefsForStage(stageID string) []llm.ToolDef {
 		"hexstrike_command": true, "install_tool": true,
 		"shell_open": true, "shell_write": true, "shell_read": true, "shell_close": true,
 		"spawn_subagent": true, "poll_subagents": true,
+		"propose": true, "update_proposal": true, // v7.1.0：S1 范围界定阶段无自主资源动作语义，隐藏提议工具面（与子代理类同口径）
 	}
 	out := make([]llm.ToolDef, 0, len(defs))
 	for _, d := range defs {

@@ -483,6 +483,9 @@ func TestV640LoopbackGovernance(t *testing.T) {
 	o, st := v48Orchestrator(t)
 	o.heads = map[string]*Head{"s4": {ID: "s4", Name: "漏洞发现与分析", Body: "# S4"}}
 	o.cfg.Engine.LoopbackMaxRuns = 3
+	// v7.1.0：本用例锁定旧固定上限语义——显式关闭自主框架（动态额度 loopback_cap_max 见 v710_autonomy_test）
+	f := false
+	o.cfg.Autonomy.Enabled = &f
 	o.loops = map[string][]string{}
 	o.loopTotal = map[string]int{}
 	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-V640LB",
@@ -511,6 +514,7 @@ func TestV640LoopbackGovernance(t *testing.T) {
 	// ④ 入队时额度从持久值恢复（新 orchestrator 实例 + 历史消费 2 → 第 3 次可入队、第 4 次拒绝）
 	o2, _ := v48Orchestrator(t)
 	o2.cfg.Engine.LoopbackMaxRuns = 3
+	o2.cfg.Autonomy.Enabled = &f
 	o2.loops = map[string][]string{}
 	o2.loopTotal = map[string]int{}
 	p2.StageStates["s4"].Status = "done"

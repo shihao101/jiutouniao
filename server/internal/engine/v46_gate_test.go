@@ -160,9 +160,21 @@ func TestV46CompleteStageForcedLists(t *testing.T) {
 	o, _ := v46Orchestrator(t)
 	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-V46G", StageStates: map[string]*store.StageState{"s4": {Status: "running", StartedAt: "2026-01-01T00:00:00Z"}}}
 	_ = o.store.SaveProject(p)
+	// v7.1.0 E1'：缺清单不再拦截——引擎按台账代填（收口继续，此处被实体文件门接住），
+	// 代填行为入时间线可审计（旧拦截文案在 48 项目实测 93 次收口 0 次通过，runtime-audit R1）
 	got := call(t, o, p, "s4", "complete_stage", `{"summary":"x"}`)
-	if !strings.Contains(got, "ready_but_unexecuted") {
-		t.Fatalf("缺清单应拦截: %s", got)
+	if strings.Contains(got, "缺少必填清单") || strings.Contains(got, "V3") {
+		t.Fatalf("v7.1.0 E1' 后缺清单不应拦截（引擎代填）: %s", got)
+	}
+	tl, _ := o.store.ListTimeline(p.ID)
+	filled := false
+	for _, ev := range tl {
+		if strings.Contains(ev.Event, "E1' V3 引擎代填") {
+			filled = true
+		}
+	}
+	if !filled {
+		t.Fatalf("E1' 引擎代填应落时间线留痕")
 	}
 	// 显式空数组 → 越过 V3（后续被实体文件检查拦截属正常流程）
 	got = call(t, o, p, "s4", "complete_stage", `{"summary":"x","ready_but_unexecuted":[],"l2_approved_unused":[]}`)

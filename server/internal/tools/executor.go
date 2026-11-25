@@ -188,7 +188,7 @@ func (e *Executor) ClassifyRisk(command string) string {
 		}
 		return L0ReadOnly
 	}
-	return L1Write // 未知命令按写操作处理；v5.2.0 起默认审批策略 manual——未知命令必然人工审批
+	return L1Write // 未知命令按写操作处理；审批策略决定去向（v7.1.0 默认 engine 档：未知命令兜底 L1 经裁决器核验，manual 档下仍必然人工审批）
 }
 
 // readOnlySafe v3.3.0 L0 只读安全判定（v3.2.0 段首词锚定 + 危险元字符否决的引号感知升级）。

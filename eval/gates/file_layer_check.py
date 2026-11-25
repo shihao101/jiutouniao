@@ -572,9 +572,13 @@ orch2 = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encod
 for kw in ["registrationGate", "scopeGate", "roeAutoRegisterDeny", "defaultScopeAllowlist", "strict_scope=true：命令引用范围外目标"]:
     check(f"orchestrator 治理门含 {kw}", kw in orch2)
 ex = open(os.path.join(ROOT, "server/internal/tools/executor.go"), encoding="utf-8").read()
-check("executor 未知命令保持 L1+默认 manual 注释", "v5.2.0 起默认审批策略 manual" in ex)
+check("executor 未知命令 L1 兜底注释（v7.1.0 engine 档口径）", "审批策略决定去向" in ex)
 cfg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
-check("config 默认 manual", 'c.AutoApprove = "manual"' in cfg)
+# v7.1.0（用户决策）：默认审批策略改为 engine 档（manual/l1/all 保留可回退）——
+# 旧锁「config 默认 manual」随默认值变更同步更新为新不变式（engine 缺省兜底 + manual 合法集保留）。
+check("config 默认 engine（v7.1.0）", 'c.AutoApprove = "engine"' in cfg)
+check("config manual 合法集保留", 'c.AutoApprove != "manual"' in cfg)
+check("config PAE 自主决策框架在场", "AutonomyConfig" in cfg)
 for kw in ["管道执行与系统路径写入属利用形态", "ScopeAllowlist"]:
     check(f"config 含 {kw}", kw in cfg)
 dfl2 = open(os.path.join(ROOT, "Dockerfile"), encoding="utf-8").read()
@@ -1289,5 +1293,60 @@ for name, ok, detail in CHECKS:
         print("SKIP " + name + (("  " + detail) if detail else ""))
     else:
         print(("PASS " if ok else "FAIL ") + name + (("  " + detail) if detail and not ok else ""))
+
+# ---------- v7.1.0-v7.4.0 自主渗透能力新增内容防回退锁（方案 §5.3 承诺，第八轮核对补齐） ----------
+eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+auto = open(os.path.join(ROOT, "server/internal/engine/autonomy.go"), encoding="utf-8").read()
+brain = open(os.path.join(ROOT, "server/internal/engine/brain.go"), encoding="utf-8").read()
+appr = open(os.path.join(ROOT, "server/internal/engine/approval.go"), encoding="utf-8").read()
+exp = open(os.path.join(ROOT, "server/internal/engine/expert.go"), encoding="utf-8").read()
+ctxg = open(os.path.join(ROOT, "server/internal/engine/context.go"), encoding="utf-8").read()
+cfgg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
+stg = open(os.path.join(ROOT, "server/internal/store/store.go"), encoding="utf-8").read()
+lc = open(os.path.join(ROOT, "prompts/loop-core.md"), encoding="utf-8").read()
+mmd = open(os.path.join(ROOT, "heads/main.md"), encoding="utf-8").read()
+s3d = open(os.path.join(ROOT, "heads/s3.md"), encoding="utf-8").read()
+s4d = open(os.path.join(ROOT, "heads/s4.md"), encoding="utf-8").read()
+s5d = open(os.path.join(ROOT, "heads/s5.md"), encoding="utf-8").read()
+s6d = open(os.path.join(ROOT, "heads/s6.md"), encoding="utf-8").read()
+s7d = open(os.path.join(ROOT, "heads/s7.md"), encoding="utf-8").read()
+s8d = open(os.path.join(ROOT, "heads/s8.md"), encoding="utf-8").read()
+skap = open(os.path.join(ROOT, "skills/autonomy-proposal.md"), encoding="utf-8").read()
+evr = open(os.path.join(ROOT, "scripts/eval_run.py"), encoding="utf-8").read()
+
+def checks_v71():
+    check("v7.1 PAE 裁决器在场", "func (o *Orchestrator) toolPropose" in auto and "duplicateProposal" in auto)
+    check("v7.1 引擎审批档在场", "engineAdjudicate" in appr and "L2_NOT_EXISTENCE_PROOF" in appr)
+    check("v7.1 账本桶在场", "bucketAutonomy" in stg and "bucketCards" in stg)
+    check("v7.1 config 自主框架在场", "AutonomyConfig" in cfgg and "engine_l2_per_10min" in cfgg)
+    check("v7.1 loop-core 自主决策纪律", "自主决策纪律（v7.1.0 PAE" in lc and "同族三次被拒" in lc)
+    check("v7.1 真头作战参谋", "作战参谋（v7.1.0 PAE" in mmd)
+    check("v7.1 PoC 行/复盘章注入", "pocReadyLine" in eng and "autonomyRetrospective" in eng)
+    check("v7.1 压缩紧急裁剪+P5 归档", "预算紧急裁剪" in ctxg and "压缩前分析原文已归档" in ctxg)
+    check("v7.1 P7 健康归因", "trackToolHealth" in eng and "toolHealthSummary" in eng)
+    check("v7.1 技能 autonomy-proposal", "PAE 自主决策提议手册" in skap)
+
+def checks_v72():
+    check("v7.2 B1 作战参谋评审", "campaignBrainReview" in brain and "parseBrainSuggestions" in brain)
+    check("v7.2 B3 planDelta", "planDeltaOnScope" in brain and "PlanVersion" in stg)
+    check("v7.2 B4 预算账本", "budgetLedgerLine" in brain)
+
+def checks_v73():
+    check("v7.3 C1 红蓝对抗环", "redBlueAssumptionLoop" in exp and "红蓝对抗环 R%d" in exp)
+    check("v7.3 C4 决策图按需生成", "ensureAttackGraph" in eng)
+    check("v7.3 C3 PoC 工厂", "func (o *Orchestrator) pocFactory" in brain)
+    check("v7.3 s3 假设卡纪律", "可证伪假设卡" in s3d)
+    check("v7.3 s7 复测卡纪律", "复测卡" in s7d and "retest_card" in s7d)
+    check("v7.3 specA 探针环", "红队批量探针环" in open(os.path.join(ROOT, "heads/specA.md"), encoding="utf-8").read())
+
+def checks_v74():
+    check("v7.4 D1 质量门+判重", "D1 质量门" in eng and "duplicateLesson" in eng)
+    check("v7.4 D2/D3 eval 管线", "skill_workorder" in evr and "autonomy_section" in evr and "assumption_metrics" in evr)
+    check("v7.4 loop-core 教训质量门说明", "教训库质量门（v7.4.0 D1）" in lc)
+    check("v7.4 头承接完整", ("v7.3.0 C2/C3" in s4d) and ("v7.3.0 C3" in s5d) and ("v7.3.0 C4" in s6d) and ("自主决策复盘" in s8d))
+
+for f in (checks_v71, checks_v72, checks_v73, checks_v74):
+    f()
+
 print(f"\n文件层核查: {len(CHECKS)-len(fails)-len(skips)}/{len(CHECKS)-len(skips)}（SKIP {len(skips)}；JTN_FLC_RUNTIME=1 可强制执行运行时自测）")
 sys.exit(0 if not fails else 1)

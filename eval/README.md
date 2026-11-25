@@ -17,3 +17,10 @@
 
 其余机制说明（判分双指标 + 匿名高危召回、declared/hidden 双模式）见 README「评测环」节
 与上游仓库的完整实现。
+
+
+## v7.4.0 学习环产出（D2/D3）
+
+- **技能迭代工单**：判分后未命中清单自动生成 `eval/results/skill-iteration-<ts>.md`——按候选技能分组（CLASS_SKILL 静态映射，未命中映射标"待人工归类"），每组附建议动作（最小探针/阴阳判据/claims 模板三件套）。工单是技能库迭代的直接输入，落地需人工复核。
+- **自主性计量**：盲测与主报告自动注入——提案/批准/转化率/升维（读 projects/<id>/autonomy.json，v7.1.0 前旧项目标注缺失）+ 假设命中率（覆盖矩阵含「假设」单元的 vulnerable 占比）。
+- **BUG-081/082/083**：外部评测扩展包工具自测漂移仍处门控 SKIP（authz-diff/blind-inject-adjudicator/oauth_mock），待评测包修复。

@@ -17,7 +17,8 @@ type Config struct {
 	LLM     LLMConfig    `json:"llm"`
 	Engine  EngineConfig `json:"engine"`
 	Guard   GuardConfig  `json:"guard"`
-	OOB     OOBConfig    `json:"oob"` // v7.0.0：OOB 回连通道三模式（盲态类 D3 语义验证基础设施）
+	OOB     OOBConfig    `json:"oob"`      // v7.0.0：OOB 回连通道三模式（盲态类 D3 语义验证基础设施）
+	Autonomy AutonomyConfig `json:"autonomy"` // v7.1.0：PAE 自主决策框架（提议-裁决-升维，无人工裁决点、全程留痕）
 
 	// ---- 移植模块配置 ----
 	AuthToken         string  `json:"auth_token"`          // API 直连令牌（脚本/CI 用；Web 走账号密码+验证码）
@@ -29,7 +30,7 @@ type Config struct {
 	MaxProjectTokens  int64   `json:"max_project_tokens"`  // 项目 token 预算上限（0=不限制），超限自动熔断
 	PricePer1MInput   float64 `json:"price_per_1m_input"`  // 成本核算：输入价（$/1M tokens）
 	PricePer1MOutput  float64 `json:"price_per_1m_output"` // 成本核算：输出价（$/1M tokens）
-	AutoApprove       string  `json:"auto_approve"`        // 全局默认审批策略：manual（默认，L1+ 全人工——未知命令不进自动通道）/l1（仅 L0/L1 自动批准并留痕）/all（L1+L2 自动批准），项目可覆盖
+	AutoApprove       string  `json:"auto_approve"`        // 全局默认审批策略：engine（v7.1.0 默认——L1 自动批准，L2 由裁决器按存在性证明语义+配额确定性裁决）/manual（L1+ 全人工）/l1（仅 L0/L1 自动）/all（L1+L2 自动），项目可覆盖
 
 	inlineSecrets bool `json:"-"` // v6.1.0（方案⑨）：Load 时记录「配置文件原文是否含明文凭据」（env 注入前的文件态）——迁移提示判定依据，不把 env 注入值误报为文件明文
 }
@@ -96,6 +97,33 @@ type OOBCustomConfig struct {
 	ServerURL string `json:"server_url"` // C：通道服务地址
 	Secret    string `json:"secret"`     // C：token/cookie/API key（可空）
 }
+
+// AutonomyConfig v7.1.0 PAE 自主决策框架（docs/优化方案_AI自主渗透能力增强_通用实战总案）：
+// LLM 提议（propose）→ 引擎裁决（确定性规则集，原因码机读）→ 升维（同族拒 ×3 上移抽象层）→
+// 保守降级（落 VT 继续推进），全程零人工裁决点；账本落 bbolt autonomy 桶，Web「自主决策」页
+// 与 S8《自主决策复盘》章事后可见。治理九门与 execution profile 的确定性拦截一项不放宽——
+// 本框架只改变「谁来触发裁决」，不改变「什么被允许」。
+type AutonomyConfig struct {
+	Enabled *bool `json:"enabled"` // 总开关（默认 true——用户决策 v7.1.0：全项目默认具备自主性；显式 false 才整体关闭）
+
+	LoopbackCapMax           int `json:"loopback_cap_max"`            // 动态回环上限（默认 8；替代固定 3——聚焦回环成本降一个量级后放宽）
+	ProposalsPerStage        int `json:"proposals_per_stage"`         // 每阶段提议总数上限（默认 6，防提议风暴挤占轮次）
+	MutationCampaignPerStage int `json:"mutation_campaign_per_stage"` // 每阶段 WAF 变异攻坚提议上限（默认 3）
+	DepthUnitRoundCap        int `json:"depth_unit_round_cap"`        // 单覆盖单元深化轮次硬顶（默认 8，防单点黑洞）
+	ExplorerConcurrent       int `json:"explorer_concurrent"`         // 探索代理同时在途上限（默认 1）
+	LateralEdgesPerStage     int `json:"lateral_edges_per_stage"`     // 每阶段横向边提议上限（默认 5）
+	BudgetTransfersPerProj   int `json:"budget_transfers_per_proj"`   // 项目级预算转移提议上限（默认 2）
+	EngineL2Per10Min         int `json:"engine_l2_per_10min"`         // engine 审批档：L2 裁决滑动窗口配额（默认 20 次/10 分钟）
+	EngineL2Total            int `json:"engine_l2_total"`             // engine 审批档：项目 L2 裁决总配额（默认 200）
+
+	Shadow *bool `json:"shadow"` // shadow 灰度（默认 false=active）：true 时提议/裁决照跑照记账，但不改变执行路径——审计对照「引擎会怎么裁 vs 实际发生了什么」
+}
+
+// IsEnabled 默认开启（nil=true，显式 false 才关闭——与 guard 三态开关同约定）。
+func (a AutonomyConfig) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+
+// ShadowMode 默认 active（nil=false）；shadow=true 时裁决只记账不改变执行路径。
+func (a AutonomyConfig) ShadowMode() bool { return a.Shadow != nil && *a.Shadow }
 
 type EngineConfig struct {
 	MaxStageIterations int `json:"max_stage_iterations"` // 每阶段 Agent 循环上限（预算封顶）
@@ -339,7 +367,7 @@ func (c *Config) applyDefaults() {
 		c.Engine.MaxStageIterations = 40
 	}
 	if c.Engine.MaxConcurrentExec == 0 {
-		c.Engine.MaxConcurrentExec = 4
+		c.Engine.MaxConcurrentExec = 8 // v7.1.0 E6'（runtime-audit R5）：并发闸 4→8——慢任务占闸曾致 11 个 killed 任务纯烧 244 分钟；批处理吞吐优先，ROE 限速由命令级 --max-rate/行为预算器约束
 	}
 	if c.Engine.CommandTimeoutSec == 0 {
 		c.Engine.CommandTimeoutSec = 300
@@ -488,10 +516,40 @@ func (c *Config) applyDefaults() {
 	// v6.1.0（S1 修复方案⑨）：移除默认管理员密码回填——公开文档化默认口令不再允许
 	// 空配置静默生效；凭据缺失时 Load fail-fast（见 validateSecrets），运维经
 	// ADMIN_PASSWORD_HASH（推荐，配置零明文）或 ADMIN_PASSWORD 环境变量注入。
-	if c.AutoApprove != "manual" && c.AutoApprove != "l1" && c.AutoApprove != "all" {
-		// v5.2.0 P1-2（外部审计）：默认 manual——L1（含未知命令兜底）也人工审批，
-		// 杜绝"未知命令经默认策略自动执行"；自动化需求由项目级显式配置 l1/all。
-		c.AutoApprove = "manual"
+	// v7.1.0（用户决策）：全局默认审批策略改为 engine——L1 直接自动批准；L2 由裁决器按
+	// 「存在性证明语义白名单 + 配额」确定性裁决，拒绝即走保守路径，不进人工屏障。
+	// manual/l1/all 三档保留可显式回退；治理九门与 execution profile 前置拦截不变，
+	// engine 档只改变「谁来触发裁决」，不改变「什么被允许」。
+	if c.AutoApprove != "engine" && c.AutoApprove != "manual" && c.AutoApprove != "l1" && c.AutoApprove != "all" {
+		c.AutoApprove = "engine"
+	}
+	// v7.1.0：PAE 自主决策框架默认值（docs/优化方案 §3.2 规则集参数表）。
+	if c.Autonomy.LoopbackCapMax <= 0 {
+		c.Autonomy.LoopbackCapMax = 8
+	}
+	if c.Autonomy.ProposalsPerStage <= 0 {
+		c.Autonomy.ProposalsPerStage = 6
+	}
+	if c.Autonomy.MutationCampaignPerStage <= 0 {
+		c.Autonomy.MutationCampaignPerStage = 3
+	}
+	if c.Autonomy.DepthUnitRoundCap <= 0 {
+		c.Autonomy.DepthUnitRoundCap = 8
+	}
+	if c.Autonomy.ExplorerConcurrent <= 0 {
+		c.Autonomy.ExplorerConcurrent = 1
+	}
+	if c.Autonomy.LateralEdgesPerStage <= 0 {
+		c.Autonomy.LateralEdgesPerStage = 5
+	}
+	if c.Autonomy.BudgetTransfersPerProj <= 0 {
+		c.Autonomy.BudgetTransfersPerProj = 2
+	}
+	if c.Autonomy.EngineL2Per10Min <= 0 {
+		c.Autonomy.EngineL2Per10Min = 20
+	}
+	if c.Autonomy.EngineL2Total <= 0 {
+		c.Autonomy.EngineL2Total = 200
 	}
 }
 
