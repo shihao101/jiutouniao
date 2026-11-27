@@ -52,10 +52,14 @@
           <div>
             <label class="fld">审批策略</label>
             <select v-model="f.policy" title="自动批准的操作全部落库留痕；FORBIDDEN 破坏性命令始终拒绝">
-              <option value="l1">推荐：仅 L2 人工批准</option>
+              <option value="engine">默认：引擎裁决档（L1 自动/L2 语义裁决+配额）</option>
+              <option value="l1">仅 L2 人工批准</option>
               <option value="manual">全部人工批准</option>
               <option value="all">全部自动批准</option>
             </select>
+            <!-- v7.6.0（E1 用户决策⑤）：all 档直接生效不设二次确认——仅信息展示，不阻断 -->
+            <div v-if="f.policy==='all'" class="hint" style="font-size:12px;color:#b58900;margin-top:2px">当前选择 all：L1/L2 审批全部自动放行（每单照常留痕可审计）；选择即生效。</div>
+            <div v-else class="hint" style="font-size:12px;color:#586e75;margin-top:2px">生效档位：{{ f.policy==='engine' ? '引擎裁决（L1 自动/L2 语义裁决+配额）' : f.policy==='l1' ? 'L0/L1 自动、L2 人工' : '全部人工' }}</div>
           </div>
           <div>
             <label class="fld">执行档</label>
@@ -99,7 +103,7 @@ const DEFAULT_SUCCESS = `测试目的：发现并验证可利用漏洞；成功�
 
 // v3.7.0 项目模板（通用型口径：不同目标类型的范围草稿 + 在通用 ROE 上叠加专项条款）
 const templates = [
-  { name: 'Web 应用（黑盒）', scope: '已确认授权的域名、子域名与端口（Web 服务全部路径）；范围外线索只记录、不继续访问。', roe: '登录/注册类测试使用客户提供的测试账号（注册面只评估不注册，自建账号默认禁止）；验证码走人机协同口径，不自动打码。', tt: '黑盒' },
+  { name: 'Web 应用（黑盒）', scope: '已确认授权的域名、子域名与端口（Web 服务全部路径）；范围外线索只记录、不继续访问。', roe: '登录/注册类测试使用客户提供的测试账号（注册面只评估不注册，自建账号默认禁止）；未提供账号即默认无凭据，运行期不询问。验证码由智能体自动识别打码（本地 OCR/多模态读图/行为轨迹三级链），连续失败按四元组移交。真实世界副作用（短信/邮件/支付触发类）默认禁止，命中即按四元组移交。', tt: '黑盒' },
   { name: 'APP / 小程序', scope: '已确认授权的 APP/小程序包及其后端 API 域名与端口；范围外线索只记录、不继续访问。', roe: '禁止破解分发、禁止拖取真实用户数据（只做存在性证明）；动态测试限授权设备与账号。', tt: '黑盒' },
   { name: '内网 / 主机（灰盒）', scope: '已确认授权的内网网段、主机与端口；凭据以授权发放为准；范围外资产只记录不访问。', roe: '横向移动类动作逐项审批；凭据只登记掩码摘要不落明文；限速探测避免影响业务。', tt: '灰盒' },
   { name: 'AI / LLM 应用', scope: '已确认授权的 LLM 应用入口、API 与其后端服务；提示注入测试仅针对授权实例。', roe: '不产出违法内容的越权滥用；输出中敏感信息只做存在性证明；注入载荷可清理、不持久化。', tt: '黑盒' },
@@ -114,7 +118,7 @@ function resetScope() { f.scope = DEFAULT_SCOPE }
 function resetRoe() { f.roe = DEFAULT_ROE }
 function resetSuccess() { f.success = DEFAULT_SUCCESS }
 
-const f = reactive({ name: '', target: '', scope: '', roe: DEFAULT_ROE, success: '', auth: '', testType: '黑盒', specs: new Set(), modelId: '', policy: 'manual', profile: 'production_safe', labAck: false, preAll: false, postExploit: false, strict: true, autostart: true, authorized: false })
+const f = reactive({ name: '', target: '', scope: '', roe: DEFAULT_ROE, success: '', auth: '', testType: '黑盒', specs: new Set(), modelId: '', policy: 'engine', profile: 'production_safe', labAck: false, preAll: false, postExploit: false, strict: true, autostart: true, authorized: false })
 const models = reactive([])
 const creating = ref(false) // 创建进行中防重复提交（双击会产出两个同内容项目并双双自动开工）
 

@@ -3,7 +3,7 @@ export const STATUS_CN = { pending: '待执行', running: '运行中', done: '�
 export const APPROVAL_CN = { pending: '待审批', approved: '已批准', rejected: '已拒绝', cancelled: '已取消', expired: '已过期（屏障超时）', timeout: '已超时' }
 export const EVTYPE_CN = { command: '命令执行', file: '文件产出', stage: '阶段事件', approval: '审批', hexstrike: '远程工具', finding: '漏洞记录' }
 export const COV_CN = { vulnerable: '存在漏洞', no_issue_found: '未发现问题', ruled_out: '已排除', waf_blocked: '被WAF拦截', needs_follow_up: '需跟进', skipped: '跳过' }
-export const POLICY_CN = { manual: '全部人工批准', l1: '仅L2高危人工批准', all: '全部操作自动批准' }
+export const POLICY_CN = { engine: '引擎裁决档（默认）', manual: '全部人工批准', l1: '仅L2高危人工批准', all: '全部操作自动批准' }
 export const STAGE_NAMES = { s1: '资产与范围', s2: '信息收集/侦察', s3: '威胁建模', s4: '漏洞发现', s5: '漏洞利用', s6: '后渗透/横向', s7: '影响证明/收尾', s8: '报告与建议', specA: '专项A·LLM目标', specB1: '专项B1·APP', specB2: '专项B2·小程序', chat: '对话指挥' }
 export const SUBTASK_ICON = { created: '○', running: '◐', waiting: '◔', finished: '●', failed: '✗' }
 export const SUBTASK_COLOR = { created: 'var(--muted)', running: 'var(--gold)', waiting: 'var(--purple)', finished: 'var(--green)', failed: 'var(--red)' }
@@ -35,10 +35,12 @@ export function md2html(s) {
     const cells = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim())
     const th = cells(rows[0])
     if (!th.some(c => c)) return m
-    let h = '<table class="md"><thead><tr>' + th.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>'
+    // v7.4.3 XSS 修复：表格提取发生在全文 escapeHtml 之前、占位符替换在其之后——单元格必须
+    // 逐个转义（渗透控制台的模型消息常含目标站点响应原文，目标可控 HTML 不得在操作员浏览器执行）
+    let h = '<table class="md"><thead><tr>' + th.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>'
     for (const r of rows.slice(1)) {
       const td = cells(r)
-      h += '<tr>' + th.map((_, i) => `<td>${td[i] || ''}</td>`).join('') + '</tr>'
+      h += '<tr>' + th.map((_, i) => `<td>${escapeHtml(td[i] || '')}</td>`).join('') + '</tr>'
     }
     h += '</tbody></table>'
     tables.push(h)

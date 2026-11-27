@@ -30,6 +30,27 @@ type brainSuggestion struct {
 
 var brainTypes = map[string]bool{"budget_transfer": true, "loopback_focus": true, "replan_delta": true}
 
+// gapEvidenceRefs v7.7.3：从覆盖缺口 notes 提取 evidence/ 路径（≤3 条）——参谋缺口类
+// 提议的合法引用源（复用包级 evidencePathRe 正则；跨文件借用包内已声明变量）。
+func gapEvidenceRefs(text string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range evidencePathRe.FindAllString(text, 6) {
+		p := strings.TrimRight(m, "，。；、)）")
+		if p != "" && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+// evidencePathRe evidence/ 路径提取（参谋缺口行附带用）。
+
+
 // parseBrainSuggestions 宽容解析：提取文本中首个平衡 JSON 数组；无数组或解析失败返回空。
 // 超过 3 条截断（有限裁决契约）；type 不在白名单的条目丢弃（否决清单硬编码的第一道）。
 func parseBrainSuggestions(content string) []brainSuggestion {
@@ -94,69 +115,31 @@ func (o *Orchestrator) campaignBrainReview(ctx context.Context, p *store.Project
 	if !o.cfg.Autonomy.IsEnabled() || stageID == "s1" {
 		return
 	}
-	cli, model := o.clientFor(p)
+	cli, model := o.auxClientFor(p) // v7.5.0（E2）：参谋评审走辅助档（配置 aux_model 时；默认同主模型零变化）
 	if cli == nil {
 		return // 测试/无 LLM 装配：fail-open 跳过
 	}
-	// 评审输入：预算/覆盖/验证队列/提案账本的紧凑画像
-	var b strings.Builder
-	usage, _ := o.store.GetUsage(p.ID)
-	budget := p.BudgetTokens
-	if budget == 0 {
-		budget = int64(o.cfg.MaxProjectTokens)
-	}
-	pct := ""
-	if budget > 0 && usage != nil {
-		pct = fmt.Sprintf("（已用 %.0f%%）", float64(usage.TotalTokens)/float64(budget)*100)
-	}
-	b.WriteString(fmt.Sprintf("## 预算\n- stage_tokens=%d project_total=%d/%s %s\n", usageStageTokens(usage, stageID), usageTotal(usage), humanBudget(budget), pct))
-	if cs := o.store.CardStats(p.ID); cs["total"] > 0 {
-		b.WriteString(fmt.Sprintf("## 执行卡漏斗\n- total=%d queued_vt=%d dispatched=%d evidence_linked=%d dispositioned=%d blocked=%d deferred=%d\n",
-			cs["total"], cs["queued_vt"], cs["dispatched"], cs["evidence_linked"], cs["dispositioned"], cs["blocked"], cs["deferred"]))
-	}
-	if vts, err := o.store.ListVTs(p.ID); err == nil {
-		pending, ready := 0, 0
-		for _, v := range vts {
-			if v.Status == "pending" {
-				pending++
-			} else if v.Status == "ready" {
-				ready++
-			}
-		}
-		b.WriteString(fmt.Sprintf("## 验证队列\n- pending=%d ready=%d\n", pending, ready))
-	}
-	if stats := o.store.AutonomyStats(p.ID); stats["total"] != nil && stats["total"].(int) > 0 {
-		b.WriteString(fmt.Sprintf("## 提案账本\n- total=%d approved=%d escalations=%d\n", stats["total"], stats["approved"], stats["escalations"]))
-	}
-	if cov, err := o.store.ListCoverage(p.ID); err == nil && len(cov) > 0 {
-		nf := 0
-		for _, c := range cov {
-			if c.Status == "needs_follow_up" {
-				nf++
-			}
-		}
-		b.WriteString(fmt.Sprintf("## 覆盖矩阵\n- units=%d needs_follow_up=%d\n", len(cov), nf))
-	}
+	// 评审输入：预算/执行卡漏斗/验证队列/覆盖矩阵 + 可引用实体（v7.6.1 证据实体注入）
+	b := o.buildBrainProfile(p, stageID)
 
-	sys := strings.Join([]string{
-		"[[EXPERT:campaign-brain]]",
-		"你是九头鸟的真头作战参谋。你的职责是有限的：基于给定画像，判断是否值得发起跨阶段资源编排建议（≤3 条，无高价值建议必须返回 []）。",
-		"仅允许三类：budget_transfer（阶段间预算转移）、loopback_focus（聚焦回环补缺口，focus 填目标/类/端点）、replan_delta（新面纳入计划）。",
-		"硬约束：只建议、不执行；不得建议越过授权范围/S1 授权门/执行档拦截/总预算；每条必须给 evidence（账本/矩阵里可查的具体依据）。",
-		"输出格式：仅一个 JSON 数组，元素字段 {type,rationale,evidence,focus,target_stage}；无建议输出 []。禁止输出数组之外的任何文字。",
-	}, "\n")
-	msgs := []llm.Message{{Role: "system", Content: sys}, {Role: "user", Content: b.String()}}
-	resp, usage2, err := cli.Chat(ctx, model, msgs, nil, 0.3, 1024)
+	sys := brainSystemPrompt()
+	msgs := []llm.Message{{Role: "system", Content: sys}, {Role: "user", Content: b}}
+	resp, usage2, err := cli.Chat(ctx, model, msgs, nil, o.auxTemperature(0.3), o.auxMaxTokens())
 	if err != nil {
 		o.log(p, stageID, "🎖 作战参谋评审不可用（LLM 失败，跳过）: "+truncateText(err.Error(), 80))
 		return
 	}
-	o.accountUsage(p, stageID, usage2)
+	o.accountUsageC(p, stageID, usage2, usageCtx{kind: "brain", msgs: msgs, resp: &resp}) // v7.5.0（A4）
 	sugs := parseBrainSuggestions(resp.Content)
 	if len(sugs) == 0 {
+		o.auxZeroOutput(p, stageID, "brain", true) // v7.6.0（A1）零产出计数告警
 		o.log(p, stageID, "🎖 作战参谋评审：无高价值编排建议（[]）")
+		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+			Event:  "作战参谋评审",
+			Detail: "零建议（[]）——预算/覆盖/队列画像下无编排触发点（正常静默，留痕供审计）"})
 		return
 	}
+	o.auxZeroOutput(p, stageID, "brain", false)
 	approved, denied, skipped := 0, 0, 0
 	for _, s := range sugs {
 		// v7.2.0 核对修复（审计 A）：参谋建议证据预校验——引用逐条核存，全部不可达的建议
@@ -196,6 +179,184 @@ func (o *Orchestrator) campaignBrainReview(ctx context.Context, p *store.Project
 	} else {
 		o.log(p, stageID, fmt.Sprintf("🎖 作战参谋评审：%d 条建议入裁决（批准 %d / 拒绝 %d）——全部落自主决策账本可审计", len(sugs), approved, denied))
 	}
+}
+
+// brainSystemPrompt 作战参谋系统提示词（v7.6.1 增加引用纪律节，抽为函数便于单测锚定）。
+func brainSystemPrompt() string {
+	return strings.Join([]string{
+		"[[EXPERT:campaign-brain]]",
+		"你是九头鸟的真头作战参谋。你的职责是有限的：基于给定画像，判断是否值得发起跨阶段资源编排建议（≤3 条，无高价值建议必须返回 []）。",
+		"仅允许三类：budget_transfer（阶段间预算转移）、loopback_focus（聚焦回环补缺口，focus 填目标/类/端点）、replan_delta（新面纳入计划）。",
+		"硬约束：只建议、不执行；不得建议越过授权范围/S1 授权门/执行档拦截/总预算；每条必须给 evidence（账本/矩阵里可查的具体依据）。",
+		// v7.6.1（证据实体注入配套）：引用纪律——画像实体是唯一合法引用源，核存逐条验证。
+		"引用纪律：evidence 只能从本画像中出现的编号/键选取（VT-xxx / fact:<key> / F-xxx / CD-xxx / evidence/ 路径）；「覆盖缺口」行与统计计数不可直接作为 evidence（可写入 focus 或 rationale）；引用画像之外的标识将被裁决拒绝。loopback_focus 的 focus 直接使用覆盖缺口行的 端点×类 形态，evidence 搭配相关 VT-/fact:/F- 编号。",
+		"输出格式：仅一个 JSON 数组，元素字段 {type,rationale,evidence,focus,target_stage}；无建议输出 []。禁止输出数组之外的任何文字。",
+	}, "\n")
+}
+
+// buildBrainProfile v7.6.1（证据实体注入，方案「参谋画像从统计升级为渗透信号」）：
+// 作战参谋评审画像——统计计数与**可核存引用实体**并存。实体选取按渗透价值排序：
+// open VT（可引用 VT-）→ 黑板事实（可引用 fact:<key>）→ 高危/确证发现（可引用 F-）→
+// open 候选（可引用 CD-）；覆盖缺口明细**不可直接引用**（verifyEvidenceRefs 不核 endpoint
+// 键），仅作 focus/rationale 素材并显式标注；战利品计数行作为 budget_transfer 价值信号。
+// 修复的结构性缺陷：旧画像只有统计计数、无任何可引用 ID——参谋在「必须给 evidence」
+// 约束下永远无法给出可核验引用，提议被 NO_EVIDENCE 结构性全灭（生产实证 3 收口 5/5 全拒）。
+func (o *Orchestrator) buildBrainProfile(p *store.Project, stageID string) string {
+	var b strings.Builder
+	usage, _ := o.store.GetUsage(p.ID)
+	budget := p.BudgetTokens
+	if budget == 0 {
+		budget = int64(o.cfg.MaxProjectTokens)
+	}
+	pct := ""
+	if budget > 0 && usage != nil {
+		pct = fmt.Sprintf("（已用 %.0f%%）", float64(usage.TotalTokens)/float64(budget)*100)
+	}
+	b.WriteString(fmt.Sprintf("## 预算\n- stage_tokens=%d project_total=%d/%s %s\n", usageStageTokens(usage, stageID), usageTotal(usage), humanBudget(budget), pct))
+	if cs := o.store.CardStats(p.ID); cs["total"] > 0 {
+		b.WriteString(fmt.Sprintf("## 执行卡漏斗\n- total=%d queued_vt=%d dispatched=%d evidence_linked=%d dispositioned=%d blocked=%d deferred=%d\n",
+			cs["total"], cs["queued_vt"], cs["dispatched"], cs["evidence_linked"], cs["dispositioned"], cs["blocked"], cs["deferred"]))
+	}
+	// ①验证队列：计数 + open 实体（按 Priority 升序，与冲刺投递同口径）
+	if vts, err := o.store.ListVTs(p.ID); err == nil {
+		pending, ready := 0, 0
+		var open []*store.VerificationTask
+		for _, v := range vts {
+			switch v.Status {
+			case "pending":
+				pending++
+				open = append(open, v)
+			case "ready":
+				ready++
+				open = append(open, v)
+			}
+		}
+		b.WriteString(fmt.Sprintf("## 验证队列\n- pending=%d ready=%d\n", pending, ready))
+		sort.Slice(open, func(i, j int) bool {
+			if open[i].Priority != open[j].Priority {
+				return open[i].Priority < open[j].Priority
+			}
+			return open[i].ID < open[j].ID
+		})
+		for i, v := range open {
+			if i >= 5 {
+				b.WriteString(fmt.Sprintf("- …（open 共 %d 条，引用以本清单编号为准）\n", len(open)))
+				break
+			}
+			b.WriteString(fmt.Sprintf("- %s [%s/P%d] %s（就绪资产: %s）\n", v.ID, v.Status, v.Priority, truncateText(v.Title, 50), truncateText(v.ReadyAssets, 50)))
+		}
+	}
+	// ②黑板事实：非 deprecated 前 5（fact:<key> 可核存引用）——确证优先、含攻击原语
+	//（primitive:READ/WRITE/EXEC/SSRF/SQLI/AUTHZ/CRED）优先，渗透价值排序而非存储序。
+	if facts, err := o.store.ListFacts(p.ID, 200); err == nil && len(facts) > 0 {
+		var usable []*store.FactRecord
+		for _, f := range facts {
+			if f.Confidence == "deprecated" {
+				continue
+			}
+			usable = append(usable, f)
+		}
+		factRank := func(f *store.FactRecord) int {
+			r := 2
+			if f.Confidence == "confirmed" {
+				r -= 2
+			}
+			if strings.Contains(f.Value, "primitive:") {
+				r -= 1
+			}
+			return r
+		}
+		sort.Slice(usable, func(i, j int) bool { return factRank(usable[i]) < factRank(usable[j]) })
+		if len(usable) > 0 {
+			b.WriteString("## 黑板关键事实\n")
+			for i, f := range usable {
+				if i >= 5 {
+					break
+				}
+				b.WriteString(fmt.Sprintf("- fact:%s [%s] %s\n", f.Key, f.Confidence, truncateRunes(f.Value, 100)))
+			}
+		}
+	}
+	// ③高危/确证发现：确证优先、等级降序前 5（F- 可核存引用）
+	if fs, err := o.store.ListFindings(p.ID); err == nil && len(fs) > 0 {
+		rank := func(f *store.Finding) int {
+			sv := map[string]int{"高": 0, "中": 1, "低": 2, "信息": 3}
+			r, ok := sv[f.Severity]
+			if !ok {
+				r = 4
+			}
+			if f.Confidence == "确证" {
+				r -= 4 // 确证优先于等级
+			}
+			return r
+		}
+		sorted := append([]*store.Finding(nil), fs...)
+		sort.Slice(sorted, func(i, j int) bool { return rank(sorted[i]) < rank(sorted[j]) })
+		b.WriteString("## 关键发现\n")
+		for i, f := range sorted {
+			if i >= 5 {
+				break
+			}
+			b.WriteString(fmt.Sprintf("- %s [%s/%s] %s\n", f.ID, f.Severity, f.Confidence, truncateText(f.Title, 50)))
+		}
+	}
+	// ④候选账本：open 前 3（CD- 可核存引用）
+	if cands, err := o.store.ListCandidates(p.ID); err == nil {
+		var open []*store.Candidate
+		for _, c := range cands {
+			if c.Disposition == "" || c.Disposition == "open" {
+				open = append(open, c)
+			}
+		}
+		if len(open) > 0 {
+			b.WriteString(fmt.Sprintf("## 未定性候选（open %d）\n", len(open)))
+			for i, c := range open {
+				if i >= 3 {
+					break
+				}
+				b.WriteString(fmt.Sprintf("- %s %s\n", c.ID, truncateText(c.Title, 50)))
+			}
+		}
+	}
+	// ⑤覆盖缺口：needs_follow_up 明细前 5——focus/rationale 素材（不可直接引用，显式标注）
+	if cov, err := o.store.ListCoverage(p.ID); err == nil && len(cov) > 0 {
+		nf := 0
+		var gaps []*store.CoverageEntry
+		for _, c := range cov {
+			if c.Status == "needs_follow_up" {
+				nf++
+				gaps = append(gaps, c)
+			}
+		}
+		b.WriteString(fmt.Sprintf("## 覆盖矩阵\n- units=%d needs_follow_up=%d\n", len(cov), nf))
+		if len(gaps) > 0 {
+			b.WriteString("### 覆盖缺口（仅作 focus/rationale 素材，不可作 evidence 引用）\n")
+			for i, c := range gaps {
+				if i >= 5 {
+					break
+				}
+				line := fmt.Sprintf("- %s × %s × %s", c.Endpoint, c.VulnClass, c.Param)
+				// v7.7.3 修复（某历史任务 实证）：缺口行附其自带证据指针——needs_follow_up
+				// notes 内的 evidence/ 路径是可核存实体，且是"该缺口确实存在"的证明；缺失后
+				// 参谋缺口类提议（聚焦回环补测）因 NO_EVIDENCE 被结构性全拒（3/3 实证）。
+				if evs := gapEvidenceRefs(c.Notes); len(evs) > 0 {
+					line += "（evidence: " + strings.Join(evs, ", ") + "）"
+				}
+				if strings.TrimSpace(c.Notes) != "" {
+					line += "（" + firstLine(c.Notes) + "）"
+				}
+				b.WriteString(line + "\n")
+			}
+		}
+	}
+	// ⑥战利品计数（budget_transfer 价值信号：有可复用凭据时跨阶段利用更值得投入）
+	if loot, err := o.store.ListLoot(p.ID, 100); err == nil && len(loot) > 0 {
+		b.WriteString(fmt.Sprintf("## 战利品\n- 已登记 %d 件（掩码，跨阶段复用价值信号）\n", len(loot)))
+	}
+	if stats := o.store.AutonomyStats(p.ID); stats["total"] != nil && stats["total"].(int) > 0 {
+		b.WriteString(fmt.Sprintf("## 提案账本\n- total=%d approved=%d escalations=%d\n", stats["total"], stats["approved"], stats["escalations"]))
+	}
+	return b.String()
 }
 
 // planDeltaOnScope B3：测试中新转 in_scope 的资产 → 自动执行卡（C-00 新面探针）+

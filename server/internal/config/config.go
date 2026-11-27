@@ -4,20 +4,21 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
 
 // Config 顶层配置，对应 config.json。
 type Config struct {
-	Listen  string       `json:"listen"`   // HTTP 监听地址，如 ":8787"（绑定全部网卡）
-	DataDir string       `json:"data_dir"` // 项目工作区根目录
-	WebDir  string       `json:"web_dir"`  // 前端静态资源目录
-	Paths   PathsConfig  `json:"paths"`    // v6.1.0（方案㉑）：引擎资源目录（heads/prompts/skills）——相对路径以 config 文件所在目录为基准解析
-	LLM     LLMConfig    `json:"llm"`
-	Engine  EngineConfig `json:"engine"`
-	Guard   GuardConfig  `json:"guard"`
-	OOB     OOBConfig    `json:"oob"`      // v7.0.0：OOB 回连通道三模式（盲态类 D3 语义验证基础设施）
+	Listen   string         `json:"listen"`   // HTTP 监听地址，如 ":8787"（绑定全部网卡）
+	DataDir  string         `json:"data_dir"` // 项目工作区根目录
+	WebDir   string         `json:"web_dir"`  // 前端静态资源目录
+	Paths    PathsConfig    `json:"paths"`    // v6.1.0（方案㉑）：引擎资源目录（heads/prompts/skills）——相对路径以 config 文件所在目录为基准解析
+	LLM      LLMConfig      `json:"llm"`
+	Engine   EngineConfig   `json:"engine"`
+	Guard    GuardConfig    `json:"guard"`
+	OOB      OOBConfig      `json:"oob"`      // v7.0.0：OOB 回连通道三模式（盲态类 D3 语义验证基础设施）
 	Autonomy AutonomyConfig `json:"autonomy"` // v7.1.0：PAE 自主决策框架（提议-裁决-升维，无人工裁决点、全程留痕）
 
 	// ---- 移植模块配置 ----
@@ -27,7 +28,7 @@ type Config struct {
 	AdminPasswordHash string  `json:"admin_password_hash"` // 可选：sha256("jiutouniao$v1:"+密码) 十六进制；设置后 admin_password 不参与校验（推荐，配置中不存明文口令）
 	DebugCaptcha      bool    `json:"debug_captcha"`       // 调试：验证码回显明文（仅联调用，生产必须 false）
 	HexStrikeURL      string  `json:"hexstrike_url"`       // hexstrike-ai HTTP 网关（如 http://127.0.0.1:9023），空=禁用工具桥
-	MaxProjectTokens  int64   `json:"max_project_tokens"`  // 项目 token 预算上限（0=不限制），超限自动熔断
+	MaxProjectTokens  int64   `json:"max_project_tokens"`  // 项目 token 预算上限（默认 55M=v7.6.0 C4；显式 -1=不限制），超限自动熔断
 	PricePer1MInput   float64 `json:"price_per_1m_input"`  // 成本核算：输入价（$/1M tokens）
 	PricePer1MOutput  float64 `json:"price_per_1m_output"` // 成本核算：输出价（$/1M tokens）
 	AutoApprove       string  `json:"auto_approve"`        // 全局默认审批策略：engine（v7.1.0 默认——L1 自动批准，L2 由裁决器按存在性证明语义+配额确定性裁决）/manual（L1+ 全人工）/l1（仅 L0/L1 自动）/all（L1+L2 自动），项目可覆盖
@@ -63,6 +64,21 @@ type LLMConfig struct {
 	RetryBaseSec      int   `json:"retry_base_sec"`      // 重试指数退避基值秒数（默认 2）
 	RetryMaxSec       int   `json:"retry_max_sec"`       // 重试退避上限秒数（默认 20）
 	ResponseMaxBytes  int64 `json:"response_max_bytes"`  // 响应体读取上限字节（默认 32MiB；防异常超大响应拖垮内存）
+
+	// ---- v7.5.0 Token 成本总案（docs/优化方案_Token成本总案_通用实战能力无损_v7.4.5_20261125.md）----
+
+	// E2 辅助调用模型分层：反思门/导师/作战参谋/压缩摘要器路由到独立模型档（默认空=与主模型
+	// 同 client 不同模型名；再空=完全同主模型，零行为变化）。杂活用便宜档是 PentAGI 13 档 /
+	// Codex reasoning-effort 分档的通行做法；能力由既有 fail-open + 确定性门兜底。
+	AuxModel       string            `json:"aux_model"`      // 辅助调用模型名（空=与主模型完全一致）
+	StageModels    map[string]string `json:"stage_models"`   // v7.7.0 P5 思考分档：阶段→模型注册表 id（如 {"s1":"fast","s2":"fast"}）——侦察/报告等机械阶段用快档；未配置或 id 不在注册表回退默认（s3/s4/s5 不建议配快档——深度推理是发现率来源）
+	AuxMaxTokens   int               `json:"aux_max_tokens"` // 辅助调用输出上限（默认 4096——思考型模型需要 reasoning 预算，1024 下正文恒为空）
+	AuxTemperature float32           `json:"aux_temperature"`
+
+	// B1 前缀缓存标记（仅 Anthropic 协议路径）：system+末位工具定义加 cache_control:ephemeral。
+	// 默认关闭——先经 cmd/probe1937 探测网关支持再开启；OpenAI 协议路径网关自动前缀缓存，
+	// 无需开关（命中量经 usage.prompt_tokens_details 回传分账）。默认 nil=false。
+	CacheEnabled *bool `json:"cache_enabled"`
 }
 
 // EngineConfig 执行循环与并发控制。
@@ -156,6 +172,24 @@ type EngineConfig struct {
 	// v4.4 多目标轮次自适应（方向二B）：s1/s2/s3/s4/s5/s6/s8 阶段预算 = base + (目标数-1)*PerTargetRounds，封顶 3×base（v6.1.0 方案⑤ s1 纳入、v6.3.0 S3-② s3 纳入、v6.7.0 S6-⑩ s6 纳入、v6.9.0 S8-④ s8 纳入——多目标报告按目标组织，分组合并工作量随目标数线性增长；s7 不入选：收尾按条目不按目标）
 	PerTargetRounds int `json:"per_target_rounds"` // 每增 1 个目标追加的轮次（默认 10；<=0 视为默认）
 
+	// v7.6.0（B2③ 用户决策②）：预算耗尽自动收割-续跑——首耗尽不暂停，收割在途产出后
+	// 以同额增量预算自动续跑一次（依赖异步作业落盘防重复）；第二次耗尽仍走 pause。
+	BudgetAutoResume *bool `json:"budget_auto_resume"` // 默认 true；显式 false 恢复「首耗尽即 pause」旧行为
+
+	// v7.6.0（B8 残余协同 SLA）：提问屏障独立档位（默认 600=10 分钟，与审批 30 分钟分离）——
+	// 实证人工响应 6.7s~197s 极快、唯一挂起事故是读码类等待（实测报告 §B8）；残余提问
+	// （副作用授权/异常上报）10 分钟未答即按移交指引降级，不再占 30 分钟审批档。
+	AskBarrierTimeoutSec int `json:"ask_barrier_timeout_sec"`
+
+	// v7.6.0（C1 集中式压缩）：压缩触发仍按 ContextBudgetTokens，但裁剪目标降至该百分比
+	//（默认 70）——单次加深裁剪、减少触发频次 = 减少 cache_reset 次数（实测压缩存根就地
+	// 改写历史曾致 3.5M 全价重发，实测报告 §C1）。
+	CompactionTargetPct int      `json:"compaction_target_pct"`
+	ConvergenceRounds   int      `json:"convergence_rounds"`    // v7.7.0 P1 收敛驱动收口：连续 N 轮无新增确证产出即注入收敛信号（默认 3；0=关闭）
+	ResumeGrantPct      int      `json:"resume_grant_pct"`      // v7.7.2 手动续跑预算授予幅度：上限的百分比（默认 25；0=关闭授予，续跑前须手动提额）
+	ProbeTiering        *bool    `json:"probe_tiering"`         // v7.7.1 红队模式：低产出合规类（基线类）一轮探针后深化不再计产出（收敛 idle 累积→预算让渡高价值族；默认 true；false=合规模式，行为与旧版一致）
+	BaselineTierClasses []string `json:"baseline_tier_classes"` // v7.7.1 基线类清单（vuln_class/endpoint 子串匹配；默认 C-24 TLS/邮件安全 + C-25 安全头——实测 no_issue_found 大头、产出全低危）
+
 	// v5.5.0 能力修复（docs/repair-plan-capability-20261118.md 方案 D/E）：
 	BudgetExhaustedPolicy string `json:"budget_exhausted_policy"` // 阶段预算耗尽策略：pause（默认，阶段置 paused+项目暂停，可提升预算/手动重跑续跑；不再把未完成阶段装作 done）/auto_close（v4.9 旧行为：代收口 done+quality-pending，流水线继续）
 	LoopbackMaxRuns       int    `json:"loopback_max_runs"`       // 单项目自动回环补跑上限（默认 3；超额的 loopback 请求显式拒绝并留痕，不再"置 pending 却不排队"成死角）
@@ -180,6 +214,50 @@ type EngineConfig struct {
 
 	// v3.7.7 重启自愈：引擎重启后对被中断（paused）的项目自动断点续跑
 	AutoResume *bool `json:"auto_resume"` // 默认 true；显式 false 关闭（启动恢复后仍需人工续跑）
+
+	// ---- v7.5.0 Token 成本总案引擎侧开关（全部可回退；默认值 = 能力红线优先）----
+
+	// A3 零 usage 估算兜底：网关不回传 usage 时按消息链估算入账（estimated 标记），
+	// 熔断护栏不再被「免费搭车」绕过。默认 true；显式 false 回退旧口径。
+	UsageEstimateFallback *bool `json:"usage_estimate_fallback"`
+
+	// B2 工具面双模：trimmed（默认，现行——S1 隐藏 14 个执行类工具）| stable（47 工具恒定
+	// 下发吃前缀缓存，S1 越界调用由既有 s1ActionGate 治理链拒绝——Manus「mask 不 remove」）。
+	ToolMaskMode string `json:"tool_mask_mode"`
+
+	// C1 技能索引分阶注入：full（默认——146 技能全量索引常驻，现行口径）| staged（≤30 行
+	// 阶段相关技能提示 + load_skill query 检索；低置信度自动回退全量）。默认 full：
+	// 启用前须过 eval 盲挖指标回归（方案核对结论 C1 单独灰度条款）。
+	SkillIndexMode string `json:"skill_index_mode"`
+
+	// C2 read_file 溢出治理：>16KB 走 .tool-output/ 落盘 + 头尾截断 + 分段指针（与 run_command
+	// 同一口径，堵 200KB 直入消息链通道——S8 十倍离群的机制性根因）。默认 true。
+	ReadFileSpill *bool `json:"read_file_spill"`
+
+	// C3 上下文包无上限块设顶（完整内容仍在文件/库内，可 read_file/search_memory 取回）
+	PackSummaryCap  int `json:"pack_summary_cap"`  // 既往阶段 Summary 上限字符（默认 800；<=0=不设顶回旧口径）
+	PackCoverageCap int `json:"pack_coverage_cap"` // 覆盖明细 vulnerable/needs_follow_up 上限条数（默认 30）
+	PackSubtaskCap  int `json:"pack_subtask_cap"`  // 子任务计划上限条数（默认 25）
+	SprintVTCap     int `json:"sprint_vt_cap"`     // 冲刺消息 VT 枚举上限条数（默认 15，与上下文包 VT 块同口径）
+
+	// C6 上下文包预算模式：legacy（默认，包在压缩保护段外不设顶）| strict（包超阈值时
+	// 低优先级块——时间线/候选/审批/教训——参与压缩，治理口径/ROE/移交块永保）。
+	PackBudgetMode  string `json:"pack_budget_mode"`
+	PackStrictBytes int    `json:"pack_strict_bytes"` // strict 触发阈值字节（默认 61440=60KB）
+
+	// D1 子代理精简模式：true 时子代理 system 不复制完整阶段头正文、上下文包换派发切片
+	// （宪法/守则/ROE 红线不减）。默认 false（完整复制，现行口径）——启用前须 eval 回归。
+	SubagentLite *bool `json:"subagent_lite"`
+
+	// D4 重复调用拦截回放：同工具+同参数（逐字节）第 3 次调用直接回放上次结果（零 LLM 轮次），
+	// 豁免清单=循环检测豁免 + 交互式非幂等工具（shell_*/browser_*/oob_*/run_async/流程类）。
+	// 默认 true；显式 false 回退旧口径（重复调用照常执行）。
+	ReplayIntercept *bool `json:"replay_intercept"`
+
+	// E1 混合压缩：窗口压缩存根化后在链尾前插入一段 ≤8KB 结构化历史摘要（aux 模型生成，
+	// sha256 LRU 去重，receipt 指针机制保留）——治纯存根丢中段语义诱发的重复检索。
+	// 默认 false（纯确定性存根，现行口径）——启用增加少量摘要调用，建议 aux_model 配便宜档。
+	HybridCompaction *bool `json:"hybrid_compaction"`
 }
 
 // ParallelDispatch 同一轮工具是否并发执行（nil=默认并发）。
@@ -198,32 +276,32 @@ type GuardConfig struct {
 
 	// v6.1.0（S1 修复方案）：治理硬门开关（三态 *bool：nil 经 applyDefaults 归一为 true，
 	// 显式 false 才回退——回滚是事故手段，须记录配置变更与重启时间，缺字段不允许静默关闭）。
-	EnforceAuthorization *bool `json:"enforce_authorization"` // ①授权硬门：创建/启动/命令三级拒绝未授权项目
-	BlockShadowAssets    *bool `json:"block_shadow_assets"`   // ②影子资产门：shadow_pending/unknown 资产在任何通道拦截测试流量
-	EnforceAssetScope    *bool `json:"enforce_asset_scope"`   // ㉒/②资产范围门：strict_scope 资产 allowlist 只收有依据的 in_scope
-	EnforceS1L0          *bool `json:"enforce_s1_l0"`         // ③S1 阶段门：仅被动查询，目标侧探测一律拒绝
-	EnforceS1Closure     *bool `json:"enforce_s1_closure"`    // ④/⑤S1 确定性收口门：四件套+逐目标对账
-	EnforceS2Closure     *bool `json:"enforce_s2_closure"`    // v6.2.0 S2-①S2 确定性收口门：攻击面地图/拓扑重建+checklist 可解析+多目标逐目标归宿
-	EnforceBatchScope    *bool `json:"enforce_batch_scope"`   // v6.2.0 S2-②批量通道范围门：run_batch 逐目标与工作区 -l 清单过影子资产/范围校验
-	EnforceS3Closure     *bool `json:"enforce_s3_closure"`    // v6.3.0 S3-①S3 确定性收口门：威胁模型/测试计划存在性+上游承接留痕+判定表证据指针核存
-	EnforceTargetClassMatrix *bool `json:"enforce_target_class_matrix"` // v6.3.0 S3-②判定表目标列复合键：多目标 (类×目标) 覆盖完备+执行卡口径统一（false 回退单目标旧口径）
-	EnforcePlanHandover  *bool `json:"enforce_plan_handover"` // v6.3.0 S3-④T-xx 计划承接门：s3-测试计划条目在 S4 收口前须显式归宿
-	EnforceEndpointMatrix *bool `json:"enforce_endpoint_matrix"` // v6.3.0 S3-⑤端点表↔覆盖矩阵运行时门：diffed/total+total=N 一致性（原 eval 离线门上移）
-	EnforceS5V3Handover   *bool `json:"enforce_s5_v3_handover"`   // v6.4.0 S4-⑤⑥S4 移交承接门：S4 V3 清单+browser-auth 路线移交项在 S5 收口前须有承接留痕（承接反蒸发机械对账）
-	EnforceTHBackfill     *bool `json:"enforce_th_backfill"`      // v6.4.0 S4-⑦威胁清单回填对账门：S4 交付物须有《威胁清单回填记录》小节+extends/replaces 引用真实 TH 编号
-	EnforceS3EndpointTable *bool `json:"enforce_s3_endpoint_table"` // v6.4.0 S4-②端点表生产端契约：S3 收口时端点表存在或计划含「未产出端点表」声明
-	EnforceS5TargetRecon  *bool `json:"enforce_s5_target_recon"`   // v6.4.0 S4-⑨S5 逐目标对账门：多目标项目 S5 收口时 targetCoverageRecon（与 S4 批次6 同口径）
-	EnforceSpecTargetRecon *bool `json:"enforce_spec_target_recon"` // v6.6.0 SP-①专项逐目标对账门：多目标项目 specA/specB1/specB2 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=本专项覆盖 notes+交付物）
-	EnforceS6TargetRecon  *bool `json:"enforce_s6_target_recon"`   // v6.7.0 S6-④s6 逐目标对账门：多目标项目 S6 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=s6 覆盖 notes+交付物排除 s4-/s5- 上游分组产物）
-	EnforceS6Deliverables *bool `json:"enforce_s6_deliverables"`  // v6.7.0 S6-⑥s6 命名交付物条件核验：有立足点信号的项目收口要求权限矩阵+横向路径图或 N/A 声明（无立足点零要求）
+	EnforceAuthorization        *bool `json:"enforce_authorization"`           // ①授权硬门：创建/启动/命令三级拒绝未授权项目
+	BlockShadowAssets           *bool `json:"block_shadow_assets"`             // ②影子资产门：shadow_pending/unknown 资产在任何通道拦截测试流量
+	EnforceAssetScope           *bool `json:"enforce_asset_scope"`             // ㉒/②资产范围门：strict_scope 资产 allowlist 只收有依据的 in_scope
+	EnforceS1L0                 *bool `json:"enforce_s1_l0"`                   // ③S1 阶段门：仅被动查询，目标侧探测一律拒绝
+	EnforceS1Closure            *bool `json:"enforce_s1_closure"`              // ④/⑤S1 确定性收口门：四件套+逐目标对账
+	EnforceS2Closure            *bool `json:"enforce_s2_closure"`              // v6.2.0 S2-①S2 确定性收口门：攻击面地图/拓扑重建+checklist 可解析+多目标逐目标归宿
+	EnforceBatchScope           *bool `json:"enforce_batch_scope"`             // v6.2.0 S2-②批量通道范围门：run_batch 逐目标与工作区 -l 清单过影子资产/范围校验
+	EnforceS3Closure            *bool `json:"enforce_s3_closure"`              // v6.3.0 S3-①S3 确定性收口门：威胁模型/测试计划存在性+上游承接留痕+判定表证据指针核存
+	EnforceTargetClassMatrix    *bool `json:"enforce_target_class_matrix"`     // v6.3.0 S3-②判定表目标列复合键：多目标 (类×目标) 覆盖完备+执行卡口径统一（false 回退单目标旧口径）
+	EnforcePlanHandover         *bool `json:"enforce_plan_handover"`           // v6.3.0 S3-④T-xx 计划承接门：s3-测试计划条目在 S4 收口前须显式归宿
+	EnforceEndpointMatrix       *bool `json:"enforce_endpoint_matrix"`         // v6.3.0 S3-⑤端点表↔覆盖矩阵运行时门：diffed/total+total=N 一致性（原 eval 离线门上移）
+	EnforceS5V3Handover         *bool `json:"enforce_s5_v3_handover"`          // v6.4.0 S4-⑤⑥S4 移交承接门：S4 V3 清单+browser-auth 路线移交项在 S5 收口前须有承接留痕（承接反蒸发机械对账）
+	EnforceTHBackfill           *bool `json:"enforce_th_backfill"`             // v6.4.0 S4-⑦威胁清单回填对账门：S4 交付物须有《威胁清单回填记录》小节+extends/replaces 引用真实 TH 编号
+	EnforceS3EndpointTable      *bool `json:"enforce_s3_endpoint_table"`       // v6.4.0 S4-②端点表生产端契约：S3 收口时端点表存在或计划含「未产出端点表」声明
+	EnforceS5TargetRecon        *bool `json:"enforce_s5_target_recon"`         // v6.4.0 S4-⑨S5 逐目标对账门：多目标项目 S5 收口时 targetCoverageRecon（与 S4 批次6 同口径）
+	EnforceSpecTargetRecon      *bool `json:"enforce_spec_target_recon"`       // v6.6.0 SP-①专项逐目标对账门：多目标项目 specA/specB1/specB2 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=本专项覆盖 notes+交付物）
+	EnforceS6TargetRecon        *bool `json:"enforce_s6_target_recon"`         // v6.7.0 S6-④s6 逐目标对账门：多目标项目 S6 收口时 targetCoverageRecon（与 S4-9/S5 同口径，语料=s6 覆盖 notes+交付物排除 s4-/s5- 上游分组产物）
+	EnforceS6Deliverables       *bool `json:"enforce_s6_deliverables"`         // v6.7.0 S6-⑥s6 命名交付物条件核验：有立足点信号的项目收口要求权限矩阵+横向路径图或 N/A 声明（无立足点零要求）
 	EnforceS7StrictFollowUpPool *bool `json:"enforce_s7_strict_followup_pool"` // v6.8.0 S7-①G3 待续清单回灌门 strict pool：处置池=s7- 前缀交付物∪s7 开工后新增/修改文件∪report.md（false 回退 deliverables 全目录旧池口径——上游交付物端点关键词不再天然满足处置对账）
 	EnforceS8FindingReportRecon *bool `json:"enforce_s8_finding_report_recon"` // v6.9.0 S8-③反向对账门：逐条 findings 的归一化标题前缀或 F- 编号须在 report.md 有归宿留痕（R- 条目/待验证小节/定级表映射并入 R-xx）——报告↔findings 1:1 的另一半（正向门 R≤findings 只拦多记，本门拦漏报；false 回退旧口径仅正向门）
-	EnforceSpecClosure    *bool `json:"enforce_spec_closure"`     // v6.6.0 SP-②专项确定性收口门：前置契约登记+点名交付物+条目三态清单存在性（豁免：无适用资产走前提不成立路径）
-	EnforceROERuntime    *bool `json:"enforce_roe_runtime"`   // ⑧ROE 运行时门：时间窗/连接预算/冷却（rotation 未接入时标注 unenforced）
-	RequireS1ROEAck      *bool `json:"require_s1_roe_ack"`    // ⑩ROE 红线确认门：确认前任何命令通道拒绝
-	RequireS1OOBChannel  *bool `json:"require_s1_oob_channel"` // ⑪OOB 条件收口门：项目要求 OOB 时核验 channel 产物
-	LessonBehaviorPerTarget *bool `json:"lesson_behavior_per_target"` // ⑮教训行为类逐目标检索（false 恢复全局单值旧排序）
-	AssetMetadataValidation *bool `json:"asset_metadata_validation"` // ⑳资产台账字段校验（APP/小程序/云账号按类型必填最小字段集）
+	EnforceSpecClosure          *bool `json:"enforce_spec_closure"`            // v6.6.0 SP-②专项确定性收口门：前置契约登记+点名交付物+条目三态清单存在性（豁免：无适用资产走前提不成立路径）
+	EnforceROERuntime           *bool `json:"enforce_roe_runtime"`             // ⑧ROE 运行时门：时间窗/连接预算/冷却（rotation 未接入时标注 unenforced）
+	RequireS1ROEAck             *bool `json:"require_s1_roe_ack"`              // ⑩ROE 红线确认门：确认前任何命令通道拒绝
+	RequireS1OOBChannel         *bool `json:"require_s1_oob_channel"`          // ⑪OOB 条件收口门：项目要求 OOB 时核验 channel 产物
+	LessonBehaviorPerTarget     *bool `json:"lesson_behavior_per_target"`      // ⑮教训行为类逐目标检索（false 恢复全局单值旧排序）
+	AssetMetadataValidation     *bool `json:"asset_metadata_validation"`       // ⑳资产台账字段校验（APP/小程序/云账号按类型必填最小字段集）
 }
 
 // FlagOrDefault 三态布尔取值：nil=默认值；显式 false 才回退（v6.1.0 配置约定）。
@@ -363,8 +441,80 @@ func (c *Config) applyDefaults() {
 	if c.LLM.ResponseMaxBytes <= 0 {
 		c.LLM.ResponseMaxBytes = 32 << 20
 	}
+	// v7.5.0 Token 成本总案默认值（E2/B2/C1/C3/C6——默认值=现行口径或方案核对结论的安全侧）
+	if c.LLM.AuxMaxTokens <= 0 {
+		c.LLM.AuxMaxTokens = 4096 // v7.5.2：思考型模型 reasoning 预算（1024 下 glm-5.3 类正文恒空——红蓝环/参谋/反思全瞎的总根因）
+	}
+	// v7.6.0（A1③ 防回退）：辅助输出下限护栏——思考型模型把预算耗在 reasoning 上，配置低于
+	// 2048 会复现「正文恒空」故障（实证的两个实战项目：1024 下 27 次调用零产出）。
+	if c.LLM.AuxMaxTokens > 0 && c.LLM.AuxMaxTokens < 2048 {
+		log.Printf("[config] aux_max_tokens=%d 低于思考型模型安全下限，已抬升至 2048（v7.6.0 A1 防回退）", c.LLM.AuxMaxTokens)
+		c.LLM.AuxMaxTokens = 2048
+	}
+	if c.Engine.ToolMaskMode != "stable" {
+		c.Engine.ToolMaskMode = "trimmed" // B2：默认保持现行裁剪口径；stable 需显式开启
+	}
+	if c.Engine.SkillIndexMode != "staged" {
+		c.Engine.SkillIndexMode = "full" // C1：默认全量索引；staged 须过 eval 盲挖回归后开启（方案核对结论）
+	}
+	if c.Engine.PackSummaryCap < 0 {
+		c.Engine.PackSummaryCap = 0
+	}
+	if c.Engine.PackSummaryCap == 0 {
+		c.Engine.PackSummaryCap = 800 // C3：800 字符保骨架，完整版在交付物文件内
+	}
+	if c.Engine.PackCoverageCap <= 0 {
+		c.Engine.PackCoverageCap = 30
+	}
+	if c.Engine.PackSubtaskCap <= 0 {
+		c.Engine.PackSubtaskCap = 25
+	}
+	if c.Engine.SprintVTCap <= 0 {
+		c.Engine.SprintVTCap = 15
+	}
+	if c.Engine.PackBudgetMode != "strict" {
+		c.Engine.PackBudgetMode = "legacy" // C6：默认不设顶；strict 低优先级块参与压缩
+	}
+	if c.Engine.PackStrictBytes <= 0 {
+		c.Engine.PackStrictBytes = 60 * 1024 // C6：strict 触发阈值（默认 60KB）
+	}
 	if c.Engine.MaxStageIterations == 0 {
-		c.Engine.MaxStageIterations = 40
+		// v7.6.0（B2 用户决策②「进一步放宽」）：40→120——实证 某实战项目 S4 首轮 120 轮未收口
+		// （236 端点大攻击面），40/60 基线对单目标大面标定不足；倍增/per-target 自适应照旧叠加。
+		c.Engine.MaxStageIterations = 120
+	}
+	// v7.6.0（B2③）：预算耗尽自动收割-续跑一次（默认开启）——首耗尽不再暂停等人工提额；
+	// 第二次耗尽仍走 pause。显式 false 恢复旧行为。
+	if c.Engine.BudgetAutoResume == nil {
+		t := true
+		c.Engine.BudgetAutoResume = &t
+	}
+	if c.Engine.ResumeGrantPct <= 0 {
+		c.Engine.ResumeGrantPct = 25 // v7.7.2：手动继续=追加消费授权（每次续跑 +25% 上限；0=关闭）
+	}
+	if c.Engine.ConvergenceRounds <= 0 {
+		c.Engine.ConvergenceRounds = 3 // v7.7.0 P1：连续 3 轮无新增确证即注入收敛信号（0=关闭；触发另需 27 类无 queued + 候选无 open）
+	}
+	if c.Engine.ProbeTiering == nil {
+		t := true
+		c.Engine.ProbeTiering = &t // v7.7.1：红队模式默认开（合规项目显式 false）
+	}
+	if len(c.Engine.BaselineTierClasses) == 0 {
+		c.Engine.BaselineTierClasses = []string{"C-24", "C-25"} // v7.7.1：TLS/邮件安全 + 安全头（实测产出全低危、消耗约 20-25% 覆盖轮次）
+	}
+	if c.Engine.CompactionTargetPct <= 0 {
+		c.Engine.CompactionTargetPct = 70
+	}
+	if c.Engine.AskBarrierTimeoutSec <= 0 {
+		c.Engine.AskBarrierTimeoutSec = 600
+	}
+	if c.Engine.CompactionTargetPct > 90 {
+		c.Engine.CompactionTargetPct = 90
+	}
+	// v7.6.0（C4）：项目 token 护栏默认 55M——实证双任务累计 31.9M/44.0M（S7/S8 尚未全部跑完），
+	// 0=不限制使 28M~44M 量级消耗无上限守护（实测样本《Token成本总案》裁决）。显式 -1=不限制。
+	if c.MaxProjectTokens == 0 {
+		c.MaxProjectTokens = 55_000_000
 	}
 	if c.Engine.MaxConcurrentExec == 0 {
 		c.Engine.MaxConcurrentExec = 8 // v7.1.0 E6'（runtime-audit R5）：并发闸 4→8——慢任务占闸曾致 11 个 killed 任务纯烧 244 分钟；批处理吞吐优先，ROE 限速由命令级 --max-rate/行为预算器约束

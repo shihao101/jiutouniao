@@ -23,7 +23,7 @@ func TestCountProjectTargets(t *testing.T) {
 		{"行首尾空白的目标行", "  http://a.com  \n\thttp://b.com\t", 2},
 	}
 	for _, c := range cases {
-		if got := countProjectTargets(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",Target: c.target}); got != c.want {
+		if got := countProjectTargets(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", Target: c.target}); got != c.want {
 			t.Errorf("%s: countProjectTargets=%d want=%d", c.name, got, c.want)
 		}
 	}
@@ -51,7 +51,7 @@ func TestStageBudget(t *testing.T) {
 		{"s7 不放大（v6.9.0 口径不变）", "s7", 10, 10, 60},
 		{"s4 五目标线性（双倍基准）", "s4", 5, 10, 160},
 		{"s2 十目标线性", "s2", 10, 10, 150},
-		{"s5 三目标线性", "s5", 3, 10, 80},
+		{"s5 三目标线性（v7.6.0 B2：s5 纳入倍增，双倍基准）", "s5", 3, 10, 140},
 		{"封顶 3 倍（s4 双倍基准）", "s4", 100, 10, 360},
 		{"perTarget=0 禁用", "s2", 10, 0, 60},
 		{"perTarget 负数禁用（s4 仍双倍）", "s4", 5, -1, 120},
@@ -106,14 +106,14 @@ func TestBuildContextPackMultiTarget(t *testing.T) {
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), cfg: &config.Config{Engine: config.EngineConfig{PerTargetRounds: 10}}}
 	o.heads = map[string]*Head{}
 
-	multi := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-MT", Name: "多目标", Target: "a.example.com\nb.example.com\nc.example.net\nd.example.org\n192.168.100.10"}
+	multi := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-MT", Name: "多目标", Target: "a.example.com\nb.example.com\nc.example.net\nd.example.org\n192.168.100.10"}
 	out := o.buildContextPack(multi, "s4")
 	for _, want := range []string{"共 5 个", "🎯 多目标推进纪律", "目标级轮转先于类级轮转", "档案目标", "+10 轮"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("多目标上下文包缺少 %q", want)
 		}
 	}
-	single := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P-ST", Name: "单目标", Target: "a.example.com"}
+	single := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P-ST", Name: "单目标", Target: "a.example.com"}
 	out1 := o.buildContextPack(single, "s4")
 	if strings.Contains(out1, "多目标推进纪律") {
 		t.Error("单目标上下文包不应注入多目标纪律块")
@@ -121,12 +121,12 @@ func TestBuildContextPackMultiTarget(t *testing.T) {
 }
 
 func TestSplitProjectTargets(t *testing.T) {
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",Target: " a.example.com\n\nb.example.com \n"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", Target: " a.example.com\n\nb.example.com \n"}
 	got := splitProjectTargets(p)
 	if len(got) != 2 || got[0] != "a.example.com" || got[1] != "b.example.com" {
 		t.Errorf("splitProjectTargets=%v", got)
 	}
-	if len(splitProjectTargets(&store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",Target: " \n "})) != 0 {
+	if len(splitProjectTargets(&store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", Target: " \n "})) != 0 {
 		t.Error("全空行应得空列表")
 	}
 	if len(splitProjectTargets(nil)) != 0 {
@@ -161,7 +161,7 @@ func TestS4TargetCoverageGate(t *testing.T) {
 	defer st.Close()
 	o := &Orchestrator{store: st, exec: newTestExec(t, dir), bus: events.NewBus(),
 		cfg: &config.Config{Engine: config.EngineConfig{PerTargetRounds: 10}}}
-	p := &store.Project{ ROEAcknowledgedAt: "2026-11-22T00:00:00Z",ID: "P6", Target: "a.example.com\nb.example.com\nc.example.org"}
+	p := &store.Project{ROEAcknowledgedAt: "2026-11-22T00:00:00Z", ID: "P6", Target: "a.example.com\nb.example.com\nc.example.org"}
 	_ = st.SaveProject(p)
 	if _, err := st.UpsertCoverage(&store.CoverageEntry{ProjectID: "P6", Stage: "s4",
 		Endpoint: "http://a.example.com/api", VulnClass: "SQL注入", Status: "vulnerable"}); err != nil {
@@ -284,6 +284,7 @@ func TestSpecStageBudgetLogHint(t *testing.T) {
 		t.Errorf("specB1 多目标上下文应注入自适应纪律块（SP-① 扩容后承诺一致）")
 	}
 }
+
 // TestV620S2FanoutHintMultitarget v6.2.0 S2-⑥（方案回归清单：multitarget_test.go 扩展）：
 // s2 多目标注入扇出提示、单目标不注入、s4/s5 既有提示不回归。
 func TestV620S2FanoutHintMultitarget(t *testing.T) {

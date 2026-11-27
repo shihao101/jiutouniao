@@ -388,3 +388,129 @@ func (r *SkillRegistry) Index() string {
 	}
 	return b.String()
 }
+
+// stageKeywords v7.5.0（C1）：阶段 → 技能匹配关键词（manifest.StageFit 缺失时的兜底打分词表）。
+var stageKeywords = map[string][]string{
+	"s1":     {"recon", "subdomain", "osint", "dns", "whois", "fingerprint", "被动", "足迹", "子域", "信息收集"},
+	"s2":     {"asset", "surface", "port", "topology", "mapping", "测绘", "资产", "攻击面", "拓扑"},
+	"s3":     {"threat", "plan", "stride", "model", "matrix", "威胁", "测试计划", "判定", "假设"},
+	"s4":     {"web", "api", "auth", "inject", "xss", "sqli", "ssrf", "upload", "waf", "poc", "exploit", "idor", "漏洞", "注入", "越权", "上传"},
+	"s5":     {"exploit", "bypass", "post", "credential", "session", "利用", "登录", "后渗透", "凭据", "绕过"},
+	"s6":     {"lateral", "privesc", "persist", "domain", "pivot", "横向", "提权", "持久化", "权限"},
+	"s7":     {"cleanup", "loot", "handover", "exfil", "清理", "收尾", "移交", "待续"},
+	"s8":     {"report", "evidence", "finding", "writing", "报告", "证据", "定级"},
+	"specA":  {"llm", "ai", "prompt", "agent", "智能体", "注入"},
+	"specB1": {"app", "android", "ios", "static", "hook", "客户端", "脱壳"},
+	"specB2": {"miniapp", "wechat", "小程序", "解包"},
+	"chat":   {"router", "workflow", "方法", "流程"},
+}
+
+// skillStageScore C1 兜底打分：id/title/tags 命中阶段关键词计分（>0 即视为该阶段相关）。
+func skillStageScore(s *Skill, stageID string) int {
+	kws, ok := stageKeywords[stageID]
+	if !ok {
+		return 0
+	}
+	hay := strings.ToLower(s.ID + " " + s.Title + " " + strings.Join(s.Tags, " "))
+	n := 0
+	for _, kw := range kws {
+		if strings.Contains(hay, strings.ToLower(kw)) {
+			n++
+		}
+	}
+	return n
+}
+
+// isCoreSkill C1：核心路由/纪律技能恒在分阶索引（不随阶段过滤丢失）。
+func isCoreSkill(id string) bool {
+	return id == "00-router" || id == "capability-primitive-search" || id == "evidence-standard" || strings.HasPrefix(id, "00-")
+}
+
+// IndexForStage v7.5.0（C1 分阶技能索引）：只注入与当前阶段相关的技能行（≤cap 行），
+// 核心路由/纪律技能恒在；数据源优先 manifest.StageFit 结构化元数据，缺失时关键词打分兜底；
+// 命中不足 3 个（低置信度）返回 ok=false 由调用方回退全量索引——宁可多注入不漏技能。
+// 头仍可用 load_skill(id) 载全文 / load_skill(query) 检索全库（通道现成，注入策略只是
+// 把「全量扫描」改为「按需检索」——ZCode 技能渐进披露 / PentAGI 检索回流同款）。
+func (r *SkillRegistry) IndexForStage(stageID string, cap int) (string, bool) {
+	if r == nil || len(r.skills) == 0 {
+		return "", false
+	}
+	if cap <= 0 {
+		cap = 30
+	}
+	type scored struct {
+		id    string
+		score int
+	}
+	var sel []scored
+	fitCount := 0
+	for id, s := range r.skills {
+		score := 0
+		if m := r.manifest[id]; m != nil && len(m.StageFit) > 0 {
+			for _, sf := range m.StageFit {
+				if sf == stageID {
+					score = 10
+					break
+				}
+			}
+		}
+		if score == 0 {
+			score = skillStageScore(s, stageID)
+		}
+		if score > 0 {
+			fitCount++
+		}
+		if score > 0 || isCoreSkill(id) {
+			sel = append(sel, scored{id: id, score: score})
+		}
+	}
+	if fitCount < 3 {
+		// 低置信度回退线取 3：真实技能库中 s8 类收尾阶段天然只有 3 个相关技能
+		//（report-writing/evidence-standard/autonomy-proposal）——绝对数小≠元数据缺失；
+		// 回退防的是「元数据坏了选不出东西」，防漏由核心技能恒在 + eval 盲挖指标兜底。
+		return "", false
+	}
+	sort.Slice(sel, func(i, j int) bool {
+		if sel[i].score != sel[j].score {
+			return sel[i].score > sel[j].score
+		}
+		return sel[i].id < sel[j].id
+	})
+	if len(sel) > cap {
+		sel = sel[:cap]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "共 %d 个技能，本阶段相关 %d 个（其余用 load_skill query 检索全库）：\n", len(r.skills), len(sel))
+	for _, sc := range sel {
+		b.WriteString(r.indexLine(sc.id))
+	}
+	return b.String(), true
+}
+
+// indexLine 单技能索引行（与 Index() 同格式，manifest 元数据一并呈现）。
+func (r *SkillRegistry) indexLine(id string) string {
+	s := r.skills[id]
+	if s == nil {
+		return ""
+	}
+	line := fmt.Sprintf("- %s：%s（tags: %s）", s.ID, s.Title, strings.Join(s.Tags, "/"))
+	if r.mOK {
+		extra := ""
+		if len(s.Aliases) > 0 {
+			extra += " 别名:" + strings.Join(s.Aliases, "|")
+		}
+		if len(s.DependsOn) > 0 {
+			extra += " 配合:" + strings.Join(s.DependsOn, "|")
+		}
+		if len(s.HandoffTo) > 0 {
+			extra += " 交接:" + strings.Join(s.HandoffTo, "|")
+		}
+		if s.LabOnly {
+			extra += " [Lab Only]"
+		}
+		if extra != "" {
+			line += " —" + extra
+		}
+	}
+	return line + "\n"
+}

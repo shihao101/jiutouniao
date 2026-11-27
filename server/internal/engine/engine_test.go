@@ -410,6 +410,8 @@ func TestChecklistCoverageGate(t *testing.T) {
 	if got := countContains(issues, "无覆盖登记"); got != 1 {
 		t.Fatalf("C1/C3 归账后应仅剩 C2 未覆盖，实际 %d: %v", got, issues)
 	}
+	// v7.6.0（A6/D3）：S4 收口硬字段夹具——nuclei 轨状态声明 + 技能豁免声明（缺任一会被新门拦截）
+	mk("PC", "deliverables/s4-逐类对账表.md", "# 对账\n\n受限项：\n- nuclei 轨：豁免——理由：模板匹配度低，替代覆盖 searchsploit 承接\n- 技能豁免——本阶段动作已有执行卡内联方法\n")
 	// C2 显式处置：deferred 缺 reason → 拦；补 reason 后放行
 	mk("PC", "checklist.json", `{"items":[
 		{"id":"C1","item":"数字型注入","hint":"/payload/sql/number.php","class":"SQLI"},

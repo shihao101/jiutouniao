@@ -157,8 +157,24 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 	if maxRounds <= 0 {
 		maxRounds = 24
 	}
+	// v7.5.0（C4）：chat 链接入窗口压缩（与主链同权，带 receipts 归档可恢复）——
+	// chat 是此前唯一无压缩通道，历史全量重发线性膨胀无上限（实测单项目最高 27.4M）。
+	var chatArchive func(stage, content string) string
+	if projectID != "" {
+		chatArchive = func(stage, content string) string {
+			content = maskSensitiveText(content)
+			rid, rerr := orch.store.SaveReceipt(projectID, stage, content)
+			if rerr != nil {
+				return ""
+			}
+			return rid
+		}
+	}
 	for round := 0; round < maxRounds; round++ {
 		roundsRun = round + 1
+		if cm, nc := compactMsgsWithArchive(msgs, orch.cfg.Engine.ContextBudgetTokens, orch.cfg.Engine.ContextKeepRecent, chatArchive); nc > 0 {
+			msgs = cm
+		}
 		chatClient, chatModel := orch.LLM(), orch.cfg.LLM.Model
 		if projectID != "" {
 			if p, perr := orch.store.GetProject(projectID); perr == nil {
@@ -177,7 +193,7 @@ func (c *ChatSessions) Turn(projectID, userMsg string) (string, error) {
 			}
 			return "", err
 		}
-		orch.accountUsageChat(projectID, usage)
+		orch.accountUsageChat(projectID, usage, msgs, &resp) // v7.5.0（A3/A4）：种类分账 + 估算兜底
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Content) == "" {
 				// v6.0.1：空回复（无文字无工具调用）——常见于思维型模型把 max_tokens 全部耗在

@@ -3,6 +3,7 @@
     <div class="ms-head">
       <b>执行流 · 对话工作台</b>
       <span class="chip">{{ stream.events.length }} 条</span>
+      <span class="chip" v-if="!stream.exhausted" style="cursor:help" title="更早记录已滚动归档保全，点上方「加载更早记录」分页查看">含更早归档</span>
       <span class="chip" v-if="projects.runningStage">阶段 {{ projects.runningStage }} 运行中</span>
       <span style="flex:1"></span>
       <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px">
@@ -15,10 +16,17 @@
     </div>
 
     <div class="ms-body" ref="boxEl">
-      <div v-if="!stream.events.length" class="empty">
+      <!-- v7.4.3 历史分页：更早记录在后端归档保全，按需加载（prepend 时保持滚动位置） -->
+      <div v-if="!stream.exhausted && stream.events.length" class="ms-earlier">
+        <button class="earlier-btn" :disabled="loadingEarlier" @click="loadEarlier">
+          {{ loadingEarlier ? '加载中…' : '加载更早记录' }}
+        </button>
+      </div>
+      <div v-if="stream.exhausted && stream.events.length" class="ms-earlier"><span class="earlier-end">── 已到最早记录 ──</span></div>
+      <div v-if="!stream.events.length && !stream.backfilling" class="empty">
         {{ projects.current ? '暂无执行记录——启动流水线或在下方对话/下达指令' : '选择项目后显示统一执行流' }}
       </div>
-      <template v-for="(e, i) in visible" :key="e.seq || i">
+      <template v-for="(e, i) in visible" :key="e.seq || ('i' + i)">
         <!-- 对话/阶段消息 -->
         <div v-if="e.kind === 'msg'" class="msg" :class="e.role === 'user' ? 'me' : 'ai'">
           <div class="avatar">{{ e.role === 'user' ? '我' : '九' }}</div>
@@ -33,12 +41,12 @@
         <div v-else-if="e.kind === 'tool'" class="msg sys">
           <div class="avatar">器</div>
           <div class="body" style="min-width:0">
-            <div class="toolcard" :class="{open: opened.has(i), ['tc-' + toolTone(e.tool)]: true}">
-              <div class="th" @click="toggle(i)">
+            <div class="toolcard" :class="{open: opened.has(cardKey(e)), ['tc-' + toolTone(e.tool)]: true}">
+              <div class="th" @click="toggle(cardKey(e))">
                 <span class="tn">{{ e.tool }}</span>
-                <span style="color:var(--muted);font-size:11px">{{ e.stage || '' }} · {{ fmtTime(e.ts) }} · {{ opened.has(i) ? '收起' : '展开' }}</span>
+                <span style="color:var(--muted);font-size:11px">{{ e.stage || '' }} · {{ fmtTime(e.ts) }} · {{ opened.has(cardKey(e)) ? '收起' : '展开' }}</span>
               </div>
-              <pre v-if="opened.has(i)">args: {{ e.args }}{{ e.result ? '\n─────\nresult: ' + e.result : '' }}</pre>
+              <pre v-if="opened.has(cardKey(e))">args: {{ e.args }}{{ e.result ? '\n─────\nresult: ' + e.result : '' }}</pre>
             </div>
           </div>
         </div>
@@ -86,8 +94,11 @@ import { md2html, fmtTime } from '../../labels.js'
 
 const input = ref(''), busy = ref(false), showLog = ref(true)
 const boxEl = ref(null)
+const loadingEarlier = ref(false)
+// v7.4.3 工具卡展开状态改按 seq 记录（原按过滤后数组索引，过滤器切换/历史 prepend 后索引漂移会串卡）
 const opened = ref(new Set())
-const toggle = i => { const s = new Set(opened.value); s.has(i) ? s.delete(i) : s.add(i); opened.value = s }
+const cardKey = e => (e.seq != null ? 's' + e.seq : 'x' + e.ts)
+const toggle = k => { const s = new Set(opened.value); s.has(k) ? s.delete(k) : s.add(k); opened.value = s }
 const chips = ['汇报当前进度', '继续推进测试', '列出待审批工单', '暂停新测试并收口本阶段', '把最新发现整理成 finding']
 
 // v3.7.0 执行流类型过滤：全部/消息/工具/日志（原只有日志开关）
@@ -101,7 +112,22 @@ const visible = computed(() => {
   return evs
 })
 const scrollBottom = () => { if (boxEl.value) boxEl.value.scrollTop = boxEl.value.scrollHeight }
-watch(() => stream.events.length, () => nextTick(scrollBottom))
+// v7.4.3 只在「尾部追加」时吸底；prepend（加载更早）由 loadEarlier 自行保持滚动位置
+watch(() => stream.events.length && stream.events[stream.events.length - 1]?.seq, () => nextTick(scrollBottom))
+
+async function loadEarlier() {
+  if (loadingEarlier.value) return
+  loadingEarlier.value = true
+  const el = boxEl.value
+  const prevHeight = el ? el.scrollHeight : 0
+  const prevTop = el ? el.scrollTop : 0
+  try {
+    await stream.loadEarlier(projects.currentId)
+    await nextTick()
+    if (el) el.scrollTop = el.scrollHeight - prevHeight + prevTop // 锚定：新增内容在上方，视口停在原记录
+  } catch (e) { session.showToast('加载更早记录失败：' + e.message) }
+  loadingEarlier.value = false
+}
 
 async function send() {
   const msg = input.value.trim()
@@ -128,6 +154,10 @@ async function send() {
 textarea{max-height:110px}
 .kf{font-size:10.5px;padding:1px 8px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--muted);cursor:pointer}
 .kf.on{color:var(--text);border-color:var(--text2)}
+.ms-earlier{text-align:center;padding:6px 0 2px}
+.earlier-btn{font-size:11px;padding:2px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);cursor:pointer}
+.earlier-btn:hover{color:var(--text)}
+.earlier-end{font-size:10.5px;color:var(--muted);opacity:.7}
 .toolcard{border-left-width:3px}
 .toolcard.tc-finding{border-left-color:var(--red)}
 .toolcard.tc-loot{border-left-color:var(--green)}

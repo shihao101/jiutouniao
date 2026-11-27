@@ -129,6 +129,7 @@ COPY tools-extra/sqlmap /opt/tools/sqlmap
 COPY tools-extra/authz-diff.py /opt/tools/authz-diff.py
 COPY tools-extra/subdomain-takeover.py /opt/tools/subdomain-takeover.py
 COPY tools-extra/captcha-ocr.py /opt/tools/captcha-ocr.py
+COPY tools-extra/subdomain-dict-probe.py /opt/tools/subdomain-dict-probe.py
 COPY tools-extra/primitive-graph.py /opt/tools/primitive-graph.py
 COPY tools-extra/chain-proxy.py /opt/tools/chain-proxy.py
 COPY tools-extra/blind-inject-adjudicator.py /opt/tools/blind-inject-adjudicator.py
@@ -264,6 +265,7 @@ RUN missing=""; \
     tpl=$(find /root/nuclei-templates -name '*.yaml' -o -name '*.yml' 2>/dev/null | wc -l); \
     [ "$tpl" -ge 3000 ] || missing="$missing nuclei-templates(${tpl}个)"; \
     [ -f /opt/tools/wordlists/403-bypass-paths.txt ] || missing="$missing wordlists-403-paths"; \
+    [ -f /opt/tools/subdomain-dict-probe.py ] || missing="$missing subdomain-dict-probe"; \
     [ -f /opt/tools/wordlists/403-bypass-headers.txt ] || missing="$missing wordlists-403-headers"; \
     [ -f /opt/tools/wordlists/ssti-matrix.txt ] || missing="$missing wordlists-ssti"; \
     pat=$(find /opt/tools/PayloadsAllTheThings -name '*.md' 2>/dev/null | wc -l); \

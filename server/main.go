@@ -62,7 +62,9 @@ func main() {
 		}
 		switch protocol {
 		case "anthropic":
-			log.Printf("LLM: Anthropic 协议 %s 模型=%s 请求预算=%ds", cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.RequestTimeoutSec)
+			// v7.5.0（B1）：cache_enabled=true 时请求加前缀缓存标记（先经 cmd/probe1937 探测网关支持）
+			llmOpts.CacheControl = config.FlagOrDefault(cfg.LLM.CacheEnabled, false)
+			log.Printf("LLM: Anthropic 协议 %s 模型=%s 请求预算=%ds cache_control=%v", cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.RequestTimeoutSec, llmOpts.CacheControl)
 			client = llm.NewAnthropicWithOptions(cfg.LLM.BaseURL, cfg.LLM.APIKey, llmOpts)
 		case "", "openai":
 			log.Printf("LLM: OpenAI 协议 %s 模型=%s 请求预算=%ds", cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.RequestTimeoutSec)

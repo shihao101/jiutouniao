@@ -105,6 +105,10 @@ type Usage struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
 	ProviderModel    string `json:"provider_model,omitempty"` // v6.0.1 P7：网关回传的实际模型标识（未回报时为空，调用方记 unreported，不得伪称一致）
+	// v7.5.0（Token 成本总案 A4）：供应商前缀缓存用量分账——命中部分按折扣计费，
+	// 不落账则缓存收益不可验证。供应商未回传时为 0（结构零值安全）。
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // Client 统一对话接口。
@@ -125,6 +129,10 @@ type Options struct {
 	RetryBaseSec      int   // 指数退避基值秒数，默认 2
 	RetryMaxSec       int   // 退避上限秒数，默认 20
 	ResponseMaxBytes  int64 // 响应体读取上限字节，默认 32MiB
+	// v7.5.0（B1）：Anthropic 协议请求追加 cache_control 前缀缓存标记（system + 末位工具定义）。
+	// 默认关闭——需先确认网关支持（cmd/probe1937 探测），严格网关遇未知字段会 4xx；
+	// OpenAI 协议路径无需此开关（前缀缓存由网关自动管理，用量经 A4 分账回传）。
+	CacheControl bool
 }
 
 // DefaultOptions 生产默认值（与 config.applyDefaults 的 LLM 默认值保持同一套口径）。
@@ -246,10 +254,30 @@ type wireResp struct {
 	Choices []struct {
 		Message wireMessage `json:"message"`
 	} `json:"choices"`
-	Usage Usage `json:"usage"`
+	Usage wireUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// wireUsage v7.5.0（A4）：OpenAI 兼容协议的 usage 线上格式——
+// prompt_tokens_details.cached_tokens（前缀缓存命中量）此前被直接丢弃，缓存收益不可测。
+type wireUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+}
+
+// toUsage 线上格式 → 引擎统一 Usage。
+func (w wireUsage) toUsage() Usage {
+	u := Usage{PromptTokens: w.PromptTokens, CompletionTokens: w.CompletionTokens, TotalTokens: w.TotalTokens}
+	if w.PromptTokensDetails != nil {
+		u.CacheReadTokens = w.PromptTokensDetails.CachedTokens
+	}
+	return u
 }
 
 // withRetry 请求级重试：网络错误/5xx/429 退避重试（LLM 网关偶发抖动）；4xx 参数错误不重试。
@@ -367,8 +395,17 @@ func (c *openaiCompat) chatOnce(ctx context.Context, body []byte) (Message, Usag
 		return Message{}, Usage{}, fmt.Errorf("LLM 空回复")
 	}
 	// v6.0.1 P7：网关回传的实际模型标识随 Usage 上报；网关未回报时字段为空（调用方记 unreported）
-	wr.Usage.ProviderModel = wr.Model
-	return fromWireOpenAI(wr.Choices[0].Message), wr.Usage, nil
+	u := wr.Usage.toUsage()
+	u.ProviderModel = wr.Model
+	msg := fromWireOpenAI(wr.Choices[0].Message)
+	// v7.5.2 修复（用户实报的两个实战项目）：思考型模型把 max_tokens 全部
+	// 耗在 reasoning_content、正文为空——旧实现静默返回空 Message，下游把空串当
+	// 「零假设/零建议/无审查意见」，辅助智能四条线系统性空转且无痕。现改为响亮错误
+	//（带 completion tokens 诊断），withRetry 自动重试仍败则调用方按各自 fail-open 路径留痕。
+	if msg.Content == "" && len(msg.ToolCalls) == 0 && msg.ReasoningContent != "" {
+		return Message{}, u, fmt.Errorf("LLM 空回复（思考耗尽预算：completion=%d tokens 全部用于 reasoning，正文为空）——上调 aux_max_tokens 或关闭思考模式", u.CompletionTokens)
+	}
+	return msg, u, nil
 }
 
 func truncate(s string, n int) string {

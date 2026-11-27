@@ -8,10 +8,18 @@
     "model": "glm-5.3-flash",
     "mock": false,
     "temperature": 0.2,
-    "max_tokens": 8192
+    "max_tokens": 8192,
+    "aux_model": "",
+    "aux_max_tokens": 4096,
+    "aux_temperature": 0.2,
+    "cache_enabled": false,
+    "stage_models": {
+      "s1": "",
+      "s2": ""
+    }
   },
   "engine": {
-    "max_stage_iterations": 60,
+    "max_stage_iterations": 120,
     "per_target_rounds": 10,
     "max_concurrent_exec": 8,
     "command_timeout_sec": 300,
@@ -21,13 +29,33 @@
     "context_budget_tokens": 100000,
     "context_keep_recent": 10,
     "barrier_timeout_sec": 1800,
-    "roe_profile_path": ""
+    "roe_profile_path": "",
+    "usage_estimate_fallback": true,
+    "tool_mask_mode": "trimmed",
+    "skill_index_mode": "full",
+    "read_file_spill": true,
+    "pack_summary_cap": 800,
+    "pack_coverage_cap": 30,
+    "pack_subtask_cap": 25,
+    "sprint_vt_cap": 15,
+    "pack_budget_mode": "legacy",
+    "pack_strict_bytes": 61440,
+    "subagent_lite": false,
+    "replay_intercept": true,
+    "hybrid_compaction": false,
+    "convergence_rounds": 3,
+    "probe_tiering": true,
+    "baseline_tier_classes": [
+      "C-24",
+      "C-25"
+    ],
+    "resume_grant_pct": 25
   },
   "auth_token": "",
   "admin_user": "admin",
   "debug_captcha": false,
   "hexstrike_url": "",
-  "max_project_tokens": 0,
+  "max_project_tokens": 55000000,
   "price_per_1m_input": 0,
   "price_per_1m_output": 0,
   "admin_password_hash": "",

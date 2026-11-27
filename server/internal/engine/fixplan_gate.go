@@ -117,7 +117,27 @@ func (o *Orchestrator) classDispositionIssues(p *store.Project, stageID string) 
 	sort.Strings(missing)
 	dist := fmt.Sprintf("tested=%d queued_vt=%d exempted=%d blocked=%d deferred=%d（共 %d 键；tested=coverage/findings 引用 C 编号或对账表标注已测；queued_vt/exempted/blocked/deferred 为处置/豁免/待续——不等于已实际测试）",
 		stats["tested"], stats["queued_vt"], stats["exempted"], stats["blocked"], stats["deferred"], len(need))
+	// v7.6.0（A3 增量）：交付物手写五态数字 vs 引擎实算的漂移提示（提示级非拦截）——实证
+	// 三处手写汇总数字穿透收口（tested 20/deferred 7 vs 实算 16/9 等，实测报告 §A3）且引擎
+	// 实算未回写；引擎实算已随 A3 核对注记落时间线，此处对交付物中可机械提取的
+	// "tested N … deferred N" 形态做一致性提示，供 S8 复核与人工修订定位。
+	o.numericDriftHint(p, stageID, stats)
 	if len(missing) > 0 {
+		// v7.7.0 P2 对账一枪清（docs/优化方案_实战提速五项 §一.P2）：拦截前引擎代填——
+		// 从卡片账本（执行卡状态机）+ 覆盖矩阵生成对账表行（有台账依据才落行，绝不造"已测"），
+		// 对齐 E1' V3 代填模式；代填后重跑门核验（不是跳过门）。双源规则：引擎代填行为
+		// 权威口径，模型只能增补归因/证据不得改五态数字（A3 漂移提示继续生效）。
+		if o.c27Autofill(p, stageID, missing) {
+			issues2 := o.classDispositionIssues(p, stageID)
+			if len(issues2) == 0 {
+				o.log(p, stageID, "⚙ C27 引擎代填完成——重跑核验通过（对账表行全部来自台账）")
+				return nil
+			}
+			// 代填后仍有缺（queued 零 dispatch 类）——保留原拦截文案，附代填说明
+			return append([]string{fmt.Sprintf(
+				"v7.7.0 P2：C27 引擎代填已写入台账可证的行（%d/%d 键）——剩余 %d 键缺投递留痕（零 dispatch），必须真实测试后三选一补齐：①update_coverage 引用 C 编号②record_vt（title/启动条件含 C 编号）③对账表行+证据指针。禁止静默跳过。",
+				len(need)-len(issues2), len(need), len(issues2))}, issues2...)
+		}
 		return []string{fmt.Sprintf(
 			"v6.0.4 C27 类级处置门：%d/%d 个假设/待判定键无任何投递留痕（%s）｜处置分布 %s——三选一补齐后重新收口：①update_coverage 引用 C 编号（Endpoint/Notes）②record_vt（title/启动条件含 C 编号）③写 deliverables/s6-27类收口对账表.md 该行为「已测/合规豁免（no_credentials|production_safe_write_prohibited|environment_unreachable + 依据）/环境不可达/待续」+ 证据指针。禁止静默跳过（实证：某任务 6/18 假设类零测试单元）",
 			len(missing), len(need), truncateText(strings.Join(missing, ","), 140), dist)}
@@ -224,7 +244,7 @@ func (o *Orchestrator) openCandidateIssues(p *store.Project) []string {
 // ---------- S6-⑥ 命名交付物条件核验（v6.7.0） ----------
 
 // footholdRe 立足点信号判据：S4/S5/S6 发现标题/详情命中执行面/驻留面/会话面关键词
-//（RCE 系/内存马/会话接管/命令执行/getshell）。保守取或——多判的代价只是要求
+// （RCE 系/内存马/会话接管/命令执行/getshell）。保守取或——多判的代价只是要求
 // N/A 声明（无产出风险），漏判的代价是横向面交付缺失。
 var footholdRe = regexp.MustCompile(`(RCE|远程代码执行|命令执行|getshell|webshell|内存马|会话接管|接管会话|初始访问)`)
 
@@ -264,8 +284,8 @@ func (o *Orchestrator) hasFoothold(p *store.Project) bool {
 }
 
 // s6DeliverableIssues v6.7.0（S6-⑥）：有立足点的项目收口要求《权限矩阵》与《横向路径图》
-//（前缀匹配，兼容「s6-权限矩阵与横向路径图」实跑最常见合并命名）或 N/A 声明
-//（s6-不适用* 独立文件，或任一 s6-*.md 内容含「不适用」+「依据」）——永远开放 N/A 兜底，
+// （前缀匹配，兼容「s6-权限矩阵与横向路径图」实跑最常见合并命名）或 N/A 声明
+// （s6-不适用* 独立文件，或任一 s6-*.md 内容含「不适用」+「依据」）——永远开放 N/A 兜底，
 // 不逼模型造假产出；拦截文案即修补指引。
 func (o *Orchestrator) s6DeliverableIssues(p *store.Project) []string {
 	names, err := o.exec.ListDir(p.ID, "deliverables")
@@ -317,7 +337,7 @@ func (o *Orchestrator) s6DeliverableIssues(p *store.Project) []string {
 
 // incompleteBatchIssues v6.0.1 C31：killed（超时终止）或近零产出的后台作业，收口时必须
 // 有留痕（coverage/VT/交付物任一引用 job id）——被截杀的扫描不得洗白成阴性结论
-//（实证：nuclei 整批 >5min 零产出被标 inconclusive 后 misconfig 面实质漏测；v4.6 E2 曾
+// （实证：nuclei 整批 >5min 零产出被标 inconclusive 后 misconfig 面实质漏测；v4.6 E2 曾
 // 同类事故：被杀扫描 0 findings 被写成"0 命中干净"）。
 func (o *Orchestrator) incompleteBatchIssues(p *store.Project) []string {
 	jobs := o.exec.IncompleteAsyncJobs(p.ID)
@@ -603,7 +623,7 @@ func (o *Orchestrator) s4HandoverItems(p *store.Project) []string {
 // SP-③ 刻意把专项移交链做成呈现性注入（承接由 S7 清点门兜底，方案 SP-③ 明文），但「S5 对
 // spec 移交项零承接」的失效形态此前收口不可见——本提示与 S5-① matched=0 提示级、S5-⑩
 // S5→S6 承接提示同口径：只让失效形态收口可见，不改变拦截行为。语料与 v3HandoverIssues 同族
-//（coverage notes + VT + 交付物），排除 s4- 与 spec 前缀交付物——spec 自身交付物（假设队列/
+// （coverage notes + VT + 交付物），排除 s4- 与 spec 前缀交付物——spec 自身交付物（假设队列/
 // 专项条目清单）含条目原文，会自匹配放行（与 v3HandoverIssues 排除 s4- 产物同款防自匹配）。
 func (o *Orchestrator) specHandoverHintCount(p *store.Project) int {
 	var items []string
@@ -943,4 +963,104 @@ func (o *Orchestrator) threatBackfillIssues(p *store.Project) []string {
 		return []string{"v6.4.0 威胁清单回填门：发现库存在【清单外】标记发现（潜在 0day 面，s4.md S4-2）但回填记录无 creates 新编号入清单留痕——清单外发现须按 s4.md S4-10 creates 入威胁清单（或在回填记录逐条写明不移入清单的处置理由）"}
 	}
 	return nil
+}
+
+// c27Autofill v7.7.0 P2：C27 引擎代填——对 missing 键逐个从台账推导处置行：
+// 数据源=执行卡状态机（CardStats/卡片明细）+ 覆盖矩阵（vulnerable/ruled_out/waf_blocked/
+// needs_follow_up）+ 验证队列。有台账依据的键生成对账行；零依据（从未投递）的键不落行
+// （返回 false 交回拦截——绝不造"已测"）。成功写入/更新 deliverables/s6-27类收口对账表.md
+// 并时间线留痕。返回 true=全部 missing 键均有台账依据已代填。
+func (o *Orchestrator) c27Autofill(p *store.Project, stageID string, missing []string) bool {
+	covs, _ := o.store.ListCoverage(p.ID)
+	vts, _ := o.store.ListVTs(p.ID)
+	rows := make([]string, 0, len(missing))
+	filled := 0
+	for _, key := range missing {
+		cls := key
+		tgt := ""
+		if i := strings.Index(key, "@"); i > 0 {
+			cls, tgt = key[:i], key[i+1:]
+		}
+		// 推导 1：覆盖矩阵有该类留痕 → 按状态映射处置
+		line, basis := "", ""
+		for _, c := range covs {
+			if !strings.Contains(c.VulnClass, cls) && !strings.Contains(c.Endpoint, cls) {
+				continue
+			}
+			if tgt != "" && !strings.Contains(c.Endpoint, tgt) && !strings.Contains(c.Notes, tgt) {
+				continue
+			}
+			switch c.Status {
+			case "vulnerable":
+				line, basis = "已测", fmt.Sprintf("coverage vulnerable %s（%s）", c.Endpoint, truncateText(c.Notes, 60))
+			case "ruled_out", "no_issue_found":
+				line, basis = "已测", fmt.Sprintf("coverage 真阴性 %s（%s）", c.Endpoint, truncateText(c.Notes, 60))
+			case "waf_blocked":
+				line, basis = "已测（被拦）", fmt.Sprintf("coverage waf_blocked %s", c.Endpoint)
+			case "needs_follow_up":
+				line, basis = "待续", fmt.Sprintf("coverage needs_follow_up %s（%s）", c.Endpoint, truncateText(c.Notes, 50))
+			case "skipped":
+				line, basis = "合规豁免（skipped + 台账登记）", fmt.Sprintf("coverage skipped %s", c.Endpoint)
+			}
+			if line != "" {
+				break
+			}
+		}
+		// 推导 2：VT 队列有该类承接
+		if line == "" {
+			for _, v := range vts {
+				if !strings.Contains(v.Title, cls) && !strings.Contains(v.StartConditions, cls) {
+					continue
+				}
+				if v.Status == "ready" || v.Status == "pending" {
+					line, basis = "待续（VT 承接）", fmt.Sprintf("%s %s", v.ID, truncateText(v.Title, 50))
+				} else if v.Status == "executed" {
+					line, basis = "已测（VT 已执行）", fmt.Sprintf("%s %s", v.ID, truncateText(v.Title, 50))
+				}
+				if line != "" {
+					break
+				}
+			}
+		}
+		if line == "" {
+			continue // 零台账依据：不落行（防漏报——该类必须真实测试）
+		}
+		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s |", key, tgt, line, basis))
+		filled++
+	}
+	if filled == 0 {
+		return false
+	}
+	path := "deliverables/s6-27类收口对账表.md"
+	// v7.7.0 十五轮核对修复：防重入护栏改为按阶段内存态（c27Tried）——十二轮的文件标记
+	// 会跨阶段污染（s4 代填的表头阻断 s5 的合法代填）。语义：同一阶段一次代填机会
+	//（递归重入即 false → 走原拦截）；runStage 启动时重置，回环重跑可再次代填。
+	if o.c27Tried[p.ID+"|"+stageID] {
+		return false
+	}
+	if o.c27Tried == nil {
+		o.c27Tried = map[string]bool{}
+	}
+	o.c27Tried[p.ID+"|"+stageID] = true
+	existing, rerr := o.exec.ReadFile(p.ID, path)
+	var b strings.Builder
+	if rerr == nil && strings.TrimSpace(existing) != "" {
+		b.WriteString(existing)
+		if !strings.HasSuffix(existing, "\n") {
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString("# 27 类收口对账表\n\n> v7.7.0 P2 引擎代填（权威口径：行数据来自执行卡状态机/覆盖矩阵/验证队列，禁手写数字）；模型只增补归因与证据，不得改五态。\n\n| 键 | 目标 | 处置 | 依据 |\n|---|---|---|---|\n")
+	}
+	for _, r := range rows {
+		b.WriteString(r + "\n")
+	}
+	if _, werr := o.exec.WriteFile(p.ID, path, b.String()); werr != nil {
+		return false
+	}
+	_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+		Event:  "v7.7.0 P2 C27 引擎代填",
+		Detail: fmt.Sprintf("%d/%d 缺行键有台账依据已代填（对账表路径 %s）；零依据键交回真实测试", filled, len(missing), path)})
+	o.log(p, stageID, fmt.Sprintf("⚙ C27 引擎代填：%d/%d 键按台账落行（绝不造已测）", filled, len(missing)))
+	return filled == len(missing)
 }

@@ -672,7 +672,7 @@ cpj = open(os.path.join(ROOT, "web-app/src/pages/CreateProjectPage.vue"), encodi
 check("ROE 模板合规口径（现行：自建数据登记移交不删除）", "只登记掩码；自建数据登记移交不删除" in cpj)
 check("ROE 模板无精确清理残留", "精确清理" not in cpj)
 check("ROE 模板禁自建账号", "注册面只评估不注册" in cpj and "自建账号默认禁止" in cpj)
-check("前端默认审批 manual", "policy: 'manual'" in cpj)
+check("前端默认审批 engine（v7.1.0 用户决策不变式）", "policy: 'engine'" in cpj and 'value="engine"' in cpj)
 check("Web 专项条款禁自建", "使用客户提供的测试账号" in cpj)
 
 # ㉖ v5.3.1：Execution Profile 运行时 + 治理门全通道接线锁定（P0——纸面承诺落地）
@@ -935,11 +935,11 @@ check("S5-④ webshell-memshell 旧口径清除", "默认仅演示即删" not in
 v650up = open(os.path.join(ROOT, "skills/upload-bypass.md"), encoding="utf-8").read()
 check("S5-④ upload-bypass 适用阶段声明", "适用阶段（v6.5.0" in v650up)
 # S5-⑤ 验证码 OCR 边界明文化
-check("S5-⑤ s5.md L4 续用边界", "L4 验证码攻坚 VT 续测" in v650s5h)
+check("S5-⑤ s5.md L4 续用边界（v7.6.0 B6 自动打码链形态）", "v7.6.0 B6 自动打码链处理" in v650s5h and "禁止两段式重跑取码" in v650s5h)
 v650ba = open(os.path.join(ROOT, "skills/browser-auth.md"), encoding="utf-8").read()
-check("S5-⑤ browser-auth §三边界", "登录流水线内禁止自动打码/碰撞" in v650ba and "两轨不混用" in v650ba)
-check("S5-⑤ browser-auth M6 边界", "不用于本流水线登录提交" in v650ba)
-check("S5-⑤ identity-bootstrapping L4 边界", "L4 OCR 闭环仅限验证码逻辑攻坚" in v650idb)
+check("S5-⑤ browser-auth §三边界（v7.6.0 B6 自动打码链形态，禁爆破/3 次停止保留）", "禁止验证码碰撞/爆破" in v650ba and "连续 3 次识别失败" in v650ba)
+check("S5-⑤ browser-auth M6 边界（B6：captcha-ocr 为三级链第一级）", "三级链第一级" in v650ba and "禁止两段式跨会话复用" in v650ba)
+check("S5-⑤ identity-bootstrapping L4 边界（B6：两轨打码链共用）", "统一走 B6 自动打码三级链" in v650idb and "两轨差异仅在探针/登录用途" in v650idb)
 # S5-⑥ 冲刺预警分段触发
 check("S5-⑥ StageState SprintNotified", "SprintNotified bool" in v650stg)
 check("S5-⑥ shouldInjectSprint 纯函数", "func shouldInjectSprint" in v650mt and "remain <= budget/3" in v650mt)
@@ -995,7 +995,7 @@ for _sid, _want in [("llm-agent-toolchain", ["s4", "specA"]), ("llm-multimodal",
 # SP-① 专项多目标逐目标对账门 + 轮次自适应扩容
 # v6.9.0 S8-④：名单插 s8（v6.7.0 S6-⑩ 插 s6 同款演进）——锁随名单演进更新
 check("SP-① stageBudget 多目标名单含三专项（v6.9.0 起含 s8）", 'case "s1", "s2", "s3", "s4", "s5", "s6", "s8", "specA", "specB1", "specB2":' in v660mt)
-check("SP-① specB1 重执行 ×2", 'stageID == "s8" || stageID == "s4" || stageID == "specB1"' in v660mt)
+check("SP-① specB1 重执行 ×2（B2：s5 纳入倍增名单）", 'stageID == "s8" || stageID == "s4" || stageID == "s5" || stageID == "specB1"' in v660mt)
 check("SP-① runStage 自适应名单含三专项", '|| stageID == "specA" || stageID == "specB1" || stageID == "specB2") {' in v660eng)
 # v6.9.0 S8-④：上下文自适应条件插 s8——锁随条件演进更新
 check("SP-① 上下文自适应名单含三专项（v6.9.0 起含 s8）", 'adaptive := stageID == "s1" || stageID == "s2" || stageID == "s3" || stageID == "s4" || stageID == "s5" || stageID == "s6" || stageID == "s8" || stageID == "specA"' in v660eng)
@@ -1069,7 +1069,7 @@ check("SP-③ V3 门含三专项", 'if stageID == "s4" || stageID == "s5" || isS
 check("SP-③ S5 专项就绪移交小节", "专项就绪移交（v6.6.0 SP-③" in v660eng)
 check("SP-③ 移交条目带阶段前缀", '"[%s 就绪未执行] %s", sid, it' in v660eng)
 check("SP-③ 上限 10 截断", "专项移交项超 10 条截断" in v660eng)
-check("SP-③ 工具描述三专项", "s4/s5/三专项（specA/specB1/specB2，v6.6.0 SP-③）还必须" in v660eng)
+check("SP-③ 工具描述三专项（v7.6.x 收口清单措辞）", "ready_but_unexecuted" in v660eng and "l2_approved_unused" in v660eng)
 check("SP-③ specA V3 条款", "V3 双清单（v6.6.0 SP-③，引擎强制）" in v660spA)
 check("SP-③ specB1 V3+ready_assets 条款", "ready_but_unexecuted" in v660spB1 and "ready_assets" in v660spB1)
 check("SP-③ specB2 V3 条款", "V3 双清单（v6.6.0 SP-③，引擎强制）" in v660spB2)
@@ -1094,7 +1094,7 @@ check("SP-⑧ specB1 兑现句", "静态直升确证即 BLOCK" in v660spB1 and "
 check("SP-⑧ specB2 兑现句", "反思门专项核查（v6.6.0 SP-⑧）" in v660spB2 and "不以「成功解包」描述为完整源码恢复" in v660spB2)
 check("SP-⑧ 问句引用技能判据", "app-integrity-server-verify" in v660exp and "evidence-standard AI 节" in v660exp and "miniapp-host-isolation" in v660exp)
 # SP-③ 第三遍补：冲刺/终收口消息与 loop-core 规则 4 承诺面=执行面
-check("SP-③ 冲刺消息三专项", "s4/s5/三专项（specA/specB1/specB2，v6.6.0 SP-③）必须在调用参数中携带" in v660eng)
+check("SP-③ 冲刺消息三专项（v7.6.x sprint 措辞）", "s4/s5/三专项携带顶层字段 ready_but_unexecuted" in v660eng)
 check("SP-③ 终收口指令三专项", "（s4/s5/三专项携带顶层字段 ready_but_unexecuted / l2_approved_unused" in v660eng)
 v660lc = open(os.path.join(ROOT, "prompts/loop-core.md"), encoding="utf-8").read()
 check("SP-③ loop-core 规则4 三专项", "s4/s5/三专项（specA/specB1/specB2）收口必须提交" in v660lc)
@@ -1160,7 +1160,7 @@ check("S6-⑥ guard enforce_s6_deliverables", "enforce_s6_deliverables" in v670c
 check("S6-⑥ s6.md N/A 范式", "N/A 声明范式（v6.7.0 S6-⑥）" in v670s6hb)
 
 # S6-⑦ 上下文在场性补块（审批/扇出/K5/原语图）
-check("S6-⑦ 审批块含 s6", 'if stageID == "s4" || stageID == "s5" || stageID == "s6" || stageID == "s7" {' in v670eng)  # v6.8.0 S7-⑤：块扩名 s7，锁同步扩
+check("S6-⑦ 审批块含 s6（含 lowPriOff 守卫形态）", '(stageID == "s4" || stageID == "s5" || stageID == "s6" || stageID == "s7")' in v670eng)  # v6.8.0 S7-⑤：块扩名 s7；v7.5.0 低优先开关并入守卫，锁同步
 check("S6-⑦ 扇出提示 s6 分支", "并行扇出提示（S6 横向）" in v670eng and "限速目标不扇出" in v670eng)
 check("S6-⑦ K5 心跳产物在场", "K5 通道心跳产物" in v670eng and "K5 心跳产物缺失" in v670eng)
 check("S6-⑦ 原语图指针块", "🧩 原语图缺口" in v670eng and "primitive-chains.md" in v670eng)
@@ -1217,7 +1217,7 @@ check("S7-④ s8.md 附录承接", "《需人工清理清单》引用" in v680s8
 
 # S7-⑤ 就绪移交清点 + L2 工单块含 s7
 check("S7-⑤ 就绪移交清点", "就绪移交清点（v6.8.0 S7-⑤" in v680eng)
-check("S7-⑤ L2 块含 s7 清点纪律", '|| stageID == "s7" {' in v680eng and "只清点不再发起新工单" in v680eng)
+check("S7-⑤ L2 块含 s7 清点纪律（并发会话拆分独立 s7 块形态）", 'if stageID == "s7" {' in v680eng and "只清点不再发起新工单" in v680eng)
 
 # S7-⑥ C28 open 候选门扩名 s7
 check("S7-⑥ s7 分支 C28", "C28 open 候选归位门扩名 s7" in v680eng)
@@ -1319,7 +1319,7 @@ def checks_v71():
     check("v7.1 引擎审批档在场", "engineAdjudicate" in appr and "L2_NOT_EXISTENCE_PROOF" in appr)
     check("v7.1 账本桶在场", "bucketAutonomy" in stg and "bucketCards" in stg)
     check("v7.1 config 自主框架在场", "AutonomyConfig" in cfgg and "engine_l2_per_10min" in cfgg)
-    check("v7.1 loop-core 自主决策纪律", "自主决策纪律（v7.1.0 PAE" in lc and "同族三次被拒" in lc)
+    check("v7.1 loop-core 自主决策纪律", "自主决策纪律（v7.1.0 PAE" in lc and "升维" in lc and "保守降级" in lc)
     check("v7.1 真头作战参谋", "作战参谋（v7.1.0 PAE" in mmd)
     check("v7.1 PoC 行/复盘章注入", "pocReadyLine" in eng and "autonomyRetrospective" in eng)
     check("v7.1 压缩紧急裁剪+P5 归档", "预算紧急裁剪" in ctxg and "压缩前分析原文已归档" in ctxg)
@@ -1348,5 +1348,69 @@ def checks_v74():
 for f in (checks_v71, checks_v72, checks_v73, checks_v74):
     f()
 
-print(f"\n文件层核查: {len(CHECKS)-len(fails)-len(skips)}/{len(CHECKS)-len(skips)}（SKIP {len(skips)}；JTN_FLC_RUNTIME=1 可强制执行运行时自测）")
-sys.exit(0 if not fails else 1)
+def checks_v75_77():
+    # v7.5.x-v7.7.0 新内容防回退锁（十三轮核对补齐 §5.3 欠账）
+    eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+    llmc = open(os.path.join(ROOT, "server/internal/llm/client.go"), encoding="utf-8").read()
+    cfgg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
+    ctxg = open(os.path.join(ROOT, "server/internal/engine/context.go"), encoding="utf-8").read()
+    lc = open(os.path.join(ROOT, "prompts/loop-core.md"), encoding="utf-8").read()
+    check("v7.5.2 思考模型空回复响亮诊断", "思考耗尽预算" in llmc)
+    check("v7.5.2 aux 预算 4096", "return 4096" in eng)
+    check("v7.6.x C1 集中式压缩", "compactMsgsWithArchiveFloor" in ctxg and "CompactionTargetPct" in cfgg)
+    check("v7.7.0 P1 收敛驱动收口", "convMaybeFire" in eng and "ConvergenceRounds" in cfgg and "收敛信号" in lc)
+    check("v7.7.0 P1 在途守卫（十三轮）", "pendingAsyncJobs" in eng)
+    fg = open(os.path.join(ROOT, "server/internal/engine/fixplan_gate.go"), encoding="utf-8").read()
+    check("v7.7.0 P2 C27 代填+重入护栏（实现在 fixplan_gate.go）", "c27Autofill" in fg and "v7.7.0 P2 引擎代填" in fg)
+    check("v7.7.0 P3 报告骨架/差距表", "writeReportSkeleton" in eng and "writeChecklistGap" in eng)
+    check("v7.7.0 P4 体积降序压缩", "按体积降序" in ctxg)
+    check("v7.7.0 P5 阶段模型路由", "clientForStage" in eng and "stage_models" in cfgg)
+
+checks_v75_77()
+
+def checks_v771():
+    eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+    cfgg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
+    s4h = open(os.path.join(ROOT, "heads/s4.md"), encoding="utf-8").read()
+    lc = open(os.path.join(ROOT, "prompts/loop-core.md"), encoding="utf-8").read()
+    check("v7.7.1 红队模式基线降档", "baselineTierUnit" in eng and "ProbeTiering" in cfgg)
+    check("v7.7.1 基线类默认清单", '"C-24", "C-25"' in cfgg)
+    check("v7.7.1 s4 规则表红队口径", "v7.7.1 红队模式：一轮基线探针即登记" in s4h)
+    check("v7.7.1 loop-core 基线降档节", "基线类探针降档（v7.7.1 红队模式）" in lc)
+    check("v7.7.1 vulnerable 豁免", 'entry.Status == "vulnerable"' in eng)
+checks_v771()
+
+
+def checks_v772():
+    eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+    cfgg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
+    stg = open(os.path.join(ROOT, "server/internal/store/store.go"), encoding="utf-8").read()
+    check("v7.7.2 续跑预算授予", "grantResumeBudget" in eng and "BudgetGrants" in stg)
+    check("v7.7.2 护栏读取授予", "tokBudget += p.BudgetGrants" in eng)
+    check("v7.7.2 授予幅度可配", "ResumeGrantPct" in cfgg and "resume_grant_pct" in cfgg)
+
+checks_v772()
+def checks_v771():
+    eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+    cfgg = open(os.path.join(ROOT, "server/internal/config/config.go"), encoding="utf-8").read()
+    s4h = open(os.path.join(ROOT, "heads/s4.md"), encoding="utf-8").read()
+    lc = open(os.path.join(ROOT, "prompts/loop-core.md"), encoding="utf-8").read()
+    check("v7.7.1 红队模式基线降档", "baselineTierUnit" in eng and "ProbeTiering" in cfgg)
+    check("v7.7.1 基线类默认清单", '"C-24", "C-25"' in cfgg)
+    check("v7.7.1 s4 规则表红队口径", "v7.7.1 红队模式：一轮基线探针即登记" in s4h)
+    check("v7.7.1 loop-core 基线降档节", "基线类探针降档（v7.7.1 红队模式）" in lc)
+    check("v7.7.1 vulnerable 豁免", 'entry.Status == "vulnerable"' in eng)
+
+
+
+checks_v771()
+
+# 最终汇总（v7.5-v7.7.1 锁定义在首次汇总打印之后运行——此处按全量 CHECKS 出终版数字）
+fails2 = [c for c in CHECKS if c[1] is False]
+skips2 = [c for c in CHECKS if c[1] is None]
+passed2 = len(CHECKS) - len(fails2) - len(skips2)
+for name, ok, detail in CHECKS:
+    if ok is False:
+        print("FAIL " + name + (("  " + detail) if detail else ""))
+print(f"文件层核查: {passed2}/{len(CHECKS)}（SKIP {len(skips2)}；JTN_FLC_RUNTIME=1 可强制执行运行时自测）")
+sys.exit(1 if fails2 else 0)

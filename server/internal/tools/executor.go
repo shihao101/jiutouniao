@@ -711,7 +711,7 @@ func (e *Executor) finalizeJobSidecar(projectID string, job *AsyncJob) {
 		StartedAt: job.StartedAt.Format(time.RFC3339),
 		Timeout:   int(job.Timeout.Seconds()),
 		State:     job.stateFin, ExitCode: job.exitFin,
-		EndedAt: time.Now().Format(time.RFC3339),
+		EndedAt:  time.Now().Format(time.RFC3339),
 		LogBytes: lb, LastOutputAt: lo}
 	if sc.LastOutputAt == "" {
 		sc.LastOutputAt = sc.EndedAt // 全程零输出：以终态时间兜底（区分「跑完零输出」与「时间戳丢失」）
@@ -789,7 +789,11 @@ func (e *Executor) KillAllAsync(projectID string) int {
 	e.asyncMu.Lock()
 	jobs := e.asyncJobs[projectID]
 	e.asyncMu.Unlock()
+	// v7.6.0（B1 flush-then-kill）：先 SIGTERM 给 ≤2s 优雅期（脚本缓冲落盘/信号处理），
+	// 仍未退出再 SIGKILL——实证 某实战项目 矩阵作业被硬杀丢 180 端点结果（17m56s
+	// 计算全废，实测报告 §B1）：优雅期让按行写盘/信号处理型脚本有机会收尾。
 	n := 0
+	termPids := []int{}
 	for _, job := range jobs {
 		select {
 		case <-job.doneCh:
@@ -797,8 +801,28 @@ func (e *Executor) KillAllAsync(projectID string) int {
 		default:
 		}
 		if job.cmd.Process != nil {
-			killGroup(job.cmd.Process.Pid)
+			_ = syscall.Kill(-job.cmd.Process.Pid, syscall.SIGTERM)
+			termPids = append(termPids, job.cmd.Process.Pid)
 			n++
+		}
+	}
+	if len(termPids) > 0 {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			allDead := true
+			for _, pid := range termPids {
+				if err := syscall.Kill(-pid, 0); err == nil {
+					allDead = false
+					break
+				}
+			}
+			if allDead {
+				return n
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		for _, pid := range termPids {
+			killGroup(pid)
 		}
 	}
 	return n
@@ -1286,7 +1310,7 @@ type BatchJob struct {
 	PerTargetTimeout int                 `json:"per_target_timeout_sec"`
 }
 
-// quoteShellArg 单引号安全引用（' → '\''），目标值注入命令模板前的最后防线。
+// quoteShellArg 单引号安全引用（' → '\”），目标值注入命令模板前的最后防线。
 func quoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -1296,7 +1320,7 @@ func quoteShellArg(s string) string {
 // 已知漏洞三通道之一整通道失效。本方法把模板按 {{TARGET}} 拆成逐目标独立 bash 进程组
 // （复用 StartAsync：独立超时/日志/sidecar/进程组终止），单目标失败/超时不影响其余，
 // 聚合结果逐目标保留 job id。风险分级/审批/治理门由 orchestrator 工具层在拆分前后完成
-//（模板与逐目标实例都过 ClassifyRisk，任一实例风险升级即拒绝整批）。
+// （模板与逐目标实例都过 ClassifyRisk，任一实例风险升级即拒绝整批）。
 func (e *Executor) StartBatch(projectID, template string, targets []string, timeoutSec int) (*BatchJob, error) {
 	template = strings.TrimSpace(template)
 	if template == "" {

@@ -269,6 +269,7 @@ details.opt[open] summary{margin-bottom:10px}
         <div class="card"><h4>漏洞等级分布</h4><div id="sevBars"></div></div>
         <div class="card"><h4>命令风险分布</h4><div id="riskBars"></div></div>
         <div class="card"><h4>资产类型分布</h4><div id="assetBars"></div></div>
+        <div class="card"><h4>Token 分账（按调用种类）</h4><div id="kindBars"></div></div>
       </div>
       <div class="grid2 dash-bottom">
         <div class="card"><h4>阶段状态与产出</h4><div id="stageList" class="stage-cols"></div></div>
@@ -631,7 +632,17 @@ function renderDash(){
     ['命令执行',cmds.length],['待审批',aps.length],
     ['Token',u.total_tokens?u.total_tokens.toLocaleString():'—'],
     ['估算成本','$'+(( (u.in_tokens||0)/1e6*(detail.price_in||0) + (u.out_tokens||0)/1e6*(detail.price_out||0) ).toFixed(4))],
+    ['缓存命中率',detail.cache_hit_rate?(detail.cache_hit_rate*100).toFixed(1)+'%':'—'],
+    ['辅助调用',Object.entries(detail.usage_calls||{}).filter(([k])=>k!=='main'&&k!=='chat').reduce((s,[,m])=>s+(m.calls||0),0)||'—'],
   ].map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  // v7.5.0（A5）：Token 按调用种类分账条形图（主线/子代理/反思/导师/参谋/对抗/摘要/chat）
+  const kindCN={main:'主线',subagent:'子代理',reflect:'反思门',mentor:'导师',brain:'参谋',adversary:'对抗环',summary:'压缩摘要',chat:'对话'};
+  const kindRows=Object.entries(detail.usage_calls||{}).filter(([,m])=>(m.in||0)+(m.out||0)>0).sort((a,b)=>(b[1].in+b[1].out)-(a[1].in+a[1].out));
+  const kindTotals=kindRows.reduce((s,[,m])=>s+(m.in||0)+(m.out||0),0);
+  const kb=document.getElementById('kindBars');
+  if(kb)kb.innerHTML=kindRows.length
+    ?kindRows.map(([k,m])=>{const t=(m.in||0)+(m.out||0);return `<div class="bar-row"><div class="bar-label">${kindCN[k]||k}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3,t/Math.max(1,kindTotals)*100)}%;background:var(--purple)"></div></div><div>${(t/1000).toFixed(0)}K</div></div>`}).join('')
+    :'<div class="empty">暂无分账数据</div>';
   const sevC={'高':0,'中':0,'低':0,'信息':0};detail.findings.forEach(f=>sevC[f.severity]=(sevC[f.severity]||0)+1);
   const sevColor={'高':'var(--red)','中':'var(--gold)','低':'var(--accent2)','信息':'var(--muted)'};
   const sevHas=Object.values(sevC).some(v=>v>0);

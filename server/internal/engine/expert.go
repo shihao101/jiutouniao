@@ -62,19 +62,23 @@ func (o *Orchestrator) consultExpert(ctx context.Context, p *store.Project, stag
 	}
 	b.WriteString("\n## 问题\n" + question)
 
-	cli, modelName := o.clientFor(p)
+	cli, modelName := o.auxClientFor(p) // v7.5.0（E2）：导师走辅助档（配置 aux_model 时；默认同主模型零变化）
 	msgs := []llm.Message{
 		{Role: "system", Content: sys},
 		{Role: "user", Content: b.String()},
 	}
-	resp, usage, err := cli.Chat(ctx, modelName, msgs, nil, 0.3, o.cfg.LLM.MaxTokens)
+	// v7.5.0（C5）：输出上限 4096→auxMaxTokens（默认 1024）——导师人格限定输出 ≤300 字，
+	// 原配额是实际所需的 10 倍敞口。
+	resp, usage, err := cli.Chat(ctx, modelName, msgs, nil, o.auxTemperature(0.3), o.auxMaxTokens())
 	if err != nil {
 		return "", err
 	}
-	o.accountUsage(p, stageID, usage)
+	o.accountUsageC(p, stageID, usage, usageCtx{kind: "mentor", msgs: msgs, resp: &resp})
 	if strings.TrimSpace(resp.Content) == "" {
+		o.auxZeroOutput(p, stageID, "mentor", true) // v7.6.0（A1）零产出计数告警
 		return "", fmt.Errorf("专家无回复")
 	}
+	o.auxZeroOutput(p, stageID, "mentor", false)
 	return resp.Content, nil
 }
 
@@ -116,10 +120,17 @@ func (o *Orchestrator) askUser(ctx context.Context, projectID, stage, question s
 	o.bus.Publish(projectID, "ask", rec)
 	o.log(o.mustProject(projectID), stage, fmt.Sprintf("❓ 向人工提问[%s]：%s", id, firstLine(question)))
 
-	// v3.4.0 屏障超时（与人工审批同源配置）：提问不再无限挂起流水线
+	// v3.4.0 屏障超时：提问不再无限挂起流水线。
+	// v7.6.0（B8 残余协同 SLA）：提问独立 10 分钟档（ask_barrier_timeout_sec，默认 600），
+	// 与审批 30 分钟档（barrier_timeout_sec）分离——实证人工响应 6.7s~197s 极快，30 分钟
+	// 档对残余提问过长（唯一挂起事故为读码类等待，该类已随 B6 取消）。
+	askTimeout := o.cfg.Engine.AskBarrierTimeoutSec
+	if askTimeout <= 0 {
+		askTimeout = o.cfg.Engine.BarrierTimeoutSec
+	}
 	var timeoutCh <-chan time.Time
-	if o.cfg.Engine.BarrierTimeoutSec > 0 {
-		timer := time.NewTimer(time.Duration(o.cfg.Engine.BarrierTimeoutSec) * time.Second)
+	if askTimeout > 0 {
+		timer := time.NewTimer(time.Duration(askTimeout) * time.Second)
 		defer timer.Stop()
 		timeoutCh = timer.C
 	}
@@ -132,8 +143,10 @@ func (o *Orchestrator) askUser(ctx context.Context, projectID, stage, question s
 		return "", ctx.Err()
 	case <-timeoutCh:
 		o.cancelAsk(id, "等待超时")
-		o.log(o.mustProject(projectID), stage, fmt.Sprintf("⏱ 提问[%s]等待超时（%d 分钟），已自动取消", id, o.cfg.Engine.BarrierTimeoutSec/60))
-		return "", fmt.Errorf("提问等待超时（%d 分钟），已自动取消", o.cfg.Engine.BarrierTimeoutSec/60)
+		// v7.6.0（B8 残余协同 SLA）：超时回执带移交指引——实证挂起类等待无处置指引会
+		// 诱发模型原地重试（实测报告 §B8）；超时即转移交、继续队列其他项。
+		o.log(o.mustProject(projectID), stage, fmt.Sprintf("⏱ 提问[%s]等待超时（%d 分钟），已自动取消——按 B8 口径转移交", id, askTimeout/60))
+		return "", fmt.Errorf("提问等待超时（%d 分钟），已自动取消——不要重复提问：将该需求按四元组移交（前置依赖/恢复条件/移交原因/验证判据）留痕，继续队列其他项（B8 残余协同 SLA）", askTimeout/60)
 	}
 }
 
@@ -268,6 +281,10 @@ type execMonitor struct {
 	lastKey    string
 	sameCount  int
 	intervened bool
+
+	// v7.5.0（D4）：重复调用拦截回放——完全相同（工具+参数逐字节）调用计数与首次结果存档。
+	dupCounts map[string]int
+	replays   map[string]string
 }
 
 const (
@@ -283,6 +300,64 @@ var monitorExemptTools = map[string]bool{
 	"shell_read":    true, // 交互会话增量读，天然重复
 	"search_memory": true, // v3.4.3：窗口压缩可能存根化早前检索结果，重查是正确行为（查到结论应上黑板）
 	"list_files":    true, // 廉价幂等读，承接文件清单常需重看
+}
+
+// replayExemptTools v7.5.0（D4）：回放拦截豁免清单——合法轮询沿用监控豁免，另排除
+// 交互式/非幂等/流程状态类工具（重复调用有真实副作用或语义，不得回放）。
+var replayExemptTools = func() map[string]bool {
+	m := map[string]bool{}
+	for k := range monitorExemptTools {
+		m[k] = true
+	}
+	for _, t := range []string{
+		"shell_open", "shell_write", "shell_close", // 交互会话写入面
+		"browser_login",                               // 登录态副作用
+		"run_async",                                   // 后台任务派发（幂等性存疑）
+		"complete_stage", "loopback", "plan_subtasks", // 流程状态机类
+		"propose", "update_proposal", // 自主决策账本写入类
+		"record_finding", "record_asset", "record_timeline", "record_loot",
+		"upsert_fact", "record_vt", "update_vt", "record_candidate", "update_candidate",
+		"update_coverage", "store_credential", "revoke_credential", // 台账写入类（重复调用=重复登记）
+		"consult_expert", "ask_user", "request_approval",
+	} {
+		m[t] = true
+	}
+	return m
+}()
+
+// replayCheck v7.5.0（D4）：回放拦截判定——同工具+同参数（逐字节）第 3 次调用命中，
+// 返回回放文本与命中标记（调用方在分发**之前**拦截，不再真实重发）。豁免清单外才计数。
+func (m *execMonitor) replayCheck(name, args string) (string, bool) {
+	if replayExemptTools[name] {
+		return "", false
+	}
+	if m.dupCounts == nil {
+		m.dupCounts = map[string]int{}
+		m.replays = map[string]string{}
+	}
+	key := name + "|" + args
+	m.dupCounts[key]++
+	if m.dupCounts[key] >= 3 {
+		if prev, ok := m.replays[key]; ok {
+			return "♻ [回放拦截] 该调用与此前完全相同（工具+参数逐字节一致）且已第 " + strconv.Itoa(m.dupCounts[key]) +
+				" 次重复——为节省轮次直接回放上次结果，未重新执行。确需重跑：改变参数并说明与上次的差异点。\n\n── 上次结果 ──\n" + prev, true
+		}
+	}
+	return "", false
+}
+
+// replayRecord v7.5.0（D4）：真实执行结果登记为回放源（截 4000 字符防内存膨胀）。
+func (m *execMonitor) replayRecord(name, args, result string) {
+	if replayExemptTools[name] {
+		return
+	}
+	if m.replays == nil {
+		m.replays = map[string]string{}
+	}
+	key := name + "|" + args
+	if _, ok := m.replays[key]; !ok {
+		m.replays[key] = truncateText(result, 4000)
+	}
 }
 
 // monitorSignature 归一化工具调用签名：小写、折叠空白、数字与长十六进制/base64 泛化。
@@ -519,20 +594,22 @@ func (o *Orchestrator) reflectStage(ctx context.Context, p *store.Project, stage
 	}
 	b.WriteString("输出格式：第一行必须是 PASS 或 BLOCK；随后用不超过 5 条列出意见。宁可放行也不要吹毛求疵，只拦截「关键缺口」。")
 
-	cli, modelName := o.clientFor(p)
+	cli, modelName := o.auxClientFor(p) // v7.5.0（E2）：反思门走辅助档（配置 aux_model 时；默认同主模型）
 	msgs := []llm.Message{
 		{Role: "system", Content: "[[EXPERT:reflector]]\n" + expertPersonas["reflector"] + "\n输出格式：第一行 PASS 或 BLOCK。"},
 		{Role: "user", Content: b.String()},
 	}
-	resp, usage, err := cli.Chat(ctx, modelName, msgs, nil, 0.2, 1024)
+	resp, usage, err := cli.Chat(ctx, modelName, msgs, nil, o.auxTemperature(0.2), o.auxMaxTokens())
 	if err != nil {
 		return "", false, err
 	}
-	o.accountUsage(p, stageID, usage)
+	o.accountUsageC(p, stageID, usage, usageCtx{kind: "reflect", msgs: msgs, resp: &resp})
 	text := strings.TrimSpace(resp.Content)
 	if text == "" {
+		o.auxZeroOutput(p, stageID, "reflect", true) // v7.6.0（A1）零产出计数告警
 		return "", false, fmt.Errorf("反思门无回复")
 	}
+	o.auxZeroOutput(p, stageID, "reflect", false)
 	blocked := strings.HasPrefix(text, "BLOCK")
 	return text, blocked, nil
 }
@@ -616,7 +693,7 @@ var adversarialHypRe = regexp.MustCompile(`(?m)^\s*[-*]\s*(.+)$`)
 // adversarialAssumptionPass 单轮对抗假设（v7.3.0 C1 红蓝对抗环的轮次原语）：
 // round=1 首轮独立复查；round≥2 携带 prior（此前轮次假设清单）专攻未覆盖角度。
 // 差异 VT 登记规则升级（方案 C1）：证据指针可核存的差异项直接 status=ready
-//（红蓝对抗环差异项不再等人工确认——证据在场即就绪），「纯推测」仍 pending。
+// （红蓝对抗环差异项不再等人工确认——证据在场即就绪），「纯推测」仍 pending。
 func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.Project, stageID string, round int, prior []string) (string, string, []string) {
 	// 主清单语料 = s3 交付物文本（判定表+威胁清单在列）
 	mainCorpus := o.deliverablesText(p.ID)
@@ -668,20 +745,41 @@ func (o *Orchestrator) adversarialAssumptionPass(ctx context.Context, p *store.P
 	}
 	pctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	resp, usage, err := cli.Chat(pctx, modelName, []llm.Message{
+	rbMsgs := []llm.Message{
 		{Role: "system", Content: fmt.Sprintf("[[R7-ADVERSARIAL]] 独立红队视角审查员（红蓝对抗环第 %d 轮）：输出对抗假设清单，每条附证据指针或「纯推测」标注。", round)},
 		{Role: "user", Content: prompt + priorLines},
-	}, nil, 0.4, 1024)
+	}
+	resp, usage, err := cli.Chat(pctx, modelName, rbMsgs, nil, 0.4, o.auxMaxTokens())
 	if err != nil {
 		o.log(p, stageID, fmt.Sprintf("⚠ 红蓝对抗环 R%d 调用失败（非阻塞，留痕）: %s", round, err.Error()))
 		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
 			Event: "红蓝对抗环", Detail: fmt.Sprintf("R%d 独立会话调用失败（非阻塞）: %s", round, truncateText(err.Error(), 120))})
 		return "", "", nil
 	}
-	o.accountUsage(p, stageID, usage)
+	o.accountUsageC(p, stageID, usage, usageCtx{kind: "adversary"}) // v7.5.0（A4）
 	hyps := parseAdversarialHypotheses(resp.Content)
 	if len(hyps) == 0 {
-		o.log(p, stageID, fmt.Sprintf("红蓝对抗环 R%d：独立会话无可解析假设（留痕）", round))
+		o.auxZeroOutput(p, stageID, "adversary", true) // v7.6.0（A1）零产出计数告警
+	} else {
+		o.auxZeroOutput(p, stageID, "adversary", false) // v7.6.0 复核修复：成功产出清零连击
+	}
+	// v7.5.1 修复（某实战项目 实证）：零可解析假设不再静默——先带格式提醒重试一次
+	//（红方输出格式漂移是最常见成因），仍失败则原始输出留档 evidence/ + 时间线可见。
+	if len(hyps) == 0 {
+		retryMsgs := append(rbMsgs, llm.Message{Role: "user", Content: "你的上一条回复没有可解析的假设行。严格按以下行格式重新输出全部假设（不要其他内容）：\n- [假设] <一句话假设> | 证据指针: <evidence/ 路径> | 类: C-<NN>"})
+		resp2, usage2, err2 := cli.Chat(pctx, modelName, retryMsgs, nil, 0.2, o.auxMaxTokens())
+		if err2 == nil {
+			o.accountUsageC(p, stageID, usage2, usageCtx{kind: "adversary"})
+			hyps = parseAdversarialHypotheses(resp2.Content)
+		}
+	}
+	if len(hyps) == 0 {
+		rawPath := fmt.Sprintf("evidence/s3-对抗假设-原始输出-R%d.md", round)
+		_, _ = o.exec.WriteFile(p.ID, rawPath, "# 红方原始输出（零可解析假设，供格式漂移审计）\n\n"+resp.Content)
+		o.log(p, stageID, fmt.Sprintf("⚠ 红蓝对抗环 R%d：零可解析假设（重试后仍失败）——原始输出留档 %s", round, rawPath))
+		_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: stageID,
+			Event:  "红蓝对抗环",
+			Detail: fmt.Sprintf("R%d 零可解析假设（含一次格式提醒重试）——原始输出留档 %s，供格式漂移审计", round, rawPath)})
 		return "", "", nil
 	}
 
@@ -783,7 +881,7 @@ func evidenceRefIn(raw string) string {
 }
 
 // redBlueAssumptionLoop v7.3.0 C1 红蓝对抗环：R1 独立复查 → R2 携带 R1 假设专攻剩余角度
-//（2 轮迭代，替代旧一次性 R7；每轮独立留痕与 VT 登记，fail-open）。
+// （2 轮迭代，替代旧一次性 R7；每轮独立留痕与 VT 登记，fail-open）。
 func (o *Orchestrator) redBlueAssumptionLoop(ctx context.Context, p *store.Project, stageID string) (string, string) {
 	note1, file1, hyps1 := o.adversarialAssumptionPass(ctx, p, stageID, 1, nil)
 	if len(hyps1) == 0 {

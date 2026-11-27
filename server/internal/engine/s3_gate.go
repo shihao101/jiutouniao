@@ -490,9 +490,10 @@ func (o *Orchestrator) endpointMatrixIssues(p *store.Project) []string {
 			}
 		}
 		if total >= 0 && rows != total {
+			// v7.6.0（A2 自解释契约）：期望形态 + diff + 修复示例（实证收口门盲猜搏斗的根修）
 			return []string{fmt.Sprintf(
-				"v6.3.0 端点表↔矩阵门：%s 行数与 # total 注记不符（rows=%d total=%d）——运行中新增端点行时同步更新表尾计数（intel-factory 四件套约定），补齐后重收口",
-				filepath.Base(fp), rows, total)}
+				"v6.3.0 端点表↔矩阵门：%s 行数与 # total 注记不符——【期望形态】表尾注记 \"# total=<行数>\" 与 \"/\" 前缀数据行数一致；【当前值 diff】rows=%d total=%d（差 %d 行）；【修复示例】新增端点行时同步更新表尾计数（intel-factory 四件套约定），或删除多余空行/注释行后重收口",
+				filepath.Base(fp), rows, total, rows-total)}
 		}
 	}
 	// 来源②：deliverables/*端点表*.md / *endpoints*.md 表格行
@@ -525,7 +526,9 @@ func (o *Orchestrator) endpointMatrixIssues(p *store.Project) []string {
 			o.log(p, "s4", "💡 [端点表豁免] 本项目无端点表，按计划「未产出端点表」声明放行端点表↔矩阵门（v5.1 硬门无输入）")
 			return nil
 		}
-		return []string{"v6.4.0 端点表↔矩阵门：端点表缺失且无「未产出端点表」显式声明（S3 确定性门⑥）——v5.1 全量未授权检测硬门失去输入，回 S3 补产 evidence/s3-api-endpoints.txt（/ 前缀路径+表尾 # total=N）或在测试计划写明声明后重收口"}
+		// v7.6.0（A2 自解释契约）：补期望形态样例
+		return []string{"v6.4.0 端点表↔矩阵门：端点表缺失且无「未产出端点表」显式声明（S3 确定性门⑥）——v5.1 全量未授权检测硬门失去输入。" +
+			"【期望形态】二选一：① evidence/s3-api-endpoints.txt 逐行 \"/\" 前缀路径 + 表尾 \"# total=<行数>\"；② 测试计划/交付物含「未产出端点表」显式声明；【修复示例】echo \"# total=0\" > evidence/s3-api-endpoints.txt（无 API 面时）或回 S3 补产后重收口"}
 	}
 	uniq := map[string]bool{}
 	for _, e := range eps {

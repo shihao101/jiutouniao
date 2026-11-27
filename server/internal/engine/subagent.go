@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"jiutouniao/internal/config"
 	"jiutouniao/internal/llm"
 	"jiutouniao/internal/store"
 )
@@ -168,20 +169,40 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 		// 拆给子代理后变成通用扫描（丢失阶段专属操作细节与收口要求）。
 		headBody = head.Body
 	}
+	lite := config.FlagOrDefault(o.cfg.Engine.SubagentLite, false) // v7.5.0（D1）
+	headSection := ""
+	if lite {
+		// v7.5.0（D1 精简模式）：不再复制完整阶段头正文（最大 6.6K est）——子代理以派发
+		// 目标+宪法+守则为准（红线/纪律全在 loop-core 与守则内，合规面不减）；主头仍持
+		// 全量上下文做整合决策。默认关闭，启用前须 eval 回归（方案核对结论 D1 条款）。
+		headSection = "## 派发你的主头阶段：" + headName + "（精简模式：阶段专属细节以派发目标与宪法为准；完成后以「结果简报」收口，不调用主头专属工具）"
+	} else {
+		headSection = "## 派发你的主头阶段：" + headName + "\n\n" + headBody +
+			"\n\n（以上为所属阶段头的完整步骤与纪律；子代理收口以「结果简报」替代 complete_stage，不触发阶段状态机）"
+	}
 	sys := strings.Join([]string{
 		"[[SUBAGENT:" + run.ID + "]]",
-		o.coreLoop,
+		o.coreLoop, // 宪法恒在（合规红线/深度测试纪律不减——D1 精简只砍头正文与上下文包）
 		fmt.Sprintf(subAgentCharter, run.Rounds),
-		"## 派发你的主头阶段：" + headName + "\n\n" + headBody +
-			"\n\n（以上为所属阶段头的完整步骤与纪律；子代理收口以「结果简报」替代 complete_stage，不触发阶段状态机）",
+		headSection,
 	}, "\n\n")
+	pack := ""
+	if lite {
+		pack = o.buildSubagentPack(p, run.Objective, run.Stage)
+	} else {
+		pack = o.buildContextPack(p, run.Stage)
+	}
 	msgs := []llm.Message{
 		{Role: "system", Content: sys},
 		{Role: "user", Content: fmt.Sprintf("## 派发目标\n%s\n\n## 项目\n- 目标: %s\n- 授权范围与红线见下\n\n%s",
-			run.Objective, firstLine(p.Target), o.buildContextPack(p, run.Stage))},
+			run.Objective, firstLine(p.Target), pack)},
 	}
 	tools := o.subAgentToolDefs()
 	cli, model := o.clientFor(p)
+	// v7.5.0（D3）：子代理自持执行监控（循环签名/回放拦截与主头同权——打转的子代理
+	// 此前可烧满 30 轮 ×3 重试无任何介入）。
+	subMon := &execMonitor{dupCounts: map[string]int{}, replays: map[string]string{}}
+	replayOn := config.FlagOrDefault(o.cfg.Engine.ReplayIntercept, true)
 	for i := 0; i < run.Rounds; i++ {
 		if ctx.Err() != nil {
 			run.Status = "killed"
@@ -189,16 +210,35 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 		}
 		// v5.9.0（方案 P1-4）：子代理与主代理统一预算——每轮前查项目 token 上限，
 		// 超限即停（此前主项目预算熔断后子代理继续烧钱，审计 B5/P1 缺陷）。
-		if tokBudget := p.BudgetTokens; tokBudget > 0 && o.projectTokens(p.ID) >= tokBudget {
+		// v7.5.0（D3）：预算口径补全局 fallback（只配 max_project_tokens 时子代理此前不受约束）。
+		tokBudget := p.BudgetTokens
+		if tokBudget <= 0 {
+			tokBudget = int64(o.cfg.MaxProjectTokens)
+		}
+		if tokBudget > 0 && o.projectTokens(p.ID) >= tokBudget {
 			run.Status = "killed"
 			run.Summary = "项目 token 预算耗尽（与主代理统一熔断口径）"
 			o.log(p, run.Stage, fmt.Sprintf("🧩 子代理 %s 因项目预算耗尽终止", run.ID))
 			return
 		}
 		// v5.9.0（方案 P1-4）：子代理窗口压缩——与主阶段同口径（长任务消息链不再无限增长）
-		if cm, nc := compactMsgs(msgs, o.cfg.Engine.ContextBudgetTokens, o.cfg.Engine.ContextKeepRecent); nc > 0 {
+		// v7.5.0（D3）：压缩升级为可恢复版（receipts 归档与主链同权——原存根不可恢复，
+		// 丢失回执曾诱发子代理重复检索/重跑）。
+		subArchive := func(stage, content string) string {
+			content = maskSensitiveText(content)
+			rid, rerr := o.store.SaveReceipt(p.ID, stage, content)
+			if rerr != nil {
+				return ""
+			}
+			return rid
+		}
+		if cm, nc := compactMsgsWithArchive(msgs, o.cfg.Engine.ContextBudgetTokens, o.cfg.Engine.ContextKeepRecent, subArchive); nc > 0 {
 			msgs = cm
-			o.log(p, run.Stage, fmt.Sprintf("🧹 子代理 %s 上下文压缩：%d 条旧消息存根化", run.ID, nc))
+			o.log(p, run.Stage, fmt.Sprintf("🧹 子代理 %s 上下文压缩：%d 条旧消息存根化（原文已归档可按 receipt id 检索）", run.ID, nc))
+			// v7.5.0（E1）：子代理混合压缩与主链同权（仅压缩事件时注入；摘要器共用 aux+LRU）
+			if hybrid := compactHybrid(msgs, o.cfg.Engine.ContextKeepRecent, o.compactionSummarizer(p, run.Stage)); hybrid != "" {
+				msgs = append(msgs, llm.Message{Role: "user", Content: hybrid})
+			}
 		}
 		// v5.5.0（修复方案 F）：LLM 瞬时错误有界重试（2s/5s/10s 退避）——
 		// Chat 失败时本轮无 tool_calls 产出，重试不重放任何工具副作用；Kill 不重试。
@@ -231,7 +271,7 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 			}
 			return
 		}
-		o.accountUsage(p, run.Stage, usage)
+		o.accountUsageC(p, run.Stage, usage, usageCtx{kind: "subagent", msgs: msgs, tools: tools, resp: &resp}) // v7.5.0（A3/A4）
 		if len(resp.ToolCalls) == 0 {
 			// 纯文本 = 结果简报，子代理收工
 			run.Summary = truncateText(strings.TrimSpace(resp.Content), 2000)
@@ -242,8 +282,25 @@ func (o *Orchestrator) runSubAgent(ctx context.Context, p *store.Project, run *S
 		}
 		msgs = append(msgs, resp)
 		for _, tc := range resp.ToolCalls {
+			// v7.5.0（D3/D4）：循环签名检测 + 回放拦截与主头同权（execMonitor 非并发安全，
+			// 子代理链串行安全）。回放在分发**之前**拦截——同参第 3 次调用不再真实重发。
+			if replayOn {
+				if text, hit := subMon.replayCheck(tc.Name, tc.Arguments); hit {
+					o.log(p, run.Stage, fmt.Sprintf("🧩 子代理 %s 重复调用拦截回放：%s", run.ID, tc.Name))
+					msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: text})
+					continue
+				}
+			}
 			result := o.dispatch(ctx, p, run.Stage, tc)
+			result = o.monitorCheck(ctx, p, run.Stage, subMon, tc, result)
+			if replayOn {
+				subMon.replayRecord(tc.Name, tc.Arguments, result)
+			}
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: result})
+		}
+		// v7.5.0（E1）：子代理混合压缩与主链同权（摘要器共用 aux+LRU；开关关闭时零调用）
+		if hybrid := compactHybrid(msgs, o.cfg.Engine.ContextKeepRecent, o.compactionSummarizer(p, run.Stage)); hybrid != "" {
+			msgs = append(msgs, llm.Message{Role: "user", Content: hybrid})
 		}
 	}
 	run.Summary = fmt.Sprintf("（达到子代理轮次上限 %d 轮，按已入库发现/覆盖度为准；未完成部分由主头决定是否续派）", run.Rounds)

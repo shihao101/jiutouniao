@@ -98,8 +98,8 @@ func (o *Orchestrator) assetTestBlockedAssets(p *store.Project, command string) 
 	stripped := urlHostRe.ReplaceAllString(command, " ")
 	stripped = ipLitRe.ReplaceAllString(stripped, " ")
 	for _, m := range bareDomainRe.FindAllStringSubmatch(stripped, -1) {
-		if !isPlausibleDomainHost(m[1]) {
-			continue // v6.3.2：TLD 纯数字（版本号 3.7/3.7.1 类）非域名候选
+		if !isPlausibleDomainHost(m[1]) || isNonTargetBareToken(stripped, m[1]) {
+			continue // v6.3.2：TLD 纯数字非域名候选；v7.6.0 B4：文件名/属性访问非网络目标
 		}
 		check(m[1])
 	}
@@ -183,6 +183,101 @@ func isPlausibleDomainHost(raw string) bool {
 	}
 	last := h[strings.LastIndex(h, ".")+1:]
 	return !isAllDigits(last)
+}
+
+// bareTokenFileExts v7.6.0（B4 目标位解析）：裸域名候选的文件扩展名尾标签集合——
+// bareDomainRe 对「边界符+含点 token」全量命中，实证把 json.load（属性访问）、coverage.json
+// （本地文件名）、2.9.0（版本号）误判为网络目标（两个实战任务
+// scope-gate 51 次拦截中误拦的主形态，实测报告《优化方案》§B4）。
+var bareTokenFileExts = map[string]bool{
+	"json": true, "py": true, "txt": true, "md": true, "csv": true, "tsv": true,
+	"log": true, "js": true, "ts": true, "html": true, "htm": true, "css": true,
+	"sh": true, "bash": true, "yaml": true, "yml": true, "xml": true, "jar": true,
+	"gif": true, "png": true, "jpg": true, "jpeg": true, "pdf": true, "pcap": true,
+	"pyc": true, "bak": true, "conf": true, "cfg": true, "ini": true, "sql": true,
+	"zip": true, "gz": true, "tgz": true, "tar": true, "war": true, "php": true,
+	"exe": true, "dll": true, "so": true, "bin": true, "pem": true, "crt": true,
+	"key": true, "db": true, "sqlite": true, "go": true, "rs": true, "vue": true,
+}
+
+// commonTLDSet v7.6.0（B4 复核增补）：裸域名候选的尾标签白名单——常见 gTLD/ccTLD + 保留域
+// + 测试惯用域。尾标签不在集合（且非 2 字母 ccTLD）→ 视为代码标识符/路径段（json.load、
+// s.replace、utf8.decode 的后标签均非 TLD——51 次实测误拦的本质特征，首现规则不够，
+// 单测实证后改此规则）。注意：完整 URL 的 host 已由 urlHostRe 先剥另行校验，本规则只影响
+// 「无 scheme 裸 token」形态；异形 TLD（.church 类）裸写会被放行（欠拦方向，可经
+// guard.scope_allowlist 补录），换取 51 次误拦形态归零。
+var commonTLDSet = map[string]bool{
+	"com": true, "net": true, "org": true, "cn": true, "edu": true, "gov": true,
+	"io": true, "dev": true, "info": true, "biz": true, "xyz": true, "top": true,
+	"online": true, "site": true, "shop": true, "app": true, "ai": true, "cc": true,
+	"co": true, "me": true, "tv": true, "cloud": true, "tech": true, "club": true,
+	"vip": true, "store": true, "pro": true, "one": true, "link": true, "zone": true,
+	"wiki": true, "ltd": true, "group": true, "center": true, "systems": true,
+	"company": true, "agency": true, "studio": true, "media": true, "news": true,
+	"blog": true, "games": true, "fun": true, "design": true, "moe": true,
+	// 保留域/测试惯用域（引擎与 eval 大量使用 .test/.example/.lab）
+	"test": true, "example": true, "invalid": true, "localhost": true,
+	"local": true, "internal": true, "lab": true, "demo": true, "corp": true,
+	"home": true, "lan": true, "intranet": true, "sandbox": true,
+}
+
+// isNonTargetBareToken v7.6.0（B4）：裸域名候选是否为「非目标位 token」——按形态判定
+// （通用规则，非目标枚举）：①尾标签是常见文件扩展名 → 本地文件名（coverage.json）；
+// ②命令中出现位置的前导字符是 '.' → 属性/方法访问（x.json.load 形态）；
+// ③尾标签纯数字 → 版本号；④尾标签非常见 TLD → 代码标识符（json.load——复核增补主规则）。
+// 网络目标的合法形态（URL host 已被 urlHostRe 先剥、dig @ns 前缀 '@' 等）不受影响。
+func isNonTargetBareToken(stripped, token string) bool {
+	t := strings.ToLower(strings.TrimSuffix(token, "."))
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		if bareTokenFileExts[t[i+1:]] {
+			return true
+		}
+	}
+	// 属性/方法访问：扫描全部出现位置（首现位置在引号后时首现规则漏判，如 -c "json.load(f)"）
+	for idx := strings.Index(stripped, token); idx > 0; {
+		if stripped[idx-1] == '.' {
+			return true // 属性/方法访问：x.token 形态
+		}
+		next := strings.Index(stripped[idx+1:], token)
+		if next < 0 {
+			break // 无更多出现（原写法 -1+idx+1=idx 不前进，单测挂起实证后修正）
+		}
+		idx += next + 1
+	}
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		last := t[i+1:]
+		// 尾标签纯数字 → 版本号/IP 段（isPlausibleDomainHost 已有同款，防御性兜底）
+		if isAllDigits(last) {
+			return true
+		}
+		// v7.6.0 复核增补主规则：尾标签非常见 TLD → 代码标识符（json.load/s.replace）
+		if !commonTLDSet[last] && len(last) != 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// engineIntrospectionPatterns v7.6.0（B7）：引擎本体/内部实现的识别特征——运行时二进制、
+// 离线门脚本目录、门实现文件。命中即拦（说明性拦截，见 engineIntrospectionBlocked）。
+var engineIntrospectionPatterns = []string{
+	"/app/jiutouniao", "/app/eval/", "eval/gates", "coverage_gate.py",
+	"probe_engine_api", "strings /app", "grep -a jiutouniao",
+}
+
+// engineIntrospectionBlocked v7.6.0（B7 引擎自省治理）：命令引用引擎本体/内部实现时说明性
+// 拦截——门校验规则以拦截回执给出的期望样例与 diff 为准（A2 自解释契约），读取引擎内部
+// 实现/逆向二进制不是合规修复路径（实证 某实战项目 S4 收口期逆向行为，实测报告 §B7）。
+func (o *Orchestrator) engineIntrospectionBlocked(command string) string {
+	lc := strings.ToLower(command)
+	for _, pat := range engineIntrospectionPatterns {
+		if strings.Contains(lc, pat) {
+			return "拒绝执行：该命令引用引擎本体/内部实现（运行时资产，非测试对象）。" +
+				"门校验规则以拦截回执中的「期望形态样例 + 当前值 diff + 修复示例」为准——按样例修形后重新提交即可；" +
+				"若拦截回执仍不足以定位问题，请在交付物「待续清单」中记录该门项并显式标注「门格式待澄清」，S8 复核统一处理。"
+		}
+	}
+	return ""
 }
 
 // dnsQuerySegmentRe 被动 DNS/WHOIS 查询段：dig/host/nslookup/whois 开头的命令段
@@ -711,7 +806,9 @@ var s1ScannerVerbRe = regexp.MustCompile(`(?i)(?:^|[|;&]\s*|\$\(\s*)(nmap|massca
 // ① ClassifyRisk 非 L0 → 拒（S1 仅只读）；
 // ② 命令含扫描器动词 → 拒（目标探测不因全局 L0 白名单放行）；
 // ③ curl/wget 等出网动词的网络对端必须是被动公开数据源（guard.scope_allowlist/defaultScopeAllowlist），
-//    指向项目目标或任何其他主机的 HTTP 请求一律拒。
+//
+//	指向项目目标或任何其他主机的 HTTP 请求一律拒。
+//
 // dig/host/whois 族不提取查询键——DNS/WHOIS 协议本身不接触目标服务。
 func (o *Orchestrator) s1ActionGate(p *store.Project, stageID, command, channel string) string {
 	if s1ScannerVerbRe.MatchString(command) {
@@ -765,6 +862,10 @@ func (o *Orchestrator) passiveSourceOnlyBlocked(p *store.Project, command string
 	stripped := urlFullRe.ReplaceAllString(command, " ")
 	for _, m := range bareDomainRe.FindAllStringSubmatch(stripped, -1) {
 		// 剩余裸域名 = curl/wget 的直接对端（curl -s example.com 形态）
+		// v7.6.0（B4）：文件名/属性访问 token 不是网络对端（coverage.json、json.load 误拦教训）
+		if isNonTargetBareToken(stripped, m[1]) {
+			continue
+		}
 		if !passive[normalizeS1Host(m[1])] {
 			return true
 		}
@@ -794,17 +895,25 @@ func (o *Orchestrator) passiveSourceAllowset() map[string]bool {
 
 // toolDefsForStage ③：阶段感知工具面——S1 隐藏执行/交互/子代理类工具（减少误用面；
 // 安全边界由 s1ActionGate 在治理链强制，直调仍拦）。其余阶段维持全量工具面不变。
+// v7.5.0（B2）双模：engine.tool_mask_mode=stable（Manus「mask 不 remove」）时全部工具
+// 恒定下发吃供应商前缀缓存（工具定义数组每轮逐字节稳定），S1 越界调用由既有
+// s1ActionGate 治理链在执行时拒绝（被隐藏工具的描述追加「本阶段将被拒绝」提示，
+// 对模型不隐瞒工具存在）；trimmed（默认）保持现行裁剪口径。
 func (o *Orchestrator) toolDefsForStage(stageID string) []llm.ToolDef {
 	defs := o.toolDefs()
 	if stageID != "s1" {
 		return defs
 	}
-	hidden := map[string]bool{
-		"run_async": true, "run_batch": true, "http_request": true, "cred_command": true,
-		"hexstrike_command": true, "install_tool": true,
-		"shell_open": true, "shell_write": true, "shell_read": true, "shell_close": true,
-		"spawn_subagent": true, "poll_subagents": true,
-		"propose": true, "update_proposal": true, // v7.1.0：S1 范围界定阶段无自主资源动作语义，隐藏提议工具面（与子代理类同口径）
+	hidden := s1HiddenTools()
+	if o.cfg.Engine.ToolMaskMode == "stable" {
+		out := make([]llm.ToolDef, 0, len(defs)+1)
+		for _, d := range defs {
+			if hidden[d.Name] {
+				d.Description += "（⚠ 本阶段（S1 被动侦察）调用将被治理门拒绝——请改用本阶段允许的被动查询通道）"
+			}
+			out = append(out, d)
+		}
+		return append(out, s1SubdomainMergerDef())
 	}
 	out := make([]llm.ToolDef, 0, len(defs))
 	for _, d := range defs {
@@ -814,10 +923,25 @@ func (o *Orchestrator) toolDefsForStage(stageID string) []llm.ToolDef {
 		out = append(out, d)
 	}
 	// S1 追加本阶段专用本地合并器（⑫：纯本地、零网络、确定性）
-	out = append(out, llm.ToolDef{Name: "build_s1_subdomain_input",
+	return append(out, s1SubdomainMergerDef())
+}
+
+// s1HiddenTools B2：S1 阶段裁剪/标注的工具清单（单源，双模共用）。
+func s1HiddenTools() map[string]bool {
+	return map[string]bool{
+		"run_async": true, "run_batch": true, "http_request": true, "cred_command": true,
+		"hexstrike_command": true, "install_tool": true,
+		"shell_open": true, "shell_write": true, "shell_read": true, "shell_close": true,
+		"spawn_subagent": true, "poll_subagents": true,
+		"propose": true, "update_proposal": true, // v7.1.0：S1 范围界定阶段无自主资源动作语义，隐藏提议工具面（与子代理类同口径）
+	}
+}
+
+// s1SubdomainMergerDef S1 专用本地合并器（⑫：纯本地、零网络、确定性）。
+func s1SubdomainMergerDef() llm.ToolDef {
+	return llm.ToolDef{Name: "build_s1_subdomain_input",
 		Description: "v6.1.0（S1 专用·纯本地零网络）：读取工作区已落盘的 CT/subfinder/DNS 候选文本（evidence/s1-crtsh-subs.txt 等），规范化去重排序生成 evidence/s1-subs-final.txt 与来源 manifest（s1-subs-manifest.json）——子域接管 DNS 指纹脚本的输入必须经此生成；无来源时 manifest 记 not_checked，不静默当作零候选。",
-		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}}})
-	return out
+		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}}}
 }
 
 // ---- ⑩ ROE 红线确认 ----
@@ -825,6 +949,12 @@ func (o *Orchestrator) toolDefsForStage(stageID string) []llm.ToolDef {
 // requestROEAck ⑩：S1 红线复述确认屏障——问题落库（Kind=roe_ack）→ 等待人工回答 →
 // 明确 yes 才置位 ROEAcknowledgedAt（时间线+证据留痕）；非 yes/超时不置位。
 func (o *Orchestrator) requestROEAck(ctx context.Context, p *store.Project, stageID, question string) string {
+	// v7.6.0（E4 复核修复）：已确认项目防御性跳过——创建页授权确认已置位时，模型习惯性
+	// 调用 purpose=roe_ack 不再向人重复提问（决策④「任务开始时不需要二次确认 ROE 红线」）。
+	if strings.TrimSpace(p.ROEAcknowledgedAt) != "" {
+		o.log(p, stageID, "✔ ROE 红线已确认（创建时置位，E4）——跳过重复确认，不发起人工提问")
+		return "ROE 红线已确认（创建页授权确认置位，确认时间 " + p.ROEAcknowledgedAt + "）——无需重复确认，直接继续当前工作。"
+	}
 	rec := &store.AskRecord{ProjectID: p.ID, Stage: stageID, Kind: "roe_ack",
 		Question: truncateText(question, 1500), Status: "pending"}
 	id, err := o.store.AddAsk(rec)
@@ -884,10 +1014,10 @@ func (o *Orchestrator) askWaiterBlocking(ctx context.Context, askID, projectID, 
 
 // assetTypeRequiredFields ⑳：四类非 Web 资产的最小字段集（键必须存在，值可 unknown）。
 var assetTypeRequiredFields = map[string][]string{
-	"APP":     {"platform", "version", "backend_api"},
-	"小程序":   {"platform", "app_id", "version", "backend_api"},
-	"云账号":    {"provider", "role", "region"},
-	"API":    {"base_url", "auth_type"},
+	"APP": {"platform", "version", "backend_api"},
+	"小程序": {"platform", "app_id", "version", "backend_api"},
+	"云账号": {"provider", "role", "region"},
+	"API": {"base_url", "auth_type"},
 }
 
 // missingAssetTypeFields 返回该资产类型缺失的最小字段（metadata 为 nil 视为全缺）。

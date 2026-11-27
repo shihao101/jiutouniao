@@ -13,7 +13,7 @@ import (
 func main() {
 	dbPath := os.Args[1]
 	outDir := os.Args[2]
-	prefix := os.Args[3] // bucket 前缀，如 projects__JT-46A865D51C / stream__JT-46A865D51C
+	prefix := os.Args[3] // bucket 前缀，如 projects__<projectID> / stream__<projectID>
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		panic(err)
 	}

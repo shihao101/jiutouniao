@@ -19,21 +19,28 @@ import (
 )
 
 var (
-	bucketProjects  = []byte("projects")
-	bucketFindings  = []byte("findings")
-	bucketAssets    = []byte("assets")
-	bucketTimeline  = []byte("timeline")
-	bucketApprovals = []byte("approvals")
-	bucketEvidence  = []byte("evidence")
-	bucketCoverage  = []byte("coverage")
-	bucketUsage     = []byte("usage")
-	bucketSettings  = []byte("settings")
-	bucketChats     = []byte("chats")
-	bucketStream    = []byte("stream")
-	bucketSubtasks  = []byte("subtasks")
-	bucketAsks      = []byte("asks")
-	bucketFacts     = []byte("facts") // v3.3.0 项目黑板（事实账本）
-	bucketLoot      = []byte("loot")  // v3.3.0 战利品库（凭据/票据/flag 掩码登记）
+	bucketProjects   = []byte("projects")
+	bucketFindings   = []byte("findings")
+	bucketAssets     = []byte("assets")
+	bucketTimeline   = []byte("timeline")
+	bucketApprovals  = []byte("approvals")
+	bucketEvidence   = []byte("evidence")
+	bucketCoverage   = []byte("coverage")
+	bucketUsage      = []byte("usage")
+	bucketUsageCalls = []byte("usage_calls") // v7.5.0（A4）：逐调用明细账（种类维度环形 5000 行）
+	bucketSettings   = []byte("settings")
+	bucketChats      = []byte("chats")
+	bucketStream     = []byte("stream")
+	// v7.4.3 执行流滚动归档：live 桶只保最近 streamKeepPerProject 条，淘汰件转入本桶
+	//（键同 stream=ID|seq）——控制台自建留痕只挪不删，刷新/分页可回填全量历史。
+	bucketStreamArchive = []byte("stream_archive")
+	bucketSubtasks      = []byte("subtasks")
+	// v7.4.3 子任务重建归档：plan_subtasks 全量重建前的旧计划转入本桶（键=ST 编号），
+	// 历史计划不再蒸发（回环/重进阶段的重建可追溯）。
+	bucketSubtaskArchive = []byte("subtask_archive")
+	bucketAsks           = []byte("asks")
+	bucketFacts          = []byte("facts") // v3.3.0 项目黑板（事实账本）
+	bucketLoot           = []byte("loot")  // v3.3.0 战利品库（凭据/票据/flag 掩码登记）
 	// v5.5.0 能力修复：结构化凭据仓库（静态加密，明文仅执行瞬间解密）与压缩前工具回执归档（按 receipt id 可检索原文）
 	bucketCredentials = []byte("credentials")
 	bucketReceipts    = []byte("receipts")
@@ -43,7 +50,7 @@ var (
 	// 非 finding/非 VT/非排除，收口时无人负责）是漏报温床；候选必须三态归档有归宿。
 	bucketCandidates = []byte("candidates")
 	bucketAutonomy   = []byte("autonomy") // v7.1.0 PAE 自主决策账本：提议→裁决→结果三元组全程留痕（Web「自主决策」页 / S8 复盘章 / autonomy.json 同源）
-	bucketCards      = []byte("cards")   // v7.1.0 A2 执行卡状态机（P1-lite）：引擎维护的 (stage×C-xx×target) 投影账本——模型零簿记，收口五态统计由状态机直出
+	bucketCards      = []byte("cards")    // v7.1.0 A2 执行卡状态机（P1-lite）：引擎维护的 (stage×C-xx×target) 投影账本——模型零簿记，收口五态统计由状态机直出
 )
 
 // CardRecord v7.1.0 A2 执行卡状态机记录：C-xx 引用（来自 update_coverage Endpoint/Notes
@@ -65,7 +72,7 @@ type CardRecord struct {
 // LLM 经 propose 工具提交结构化提议，引擎裁决器按确定性规则集核验并落 verdict，
 // 结果经 update_proposal 回写 outcome——全链无人工裁决点，用户事后在账本可见效果。
 type AutonomyRecord struct {
-	ID        string     `json:"id"`                      // PR-xxxx（提议编号）
+	ID        string     `json:"id"` // PR-xxxx（提议编号）
 	ProjectID string     `json:"project_id"`
 	Stage     string     `json:"stage"`                   // 提议所在阶段
 	Kind      string     `json:"kind"`                    // loopback_focus/budget_transfer/replan_delta/depth_extend/mutation_campaign/chain_plan/explorer_mission/lateral_edge/retest_card
@@ -84,34 +91,35 @@ type AutonomyRecord struct {
 // ---------- 记录结构 ----------
 
 type Project struct {
-	ID               string                 `json:"id"`
-	Name             string                 `json:"name"`
-	Target           string                 `json:"target"`
-	Scope            string                 `json:"scope"`
-	ROE              string                 `json:"roe"`
-	TestType         string                 `json:"test_type"`         // 黑盒/灰盒/白盒
-	TimeWindow       string                 `json:"time_window"`       // 测试时间窗口
-	Contact          string                 `json:"contact"`           // 应急联系人
-	SuccessCriteria  string                 `json:"success_criteria"`  // 测试目的 / 成功标准
-	AuthInfo         string                 `json:"auth_info"`         // 认证会话（可选·登录后测试）
-	ExecutionProfile string                 `json:"execution_profile"` // v5.3.1：执行档 production_safe（默认）/isolated_lab——引擎逐动作强制校验
-	PostExploit      bool                   `json:"post_exploit"`      // v5.3.7：后渗透勾选——false（默认）s6 整段 skipped（范围决策非漏测），true 按流水线正常执行
-	StrictScope      bool                   `json:"strict_scope"`      // 严格限定范围（只测给定目标）
-	BudgetTokens     int64                  `json:"budget_tokens"`     // 项目级 Token 预算（0=用全局配置）
-	Authorized       bool                   `json:"authorized"`        // 创建时勾选授权确认（视为已授权开工）
-	OOBRequired      bool                   `json:"oob_required"`      // v6.1.0（方案⑪）：项目显式声明需要 OOB 回连通道——S1 收口核验 channel.txt
-	ROEAcknowledgedAt string                `json:"roe_acknowledged_at,omitempty"` // v6.1.0（方案⑩）：ROE 红线四要素经 request_user_input(purpose=roe_ack) 确认的 UTC 时间——确认前命令通道全部拦截
-	ModelID          string                 `json:"model_id"`          // 本项目使用的模型（空=默认模型）
-	AutoApprove      string                 `json:"auto_approve"`      // 审批策略：manual（默认，全部人工）/l1（仅 L1 自动）/all（L1+L2 自动）；空=全局配置
-	PreApproved      string                 `json:"pre_approved"`      // v6.0.0：预批准档 none（默认人工）/all（全通过——含提权/横向及后续新增类别）/逗号类别（privesc,lateral,persistence）；仅自动签人工核签环节，治理门照常前置
-	Specializations  []string               `json:"specializations"`   // A / B1 / B2
-	Status           string                 `json:"status"`            // created/running/paused/killed/done
-	CurrentStage     string                 `json:"current_stage"`
-	CreatedAt        time.Time              `json:"created_at"`
-	StartedAt        string                 `json:"started_at,omitempty"`  // v2.6：首次启动时间（断点续跑不重置，仪表盘运行时长基准）
-	FinishedAt       string                 `json:"finished_at,omitempty"` // v2.6：终态时间（done/failed/killed），仪表盘总耗时基准
-	StageStates      map[string]*StageState `json:"stage_states"`          // key: stage id（s0..s9, specA/B1/B2）
-	KillReason       string                 `json:"kill_reason,omitempty"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Target            string                 `json:"target"`
+	Scope             string                 `json:"scope"`
+	ROE               string                 `json:"roe"`
+	TestType          string                 `json:"test_type"`                     // 黑盒/灰盒/白盒
+	TimeWindow        string                 `json:"time_window"`                   // 测试时间窗口
+	Contact           string                 `json:"contact"`                       // 应急联系人
+	SuccessCriteria   string                 `json:"success_criteria"`              // 测试目的 / 成功标准
+	AuthInfo          string                 `json:"auth_info"`                     // 认证会话（可选·登录后测试）
+	ExecutionProfile  string                 `json:"execution_profile"`             // v5.3.1：执行档 production_safe（默认）/isolated_lab——引擎逐动作强制校验
+	PostExploit       bool                   `json:"post_exploit"`                  // v5.3.7：后渗透勾选——false（默认）s6 整段 skipped（范围决策非漏测），true 按流水线正常执行
+	StrictScope       bool                   `json:"strict_scope"`                  // 严格限定范围（只测给定目标）
+	BudgetTokens      int64                  `json:"budget_tokens"`                 // 项目级 Token 预算（0=用全局配置）
+	BudgetGrants      int64                  `json:"budget_grants"`                 // v7.7.2：手动续跑预算授予累计（护栏上限 = BudgetTokens/MaxProjectTokens + BudgetGrants）
+	Authorized        bool                   `json:"authorized"`                    // 创建时勾选授权确认（视为已授权开工）
+	OOBRequired       bool                   `json:"oob_required"`                  // v6.1.0（方案⑪）：项目显式声明需要 OOB 回连通道——S1 收口核验 channel.txt
+	ROEAcknowledgedAt string                 `json:"roe_acknowledged_at,omitempty"` // v6.1.0（方案⑩）：ROE 红线四要素经 request_user_input(purpose=roe_ack) 确认的 UTC 时间——确认前命令通道全部拦截
+	ModelID           string                 `json:"model_id"`                      // 本项目使用的模型（空=默认模型）
+	AutoApprove       string                 `json:"auto_approve"`                  // 审批策略：engine（v7.1.0 全局默认，双空语义裁决）/manual/l1/all；空=全局配置
+	PreApproved       string                 `json:"pre_approved"`                  // v6.0.0：预批准档 none（默认人工）/all（全通过——含提权/横向及后续新增类别）/逗号类别（privesc,lateral,persistence）；仅自动签人工核签环节，治理门照常前置
+	Specializations   []string               `json:"specializations"`               // A / B1 / B2
+	Status            string                 `json:"status"`                        // created/running/paused/killed/done
+	CurrentStage      string                 `json:"current_stage"`
+	CreatedAt         time.Time              `json:"created_at"`
+	StartedAt         string                 `json:"started_at,omitempty"`  // v2.6：首次启动时间（断点续跑不重置，仪表盘运行时长基准）
+	FinishedAt        string                 `json:"finished_at,omitempty"` // v2.6：终态时间（done/failed/killed），仪表盘总耗时基准
+	StageStates       map[string]*StageState `json:"stage_states"`          // key: stage id（s0..s9, specA/B1/B2）
+	KillReason        string                 `json:"kill_reason,omitempty"`
 	// v6.4.0（S4-⑩）：项目级累计回环消费数——loopback 上限（LoopbackMaxRuns）的真实口径
 	// 持久化（原实现仅进程内存 map，服务重启清零=额度重置为 3 次）。
 	LoopUsed int `json:"loop_used,omitempty"`
@@ -154,6 +162,14 @@ type StageState struct {
 	// 多目标放大后最常见的预算形态整段丢失 V3 就绪投递引导）；runStage 启动复位
 	// （重跑/回环重入可再次触发），同一次运行内不重复注入。
 	SprintNotified bool `json:"sprint_notified,omitempty"`
+	// v7.6.0（B2③）：预算耗尽自动续跑已用次数（上限 1）——首耗尽自动收割-续跑，第二次耗尽
+	// 才暂停等人工；流水线据此区分「自动续跑」与「人工提额重跑」。
+	BudgetResumes int `json:"budget_resumes,omitempty"`
+	// v7.6.0（B3）：收口确定性门连击追踪——同指纹连续拦截轮次与首次拦截时刻（15 分钟
+	// 硬时间盒）；连击 ≥2 自动附导师会诊，超时转 quality-pending 人工通道。
+	GateFP           string `json:"gate_fp,omitempty"`
+	GateStreak       int    `json:"gate_streak,omitempty"`
+	FirstGateBlockAt string `json:"first_gate_block_at,omitempty"`
 }
 
 // FindingClaim v4.6 E1：结论-证据判据串（断言与所引文件内容的机械绑定）。
@@ -241,12 +257,12 @@ type Approval struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"project_id"`
 	Stage       string     `json:"stage"`
-	Action      string     `json:"action"`               // 待批动作描述（含命令/文件）
-	Risk        string     `json:"risk"`                 // L1/L2
-	Mode        string     `json:"mode"`                 // 决策路径：manual（人工批准）/auto（策略自动批准）
-	Status      string     `json:"status"`               // pending/approved/rejected/cancelled
-	Kind        string     `json:"kind,omitempty"`       // v6.0.0：scope_extension=授权扩展工单（批准即登记资产放行，scopeGate 白名单自动纳入）
-	Target      string     `json:"target,omitempty"`     // v6.0.0：scope_extension 工单的扩展目标（host/IP）
+	Action      string     `json:"action"`           // 待批动作描述（含命令/文件）
+	Risk        string     `json:"risk"`             // L1/L2
+	Mode        string     `json:"mode"`             // 决策路径：manual（人工批准）/auto（策略自动批准）
+	Status      string     `json:"status"`           // pending/approved/rejected/cancelled
+	Kind        string     `json:"kind,omitempty"`   // v6.0.0：scope_extension=授权扩展工单（批准即登记资产放行，scopeGate 白名单自动纳入）
+	Target      string     `json:"target,omitempty"` // v6.0.0：scope_extension 工单的扩展目标（host/IP）
 	RequestedAt time.Time  `json:"requested_at"`
 	DecidedAt   *time.Time `json:"decided_at,omitempty"`
 	DecidedBy   string     `json:"decided_by,omitempty"` // web-operator / auto-policy / pre-approved(...)
@@ -281,6 +297,7 @@ type Subtask struct {
 	PriorityWhy string    `json:"priority_why,omitempty"` // 排序依据（覆盖缺口/高危动作/证据缺口…供头引用）
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	ArchivedAt  time.Time `json:"archived_at,omitempty"` // v7.4.3 归档时间（plan_subtasks 全量重建前的旧计划件，非零=已归档）
 }
 
 // AskRecord 向人提问（PentAGI ask_user 屏障移植）：阶段/对话执行中挂起等待人工回答，全量留痕。
@@ -361,7 +378,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketSettings, bucketChats, bucketStream, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts, bucketCandidates, bucketAutonomy, bucketCards} {
+		for _, b := range [][]byte{bucketProjects, bucketFindings, bucketAssets, bucketTimeline, bucketApprovals, bucketEvidence, bucketCoverage, bucketUsage, bucketUsageCalls, bucketSettings, bucketChats, bucketStream, bucketStreamArchive, bucketSubtasks, bucketSubtaskArchive, bucketAsks, bucketFacts, bucketLoot, bucketLessons, bucketVTs, bucketCredentials, bucketReceipts, bucketCandidates, bucketAutonomy, bucketCards} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -489,7 +506,7 @@ func (s *Store) DeleteProject(id string) error {
 		for _, spec := range []struct {
 			bkt    *bolt.Bucket
 			prefix string
-		}{{tx.Bucket(bucketCoverage), id + "\x00"}, {tx.Bucket(bucketStream), id + "|"}} {
+		}{{tx.Bucket(bucketCoverage), id + "\x00"}, {tx.Bucket(bucketStream), id + "|"}, {tx.Bucket(bucketStreamArchive), id + "|"}} {
 			if spec.bkt == nil {
 				continue
 			}
@@ -509,7 +526,7 @@ func (s *Store) DeleteProject(id string) error {
 			ProjectID string `json:"project_id"`
 		}
 		for _, b := range [][]byte{bucketFindings, bucketAssets, bucketTimeline, bucketApprovals,
-			bucketEvidence, bucketSubtasks, bucketAsks, bucketFacts, bucketLoot, bucketVTs,
+			bucketEvidence, bucketSubtasks, bucketSubtaskArchive, bucketAsks, bucketFacts, bucketLoot, bucketVTs,
 			bucketCredentials, bucketReceipts} {
 			bkt := tx.Bucket(b)
 			if bkt == nil {
@@ -783,7 +800,11 @@ func (s *Store) ListApprovals(projectID string) ([]*Approval, error) {
 
 func (s *Store) AddAutonomy(r *AutonomyRecord) (string, error) {
 	r.ID = newID("PR")
-	r.CreatedAt = time.Now()
+	// v7.4.2 时序修复：CreatedAt 由调用方（提议/裁决时刻）设定，此处仅零值兜底——
+	// 旧实现无条件覆盖导致账本 decided_at 早于 created_at（提议→裁决时序不成立）。
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now()
+	}
 	return r.ID, s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketAutonomy, r.ID, r) })
 }
 
@@ -838,14 +859,14 @@ func (s *Store) AutonomyStats(projectID string) map[string]any {
 		conversion = float64(approvedWithOutcome) / float64(approved)
 	}
 	return map[string]any{
-		"total":                  len(recs),
-		"verdicts":               verdicts,
-		"by_kind":                byKind,
-		"approved":               approved,
-		"approved_with_outcome":  approvedWithOutcome,
-		"conversion":             conversion,
-		"escalations":            escalations,
-		"note":                   "引擎统计（v7.1.0）——提议/裁决/结果全程留痕，本表为唯一事实来源，禁止手写",
+		"total":                 len(recs),
+		"verdicts":              verdicts,
+		"by_kind":               byKind,
+		"approved":              approved,
+		"approved_with_outcome": approvedWithOutcome,
+		"conversion":            conversion,
+		"escalations":           escalations,
+		"note":                  "引擎统计（v7.1.0）——提议/裁决/结果全程留痕，本表为唯一事实来源，禁止手写",
 	}
 }
 
@@ -971,7 +992,7 @@ func (s *Store) UpsertCoverage(c *CoverageEntry) (*CoverageEntry, error) {
 				old.Status = c.Status
 				old.Notes = c.Notes
 				old.ObservedResult = c.ObservedResult
-				old.Depth = c.Depth  // v7.0.0 核对加固⑦：Depth 必须随更新回写——同键二次提交带 depth 会被静默丢弃（盲态门复核场景必现）
+				old.Depth = c.Depth // v7.0.0 核对加固⑦：Depth 必须随更新回写——同键二次提交带 depth 会被静默丢弃（盲态门复核场景必现）
 				old.Stage = c.Stage
 				old.LastSeen = time.Now()
 				return b.Put([]byte(key), mustJSON(&old))
@@ -1032,11 +1053,20 @@ type UsageRecord struct {
 	OutTokens   int64            `json:"out_tokens"`
 	ByStage     map[string]int64 `json:"by_stage"`
 	Calls       int              `json:"calls"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	// v7.5.0（A4）：前缀缓存用量分账——命中率是成本北极星指标，不落账则缓存收益不可验证；
+	// 供应商未回传时为 0（结构零值安全，旧记录反序列化自动补零）。
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // AddUsage 累计用量（输入/输出分账，成本按当前单价在展示层计算）。
 func (s *Store) AddUsage(projectID, stage string, inTokens, outTokens int64) (*UsageRecord, error) {
+	return s.AddUsageExt(projectID, stage, inTokens, outTokens, 0, 0)
+}
+
+// AddUsageExt v7.5.0（A4）：带缓存用量的累计入账（cache 读/写分开分账）。
+func (s *Store) AddUsageExt(projectID, stage string, inTokens, outTokens, cacheRead, cacheWrite int64) (*UsageRecord, error) {
 	rec := UsageRecord{ProjectID: projectID, ByStage: map[string]int64{}}
 	_ = s.db.View(func(tx *bolt.Tx) error {
 		if raw := tx.Bucket(bucketUsage).Get([]byte(projectID)); raw != nil {
@@ -1051,11 +1081,124 @@ func (s *Store) AddUsage(projectID, stage string, inTokens, outTokens int64) (*U
 	rec.TotalTokens += total
 	rec.InTokens += inTokens
 	rec.OutTokens += outTokens
+	rec.CacheReadTokens += cacheRead
+	rec.CacheWriteTokens += cacheWrite
 	rec.ByStage[stage] += total
 	rec.Calls++
 	rec.UpdatedAt = time.Now()
 	err := s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx, bucketUsage, projectID, &rec) })
 	return &rec, err
+}
+
+// ---------- v7.5.0（A4）逐调用明细账（种类维度：主线/子代理/反思/导师/参谋/对抗/摘要/chat）----------
+
+// UsageCallRecord 单次 LLM 调用明细行（A4：此前只有项目级聚合，辅助调用与主线混账，
+// 「反思门/导师各烧多少」只能靠 Calls 总数反推）。
+type UsageCallRecord struct {
+	ProjectID  string    `json:"project_id"`
+	Kind       string    `json:"kind"` // main|subagent|reflect|mentor|brain|adversary|summary|chat
+	Stage      string    `json:"stage"`
+	Model      string    `json:"model,omitempty"`
+	InTokens   int64     `json:"in_tokens"`
+	OutTokens  int64     `json:"out_tokens"`
+	CacheRead  int64     `json:"cache_read"`
+	Estimate   bool      `json:"estimate"`              // A3：网关未回传 usage、按估算入账
+	CacheReset bool      `json:"cache_reset,omitempty"` // v7.6.0（C1）：本调用前发生了上下文压缩——前缀缓存命中率归因（压缩就地改写历史破坏前缀稳定）
+	At         time.Time `json:"at"`
+}
+
+// usageCallsCapPerProject 单项目明细行上限（环形淘汰最旧；22k 调用实测每行 ~150B，
+// 5000 行封顶约 750KB，防长跑项目无界膨胀）。
+const usageCallsCapPerProject = 5000
+
+// SaveUsageCall 落一行调用明细；超上限淘汰该项目最旧行。
+func (s *Store) SaveUsageCall(r *UsageCallRecord) error {
+	if r == nil || r.ProjectID == "" {
+		return nil
+	}
+	if r.At.IsZero() {
+		r.At = time.Now()
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketUsageCalls)
+		key := fmt.Sprintf("%s|%020d", r.ProjectID, r.At.UnixNano())
+		if err := putJSON(tx, bucketUsageCalls, key, r); err != nil {
+			return err
+		}
+		// 环形淘汰：前缀扫描计数，超限删最旧（bbolt 字序键，前缀即最旧在前）
+		prefix := []byte(r.ProjectID + "|")
+		var keys [][]byte
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			keys = append(keys, append([]byte{}, k...))
+		}
+		for i := 0; i < len(keys)-usageCallsCapPerProject; i++ {
+			if err := b.Delete(keys[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ListUsageCalls 最近 N 行调用明细（时间倒序；键字序=时间正序，倒序遍历即最新在前）。
+func (s *Store) ListUsageCalls(projectID string, limit int) []UsageCallRecord {
+	out := []UsageCallRecord{}
+	if limit <= 0 {
+		limit = 100
+	}
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketUsageCalls)
+		if b == nil {
+			return nil
+		}
+		prefix := []byte(projectID + "|")
+		c := b.Cursor()
+		for k, v := c.Last(); k != nil && len(out) < limit; k, v = c.Prev() {
+			if !bytes.HasPrefix(k, prefix) {
+				continue
+			}
+			var r UsageCallRecord
+			if json.Unmarshal(v, &r) == nil {
+				out = append(out, r)
+			}
+		}
+		return nil
+	})
+	return out
+}
+
+// UsageCallsStats v7.5.0（A4/A5）：按调用种类聚合（calls/in/out/cache_read）——
+// 辅助调用成本占比与缓存命中率的数据源。
+func (s *Store) UsageCallsStats(projectID string) map[string]map[string]int64 {
+	stats := map[string]map[string]int64{}
+	add := func(kind string, r *UsageCallRecord) {
+		m := stats[kind]
+		if m == nil {
+			m = map[string]int64{}
+			stats[kind] = m
+		}
+		m["calls"]++
+		m["in"] += r.InTokens
+		m["out"] += r.OutTokens
+		m["cache_read"] += r.CacheRead
+	}
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketUsageCalls)
+		if b == nil {
+			return nil
+		}
+		prefix := []byte(projectID + "|")
+		c := b.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var r UsageCallRecord
+			if json.Unmarshal(v, &r) == nil {
+				add(r.Kind, &r)
+			}
+		}
+		return nil
+	})
+	return stats
 }
 
 func (s *Store) GetUsage(projectID string) (*UsageRecord, error) {
@@ -1159,6 +1302,54 @@ func (s *Store) DeleteStageSubtasks(projectID, stage string) error {
 	})
 }
 
+// MoveStageSubtasksToArchive v7.4.3：重建前把该阶段现有计划整体转入 subtask_archive
+// （键=ST 编号，附 ArchivedAt）——历史计划只挪不删，返回归档条数。
+func (s *Store) MoveStageSubtasksToArchive(projectID, stage string) (int, error) {
+	moved := 0
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		live := tx.Bucket(bucketSubtasks)
+		arch := tx.Bucket(bucketSubtaskArchive)
+		if live == nil || arch == nil {
+			return fmt.Errorf("归档桶未初始化")
+		}
+		type kv struct {
+			key []byte
+			t   Subtask
+		}
+		var doomed []kv
+		c := live.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var t Subtask
+			if json.Unmarshal(v, &t) == nil && t.ProjectID == projectID && t.Stage == stage {
+				doomed = append(doomed, kv{key: append([]byte{}, k...), t: t})
+			}
+		}
+		for _, d := range doomed {
+			d.t.ArchivedAt = time.Now()
+			raw, err := json.Marshal(&d.t)
+			if err != nil {
+				return err
+			}
+			if err := arch.Put(d.key, raw); err != nil {
+				return err
+			}
+			if err := live.Delete(d.key); err != nil {
+				return err
+			}
+			moved++
+		}
+		return nil
+	})
+	return moved, err
+}
+
+// ListArchivedSubtasks 返回项目已归档子任务（归档时间降序——最近重建的排前）。
+func (s *Store) ListArchivedSubtasks(projectID string) ([]*Subtask, error) {
+	out, err := listBy[Subtask](s, bucketSubtaskArchive, projectID)
+	sort.Slice(out, func(i, j int) bool { return out[i].ArchivedAt.After(out[j].ArchivedAt) })
+	return out, err
+}
+
 // ---------- 向人提问（PentAGI ask_user 移植，全量留痕） ----------
 
 func (s *Store) AddAsk(a *AskRecord) (string, error) {
@@ -1243,8 +1434,10 @@ func (s *Store) AddStream(projectID string, r *StreamRecord) (int64, error) {
 	return r.Seq, err
 }
 
-// pruneStream 每项目只保留最近 streamKeepPerProject 条（滚动淘汰）。
+// pruneStream 每项目 live 桶只保留最近 streamKeepPerProject 条；淘汰件转入 stream_archive
+// （v7.4.3 起「只挪不删」——控制台留痕全量可回填，历史不再蒸发）。
 func pruneStream(tx *bolt.Tx, b *bolt.Bucket, projectID string) error {
+	ab := tx.Bucket(bucketStreamArchive)
 	prefix := []byte(projectID + "|")
 	c := b.Cursor()
 	var n int
@@ -1256,6 +1449,11 @@ func pruneStream(tx *bolt.Tx, b *bolt.Bucket, projectID string) error {
 		}
 	}
 	for i := n; i > streamKeepPerProject && oldest != nil; i-- {
+		if ab != nil {
+			if v := b.Get(oldest); v != nil {
+				_ = ab.Put(oldest, append([]byte{}, v...)) // 同键（ID|seq）原样转存
+			}
+		}
 		if err := b.Delete(oldest); err != nil {
 			return err
 		}
@@ -1299,6 +1497,139 @@ func (s *Store) ListStream(projectID string, after int64) ([]*StreamRecord, int6
 		return nil
 	})
 	return out, last, err
+}
+
+// v7.4.3 分页读取：live 桶只保最近 streamKeepPerProject 条，更早记录在 stream_archive。
+// Tail/Before 两读法联合两桶（live 优先、archive 补齐），前端「最新窗口 + 加载更早」即全量历史。
+
+// ListStreamTail 返回最近 limit 条（升序）与全局最大 seq；exhausted=false 表示还有更早记录可分页。
+// 实战性能口径：live 桶（≤2000）优先，仅不足 limit 时才从归档桶反向按需补齐——
+// 重连/刷新高频路径不做归档全量扫描。
+func (s *Store) ListStreamTail(projectID string, limit int) (out []*StreamRecord, last int64, exhausted bool, err error) {
+	if limit <= 0 {
+		limit = 2000
+	}
+	prefix := []byte(projectID + "|")
+	err = s.db.View(func(tx *bolt.Tx) error {
+		var live []*StreamRecord
+		if b := tx.Bucket(bucketStream); b != nil {
+			c := b.Cursor()
+			for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+				var r StreamRecord
+				if json.Unmarshal(v, &r) == nil {
+					live = append(live, &r)
+					if r.Seq > last {
+						last = r.Seq
+					}
+				}
+			}
+		}
+		var older []*StreamRecord // 归档尾段（降序收集后反转）
+		if len(live) < limit {
+			if ab := tx.Bucket(bucketStreamArchive); ab != nil {
+				c := ab.Cursor()
+				for k, v := c.Last(); k != nil; k, v = c.Prev() {
+					if !bytes.HasPrefix(k, prefix) {
+						if bytes.Compare(k, prefix) < 0 {
+							break // 已低于本项目键域：整段结束
+						}
+						continue // 其他项目更高 ID 键：继续回走
+					}
+					var r StreamRecord
+					if json.Unmarshal(v, &r) == nil {
+						older = append(older, &r)
+						if len(older) >= limit-len(live) {
+							break
+						}
+					}
+				}
+			}
+		}
+		for i, j := 0, len(older)-1; i < j; i, j = i+1, j-1 {
+			older[i], older[j] = older[j], older[i]
+		}
+		all := append(older, live...)
+		if len(all) > limit { // 防御：live+older 本应 ≤ limit
+			all = all[len(all)-limit:]
+		}
+		if len(all) > 0 {
+			exhausted = !streamHasOlder(tx, prefix, all[0].Seq)
+		} else {
+			exhausted = true
+		}
+		out = all
+		return nil
+	})
+	return out, last, exhausted, err
+}
+
+// ListStreamBefore 返回 seq<before 的最近 limit 条（升序）；exhausted=false 表示其后仍有更早记录。
+func (s *Store) ListStreamBefore(projectID string, before, limit int64) (out []*StreamRecord, exhausted bool, err error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	lim := int(limit)
+	prefix := []byte(projectID + "|")
+	err = s.db.View(func(tx *bolt.Tx) error {
+		// 两桶各取该界内尾段（降序走游标），合并后截尾反转。
+		var desc []*StreamRecord
+		for _, bkt := range []*bolt.Bucket{tx.Bucket(bucketStream), tx.Bucket(bucketStreamArchive)} { // live(新)→archive(旧)
+			if bkt == nil {
+				continue
+			}
+			c := bkt.Cursor()
+			start := streamKey(projectID, before) // 排他上界
+			k, v := c.Seek(start)
+			if k == nil {
+				k, v = c.Last() // 上界后无键（ Seek 越过桶尾）：从桶尾回走
+			}
+			for ; k != nil; k, v = c.Prev() {
+				if bytes.HasPrefix(k, prefix) {
+					var r StreamRecord
+					if json.Unmarshal(v, &r) == nil && r.Seq < before {
+						desc = append(desc, &r)
+						if len(desc) >= lim {
+							break
+						}
+					}
+					continue // 本项目域内连续：seq>=before 的键继续回走取更早
+				}
+				// 非本项目键：高于本域上界（其他项目 ID 更大）继续回走；低于本域下界则整段结束
+				if bytes.Compare(k, prefix) < 0 {
+					break
+				}
+			}
+		}
+		sort.Slice(desc, func(i, j int) bool { return desc[i].Seq < desc[j].Seq })
+		if len(desc) > lim {
+			desc = desc[len(desc)-lim:]
+		}
+		out = desc
+		// exhausted：空结果=界前已无任何记录（直接见底）；非空则看首条之前是否还有更早
+		if len(out) > 0 {
+			exhausted = !streamHasOlder(tx, prefix, out[0].Seq)
+		} else {
+			exhausted = true
+		}
+		return nil
+	})
+	return out, exhausted, err
+}
+
+// streamHasOlder 判定是否还有 seq<oldest 的记录（单步判定：归档桶首记录即该项目最旧记录——
+// 淘汰件按 seq 单调转入，归档升序；live 桶任何记录都不可能早于归档首件）。
+func streamHasOlder(tx *bolt.Tx, prefix []byte, oldest int64) bool {
+	ab := tx.Bucket(bucketStreamArchive)
+	if ab == nil {
+		return false
+	}
+	c := ab.Cursor()
+	k, v := c.Seek(prefix)
+	if k == nil || !bytes.HasPrefix(k, prefix) {
+		return false
+	}
+	var r StreamRecord
+	return json.Unmarshal(v, &r) == nil && r.Seq < oldest
 }
 
 // ---------- v3.3.0 项目黑板（facts）与战利品库（loot） ----------
@@ -1530,17 +1861,17 @@ func (s *Store) ListLessons(limit int) ([]*LessonRecord, error) {
 // 非显式排除——收口无人负责，成为漏报温床。规则：任何「待评估/未定性」线索必须落位本账本，
 // 且阶段收口（S4/S5）时 Disposition 不得停留 open。
 type Candidate struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"project_id"`
-	Stage         string    `json:"stage"`
-	Title         string    `json:"title"`
-	Target        string    `json:"target,omitempty"`
-	EvidenceRef   string    `json:"evidence_ref,omitempty"` // evidence/… 或 EV- 编号
-	Disposition   string    `json:"disposition"`            // open / finding / vt / excluded
-	DispositionRef string   `json:"disposition_ref,omitempty"` // finding ID / VT ID / 排除证据文件
-	Reason        string    `json:"reason,omitempty"`          // 归位理由（excluded 强制）
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	Stage          string    `json:"stage"`
+	Title          string    `json:"title"`
+	Target         string    `json:"target,omitempty"`
+	EvidenceRef    string    `json:"evidence_ref,omitempty"`    // evidence/… 或 EV- 编号
+	Disposition    string    `json:"disposition"`               // open / finding / vt / excluded
+	DispositionRef string    `json:"disposition_ref,omitempty"` // finding ID / VT ID / 排除证据文件
+	Reason         string    `json:"reason,omitempty"`          // 归位理由（excluded 强制）
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // AddCandidate 新增候选（初始 open）。

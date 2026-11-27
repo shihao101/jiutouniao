@@ -15,7 +15,7 @@
 
     <template v-if="projects.current">
       <span v-if="wsState" class="chip" :style="{color: stream.connected ? 'var(--green)' : 'var(--gold)'}">{{ wsState }}</span>
-      <span class="chip" title="审批策略">策略: {{ POLICY_CN[projects.current.auto_approve || 'l1'] }}</span>
+      <span class="chip" title="审批策略">策略: {{ POLICY_CN[projects.current.auto_approve || 'engine'] }}</span>
       <button class="small danger" @click="kill">熔断</button>
       <button class="small danger" :disabled="projects.isRunning"
               :title="projects.isRunning ? '运行中项目不可删除——请先熔断' : '彻底删除项目记录与工作区（不可恢复）'"

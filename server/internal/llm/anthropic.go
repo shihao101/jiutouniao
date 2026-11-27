@@ -78,15 +78,31 @@ type aToolDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+	// v7.5.0（B1）：末位工具定义的前缀缓存标记（Options.CacheControl=true 时追加在最后一个工具上）
+	CacheControl *aCacheControl `json:"cache_control,omitempty"`
 }
 
 type aReq struct {
 	Model       string     `json:"model"`
 	MaxTokens   int        `json:"max_tokens"`
 	Temperature float32    `json:"temperature,omitempty"`
-	System      string     `json:"system,omitempty"`
+	System      any        `json:"system,omitempty"` // string 或 []cacheBlock（B1 缓存标记时为块数组）
 	Messages    []aMessage `json:"messages"`
 	Tools       []aToolDef `json:"tools,omitempty"`
+}
+
+// aCacheControl / aSystemTextBlock v7.5.0（B1 前缀缓存标记）：
+// system 以块数组下发并在末块标 cache_control:ephemeral，末位工具定义同标——
+// 前缀（system+tools）跨轮逐字节稳定即可命中供应商缓存（读价约为全价 1 折）。
+// 仅在 Options.CacheControl=true 时启用（网关探测确认后开启，严格网关回 4xx 即关闭）。
+type aCacheControl struct {
+	Type string `json:"type"`
+}
+
+type aSystemTextBlock struct {
+	Type         string         `json:"type"`
+	Text         string         `json:"text"`
+	CacheControl *aCacheControl `json:"cache_control,omitempty"`
 }
 
 type aResp struct {
@@ -94,8 +110,11 @@ type aResp struct {
 	Content    []aBlock `json:"content"`
 	StopReason string   `json:"stop_reason"` // end_turn / tool_use / max_tokens
 	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens      int `json:"input_tokens"`
+		OutputTokens     int `json:"output_tokens"`
+		// v7.5.0（A4）：前缀缓存用量（读=命中折扣计费，写=首次标记加成计费），未回报时为 0
+		CacheReadInputTokens    int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -159,6 +178,16 @@ func (c *anthropicClient) Chat(ctx context.Context, model string, messages []Mes
 	for _, t := range tools {
 		req.Tools = append(req.Tools, aToolDef{Name: t.Name, Description: t.Description, InputSchema: t.Parameters})
 	}
+	// v7.5.0（B1）：前缀缓存标记——system 以块数组下发（末块 ephemeral），末位工具定义同标。
+	// 前缀稳定性由引擎侧保证（system/toolDefs 每轮逐字节恒定），命中量经 A4 分账回传。
+	if c.opts.CacheControl {
+		if len(req.Tools) > 0 {
+			req.Tools[len(req.Tools)-1].CacheControl = &aCacheControl{Type: "ephemeral"}
+		}
+		if len(system) > 2048 { // 过短前缀打标无收益，保持 string 形态
+			req.System = []aSystemTextBlock{{Type: "text", Text: system, CacheControl: &aCacheControl{Type: "ephemeral"}}}
+		}
+	}
 	body, _ := json.Marshal(req)
 	return withRetry(ctx, c.spec, func(attemptCtx context.Context) (Message, Usage, error) {
 		return c.chatOnce(attemptCtx, body)
@@ -208,7 +237,9 @@ func (c *anthropicClient) chatOnce(ctx context.Context, body []byte) (Message, U
 	if len(ar.Content) == 0 {
 		return Message{}, Usage{}, fmt.Errorf("LLM 空回复（stop_reason=%s）", ar.StopReason)
 	}
-	u := Usage{PromptTokens: ar.Usage.InputTokens, CompletionTokens: ar.Usage.OutputTokens, ProviderModel: ar.Model}
+	u := Usage{PromptTokens: ar.Usage.InputTokens, CompletionTokens: ar.Usage.OutputTokens,
+		CacheReadTokens: ar.Usage.CacheReadInputTokens, CacheWriteTokens: ar.Usage.CacheCreationInputTokens,
+		ProviderModel: ar.Model}
 	u.TotalTokens = u.PromptTokens + u.CompletionTokens
 	return m, u, nil
 }

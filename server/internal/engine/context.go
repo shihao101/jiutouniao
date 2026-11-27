@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -37,6 +38,20 @@ func estStringTokens(s string) int {
 	return cjk + other/4
 }
 
+// estToolTokens v7.5.0（A3）：工具面 schema 估算——零 usage 兜底入账时工具定义也占输入
+// 预算（PentAGI estimateToolTokens 同口径），漏算会系统性低估 6-8K est tok/次。
+func estToolTokens(defs []llm.ToolDef) int {
+	total := 0
+	for _, d := range defs {
+		s := d.Name + d.Description
+		if b, err := json.Marshal(d.Parameters); err == nil {
+			s += string(b)
+		}
+		total += 16 + estStringTokens(s)
+	}
+	return total
+}
+
 // compactMsgs 确定性窗口压缩：估算超预算时，把最旧的中段工具回执与超长助手消息替换为存根。
 // 保护段：开头 system + 首个 user（上下文包）与结尾最近 keepRecent 条。
 // 单遍压缩后仍超预算则继续压（工具回执压完压 assistant），压无可压即返回当前链（如实交给上游处理）。
@@ -48,10 +63,28 @@ func compactMsgs(msgs []llm.Message, budget, keepRecent int) ([]llm.Message, int
 	return compactMsgsWithArchive(msgs, budget, keepRecent, nil)
 }
 
+// compactMsgsWithArchiveFloor v7.6.0（C1 集中式压缩）：触发线=trigger（estimate>trigger 才压），
+// 裁剪目标=floor（压到 ≤floor 为止）——floor<trigger 即「单次加深裁剪」，减少触发频次
+// = 减少 cache_reset 次数（实测压缩存根就地改写历史破坏前缀缓存，3.5M 全价重发，实测报告 §C1）。
+func compactMsgsWithArchiveFloor(msgs []llm.Message, trigger, floor, keepRecent int, archiveToolReceipt func(stage, content string) string) ([]llm.Message, int) {
+	if floor <= 0 || floor > trigger {
+		floor = trigger
+	}
+	if trigger <= 0 || len(msgs) <= 3 || estimateTokens(msgs) <= trigger {
+		return msgs, 0
+	}
+	return compactToFloor(msgs, floor, keepRecent, archiveToolReceipt)
+}
+
 func compactMsgsWithArchive(msgs []llm.Message, budget, keepRecent int, archiveToolReceipt func(stage, content string) string) ([]llm.Message, int) {
 	if budget <= 0 || len(msgs) <= 3 || estimateTokens(msgs) <= budget {
 		return msgs, 0
 	}
+	return compactToFloor(msgs, budget, keepRecent, archiveToolReceipt)
+}
+
+func compactToFloor(msgs []llm.Message, floor, keepRecent int, archiveToolReceipt func(stage, content string) string) ([]llm.Message, int) {
+	budget := floor
 	if keepRecent < 4 {
 		keepRecent = 4
 	}
@@ -69,8 +102,48 @@ func compactMsgsWithArchive(msgs []llm.Message, budget, keepRecent int, archiveT
 	copy(out, msgs)
 	total := 0
 	// 两遍：第一遍只压工具回执（信息密度最低、体积最大），第二遍压长助手消息
+	// v7.7.0 P4 技能优先压缩（方案 §一.P4）：pass-0 候选按体积降序处理——技能全文回执
+	//（【技能 前缀，21-42k 级）与大回执先裁，单次压缩收益最大化、触发频次下降；小回执与
+	// 近期消息后动。存根保留技能 id（重载免费，知识无损——库在磁盘）。E1 混合摘要与
+	// receipt 归档语义不变。
 	for pass, role := range []string{"tool", "assistant"} {
 		limit := len(out) - keepRecent
+		if pass == 0 && estimateTokens(out) > budget {
+			// 候选收集（>400 字的工具回执，保护区外）按体积降序处理
+			type cand struct{ idx, size int }
+			cands := make([]cand, 0, limit/2)
+			for i := 2; i < limit; i++ {
+				if out[i].Role == "tool" && len(out[i].Content) > 400 {
+					cands = append(cands, cand{i, len(out[i].Content)})
+				}
+			}
+			for a := 1; a < len(cands); a++ { // 插入排序降序（候选量级小，避免引入 sort 依赖变动）
+				for b2 := a; b2 > 0 && cands[b2].size > cands[b2-1].size; b2-- {
+					cands[b2], cands[b2-1] = cands[b2-1], cands[b2]
+				}
+			}
+			for _, c := range cands {
+				if estimateTokens(out) <= budget {
+					break
+				}
+				i := c.idx
+				m := out[i]
+				if archiveToolReceipt != nil {
+					if rid := archiveToolReceipt(stage, m.Content); rid != "" {
+						out[i].Content = truncateRunes(m.Content, 160) +
+							fmt.Sprintf("\n[已压缩 receipt=%s：原文已归档，search_memory query=\"receipt:%s\" 可取回全文；大输出另见 .tool-output/ 溢出文件]", rid, rid)
+						total++
+						continue
+					}
+				}
+				out[i].Content = truncateRunes(m.Content, 160) +
+					"\n[已压缩：原文可经 search_memory 检索证据链（留存前 2000 字符）；大输出另见 .tool-output/ 溢出文件]"
+				total++
+			}
+			if estimateTokens(out) <= budget {
+				continue // pass-0 已达标，跳过 pass-1
+			}
+		}
 		for i := 2; i < limit && estimateTokens(out) > budget; i++ {
 			m := out[i]
 			if m.Role != role {
@@ -143,6 +216,54 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// compactHybrid v7.5.0（E1 混合压缩）：窗口压缩存根化后，把被存根化的中段内容拼成语料
+// 交给 summarize 回调（aux 模型）生成 ≤8KB 结构化摘要，作为一条 user 消息插入保护段之前——
+// 中段语义由「摘要 + receipt 指针」双通道承接，治纯存根丢语义诱发的重复检索/重跑。
+// 结构安全：只**追加**一条 user 消息，不移动/删除既有消息（tool 配对契约不破坏）；
+// summarize 为 nil 或语料过短或摘要失败时返回 ""（零变化，纯存根口径）。
+func compactHybrid(msgs []llm.Message, keepRecent int, summarize func(corpus string) string) string {
+	if summarize == nil || len(msgs) <= keepRecent+3 {
+		return ""
+	}
+	if keepRecent < 4 {
+		keepRecent = 4
+	}
+	midEnd := len(msgs) - keepRecent
+	if midEnd <= 2 {
+		return ""
+	}
+	var parts []string
+	budget := 32 * 1024
+	used := 0
+	for _, m := range msgs[2:midEnd] {
+		c := strings.TrimSpace(m.Content)
+		if c == "" || strings.HasPrefix(c, "♻ [回放拦截]") || strings.HasPrefix(c, "[已裁剪") {
+			continue
+		}
+		if len(c) > 600 {
+			c = truncateRunes(c, 600)
+		}
+		if used+len(c) > budget {
+			break
+		}
+		parts = append(parts, c)
+		used += len(c)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	corpus := strings.Join(parts, "\n---\n")
+	if len(corpus) < 2000 {
+		return "" // 中段本就单薄，摘要收益不抵调用成本
+	}
+	sum := summarize(corpus)
+	if strings.TrimSpace(sum) == "" {
+		return ""
+	}
+	return "[历史摘要（混合压缩）] " + truncateRunes(strings.TrimSpace(sum), 8*1024) +
+		"\n（以上为已被存根化的中段过程的结构化摘要；单条原文可按 receipt:<id> 经 search_memory 检索回）"
 }
 
 // headTail v5.6.0 头尾保留截断：技能检索场景的正文裁剪——尾部常含工具兼容/误报排除/

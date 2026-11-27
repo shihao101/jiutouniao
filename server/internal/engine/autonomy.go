@@ -142,6 +142,7 @@ func (o *Orchestrator) toolPropose(p *store.Project, stageID string, args map[st
 		Rationale: rationale, Evidence: refs, Focus: focus, CostNote: cost,
 	}
 	now := time.Now()
+	rec.CreatedAt = now // v7.4.2 时序修复：提议时刻即创建时刻——修复账本 decided_at 早于 created_at 的倒挂
 	rec.DecidedAt = &now
 
 	// ---- 公共规则 ----
@@ -166,9 +167,20 @@ func (o *Orchestrator) toolPropose(p *store.Project, stageID string, args map[st
 	rec.Evidence = valid
 	rec.Rules = append(rec.Rules, erules...)
 	if len(valid) == 0 {
+		// v7.4.2 收敛修复：NO_EVIDENCE 回执必须参数化（方案 §2.2/§3.2「最近可过参数」）——
+		// 泛化指引下提议方拿不到可执行的修正信息，会原样重提（实战实证：同因连续两次被拒、
+		// 转化率 0%）。首次被拒给五类指针格式 + 项目实时可引用示例；同因重复被拒升级为强指引。
 		rec.Verdict, rec.Reason = "denied", "NO_EVIDENCE：无有效证据引用——提议必须有观察依据（hypothesis-0day 纪律），禁止空想提议"
+		rec.Rules = append(rec.Rules, "NO_EVIDENCE")
+		priorN := countNoEvidenceDenials(o, p.ID, stageID, kind) // 本条落账前计数（不含本条）
 		o.autonomyRecord(rec, p, stageID, "")
-		return o.autonomyReceipt(rec, "先取证（证据落 evidence/ 或结论入库）再重提。")
+		var extra string
+		if priorN == 0 {
+			extra = "evidence_refs 必填 ≥1 条可核存指针（五类任一）：fact:<黑板键> / VT-编号 / CD-编号 / F-编号 / evidence/… 文件路径。" + o.evidenceRefExamples(p)
+		} else {
+			extra = fmt.Sprintf("第 %d 次因 evidence_refs 缺失被拒——上次回执已给出修复参数，本次仍未携带。必须附 evidence_refs 数组（示例：%s）。两轮修正后仍无证据=该方向暂无观察依据，请保守降级 record_vt 移交后继续队列；禁止第三次原样重提。", priorN+1, o.evidenceRefExamples(p))
+		}
+		return o.autonomyReceipt(rec, extra)
 	}
 	if len(invalid) > 0 {
 		rec.Rules = append(rec.Rules, "EVIDENCE_MISSING:"+strings.Join(invalid, ","))
@@ -371,7 +383,8 @@ func (o *Orchestrator) autonomyReceipt(rec *store.AutonomyRecord, extra string) 
 		}
 	case "denied":
 		b.WriteString(fmt.Sprintf("⛔ 提议被拒（%s）\n裁决：denied\n原因：%s\n", rec.ID, rec.Reason))
-		b.WriteString("按原因码收敛后可重提（修正参数/补充证据）；同族三次被拒会触发升维提示——不要原地重试。\n")
+		// v7.4.2 收敛纪律：回执点名参数 → 提议方仅修该参数重提一次，禁止原样重提。
+		b.WriteString("按回执点名的参数收敛后可重提（仅修被拒字段，禁止原样重提）；同族三次被拒会触发升维提示——不要原地重试。\n")
 	case "shadow_recorded":
 		b.WriteString(fmt.Sprintf("📝 提议已记录（shadow，%s）\n%s\n", rec.ID, rec.Reason))
 	}
@@ -393,14 +406,15 @@ func (o *Orchestrator) toolUpdateProposal(p *store.Project, args map[string]any)
 		return "错误: 提议编号不存在或不属于本项目: " + id
 	}
 	rec.Outcome = outcome
-	now := time.Now()
-	rec.DecidedAt = &now
+	// v7.4.2 时序修复：结果回写不再覆盖 DecidedAt——账本三元组语义固定为
+	// created_at=提议时刻、decided_at=裁决时刻、outcome=回写结果（回写时间由时间线事件承载）。
 	if err := o.store.SaveAutonomy(rec); err != nil {
 		return "错误: " + err.Error()
 	}
 	_, _ = o.store.AddTimeline(&store.TimelineEvent{ProjectID: p.ID, Stage: rec.Stage,
 		Event:  "自主提议·结果回写",
 		Detail: fmt.Sprintf("%s [%s] outcome：%s", rec.ID, rec.Kind, truncateText(outcome, 160))})
+	o.convNote(p, rec.Stage)
 	return fmt.Sprintf("已回写 %s 结果入账本：%s", id, truncateText(outcome, 120))
 }
 
@@ -575,6 +589,63 @@ func (o *Orchestrator) toolHealthSummary(projectID, stageID string) string {
 		s += " ——同一类 ≥3 次：先切适配通道（channel-snapshot/限速/降并发）再批量，勿同参重试（M6 先 probe 后 batch）"
 	}
 	return s
+}
+
+// evidenceRefExamples 项目实时可引用指针示例（v7.4.2 回执参数化）：从账本/队列/发现库/候选库
+// 抓取当前真实存在的指针，让提议方「拿到示例即可过核存」，替代泛化指引（「最近可过参数」）。
+func (o *Orchestrator) evidenceRefExamples(p *store.Project) string {
+	ex := []string{}
+	if vts, err := o.store.ListVTs(p.ID); err == nil {
+		n := 0
+		for _, v := range vts {
+			if n >= 2 {
+				break
+			}
+			if v.ID != "" {
+				ex = append(ex, "\""+v.ID+"\"")
+				n++
+			}
+		}
+	}
+	if facts, err := o.store.ListFacts(p.ID, 50); err == nil {
+		n := 0
+		for _, f := range facts {
+			if n >= 2 {
+				break
+			}
+			if k := truncateText(f.Key, 40); k != "" {
+				ex = append(ex, "\"fact:"+k+"\"")
+				n++
+			}
+		}
+	}
+	if cands, err := o.store.ListCandidates(p.ID); err == nil && len(cands) > 0 {
+		ex = append(ex, "\""+cands[0].ID+"\"")
+	}
+	if fs, err := o.store.ListFindings(p.ID); err == nil && len(fs) > 0 {
+		ex = append(ex, "\""+fs[len(fs)-1].ID+"\"")
+	}
+	if len(ex) == 0 {
+		return "当前项目暂无现成指针：先用 write_file 在 evidence/ 落一份实测证据（如 evidence/<主题>.txt），再以该路径作为 evidence_refs 重提。"
+	}
+	return "当前可直接引用（示例）：" + strings.Join(ex, "、") + " ——任取其一放入 evidence_refs 即可通过核存。"
+}
+
+// countNoEvidenceDenials 同因（NO_EVIDENCE）被拒计数（同项目+同阶段+同 kind）——
+// v7.4.2 收敛修复：同因重复被拒时回执升级为强指引；该类格式性拒绝不计入同族升维计数
+// （升维通道留给实质分歧，格式问题在回执层收敛）。
+func countNoEvidenceDenials(o *Orchestrator, projectID, stageID, kind string) int {
+	recs, err := o.store.ListAutonomy(projectID)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, r := range recs {
+		if r.Kind == kind && r.Stage == stageID && r.Verdict == "denied" && strings.HasPrefix(r.Reason, "NO_EVIDENCE") {
+			n++
+		}
+	}
+	return n
 }
 
 // duplicateProposal 同族判重：存在同 kind+同 focus 的非 denied 提议 → 返回其编号。

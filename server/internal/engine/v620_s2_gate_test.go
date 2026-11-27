@@ -39,6 +39,11 @@ func s2GateFixtureProject(t *testing.T, o *Orchestrator, targets string, files m
 	for f, body := range extraFiles {
 		_, _ = o.exec.WriteFile(p.ID, f, body)
 	}
+	// v7.6.0（A7）：S2 收口最低覆盖行——已登记资产=有侦察活动，夹具按强制纪律③补一条
+	// 规范覆盖单元（vulnerable×negative_valid 互斥与真阴性语义同步满足）。
+	_, _ = o.store.UpsertCoverage(&store.CoverageEntry{ProjectID: p.ID, Stage: "s2",
+		Endpoint: "tcp/443", VulnClass: "服务暴露", Status: "no_issue_found",
+		ObservedResult: "negative_valid", Notes: "夹具：端口/指纹实测留痕（A7 记账纪律）"})
 	return p
 }
 

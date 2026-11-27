@@ -40,6 +40,32 @@ func (o *Orchestrator) s2ClosureIssues(p *store.Project) []string {
 			issues = append(issues, fmt.Sprintf("收口被拦截（S2 确定性门）：缺少或内容为空：%s（须为实质内容，不接受占位空壳）——按 heads/s2.md 交付物节补齐后重试。", f))
 		}
 	}
+	// v7.6.0（A7 覆盖度记账治理）：S2 收口最低覆盖行校验——强制纪律③「测完必记覆盖度矩阵」
+	// 的机械兜底：实证某项目 S2 仅 6 行、S1 为空（反思门建议两轮未闭环，实测报告 §A7）。
+	// S2 侦察动作（端口/指纹/路径普查/接口清单/CVE 预检索）每项都是 endpoint×漏洞类单元，
+	// 零行=纪律未落实。
+	// 触发条件收敛（测试与降级态友好）：仅当项目确有侦察活动痕迹（S1 已登记资产 或 evidence/
+	// 存在 s2-* 侦察证据文件）时才校验——纯模板/无活动项目不误拦。
+	hasReconActivity := false
+	if assets, aerr := o.store.ListAssets(p.ID); aerr == nil && len(assets) > 0 {
+		hasReconActivity = true
+	}
+	if !hasReconActivity {
+		if evs, _ := filepath.Glob(filepath.Join(o.workspaceRoot(p.ID), "evidence", "s2-*")); len(evs) > 0 {
+			hasReconActivity = true
+		}
+	}
+	if cov, err := o.store.ListCoverage(p.ID); err == nil && hasReconActivity {
+		s2Rows := 0
+		for _, c := range cov {
+			if c.Stage == "s2" {
+				s2Rows++
+			}
+		}
+		if s2Rows == 0 {
+			issues = append(issues, "v7.6.0 S2 覆盖度矩阵为空（A7 记账治理，强制纪律③）——已执行的侦察面（端口/指纹/路径普查/接口清单/CVE 预检索）应逐项落 endpoint×漏洞类 单元。【修复示例】update_coverage{endpoint:\"tcp/443\", vuln_class:\"服务暴露\", status:\"no_issue_found\", observed_result:\"negative_valid\", notes:\"TLS 实测…\"}——按实际执行面补记后重收口")
+		}
+	}
 	// ② checklist.json 存在时必须可解析——S2-9 自校验的引擎级兜底。
 	if raw, rerr := o.exec.ReadFile(p.ID, "checklist.json"); rerr == nil && strings.TrimSpace(raw) != "" {
 		if len(parseChecklistItems(raw)) == 0 {

@@ -110,9 +110,9 @@ func wordBoundaryContains(corpus, token string) bool {
 }
 
 // boundaryRejectByte v6.5.0（S5-①）：命中位置紧邻字母/数字 = 目标串是更大词元的内部片段
-//（notexample.com 内的 example.com、110.0.0.0 内的 10.0.0.0）——不计命中。
+// （notexample.com 内的 example.com、110.0.0.0 内的 10.0.0.0）——不计命中。
 // '-'/'.'/'/'/':' 等不属拒绝集：normCovText 去空白后 markdown 列表符「- 」紧邻目标串
-//（"- b.example.com" → "-b.example.com"）是覆盖 notes/交付物的常态形态，连字符邻接
+// （"- b.example.com" → "-b.example.com"）是覆盖 notes/交付物的常态形态，连字符邻接
 // 若拒绝会把既有命中全部打成误拦；scheme/路径/子域邻接同理保持。
 func boundaryRejectByte(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
@@ -134,7 +134,10 @@ func boundaryRejectByte(c byte) bool {
 //   - 其余阶段（s7）与 perTarget<=0（禁用自适应）时维持原值。
 func stageBudget(base int, stageID string, targets, perTarget int) int {
 	mult := 1
-	if stageID == "s8" || stageID == "s4" || stageID == "specB1" {
+	// v7.6.0（B2 用户决策②）：s5 纳入倍增名单——实证 某实战项目 S5 按 base 计（60 轮）
+	// 未收口暂停，S5 利用编排（子代理扇出+人机协同+受控验证）轮耗与 s4 同量级，固定 base
+	// 标定不足；放宽预算后 s5 与 s4/s8/specB1 同享 ×2。
+	if stageID == "s8" || stageID == "s4" || stageID == "s5" || stageID == "specB1" {
 		mult = 2
 	}
 	budget := base * mult

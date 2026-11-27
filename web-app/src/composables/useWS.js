@@ -15,8 +15,13 @@ export function connectWS(projectId) {
   ws.onopen = () => {
     stream.connected = true
     retry = 0
-    // 连接建立后全量回填一次（清空 + seq 权威），防断线窗口丢事件
-    stream.backfill(projectId).then(() => projects.refresh()).catch(() => {})
+    // v7.4.4 连接策略修正：同项目且已有事件 → seq 增量补拉（不清空，保住已分页加载的更早
+    // 历史）；首次进入/切项目 → tail 全量回填。两条路都以 seq 权威防重，断线窗口不丢事件。
+    if (stream.projectId === projectId && stream.events.length) {
+      stream.pollIncrement(projectId).then(() => projects.refresh()).catch(() => {})
+    } else {
+      stream.backfill(projectId).then(() => projects.refresh()).catch(() => {})
+    }
   }
   // v3.7.2 数据实时性修复：stage_tool 事件此前被 stream 消费后不再触发任何数据刷新——
   // 黑板/战利品/子代理/交付物/覆盖度在运行期间永远停留在 select() 快照（用户须手动刷新才更新）。
