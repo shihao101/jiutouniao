@@ -124,10 +124,10 @@ make run      # 启动，默认 http://localhost:8787
 | 文档 | 内容 |
 |---|---|
 | [docs/FEATURES.md](docs/FEATURES.md) | 完整功能详解：移植模块表 / Docker 部署细节 / 代理接入 / 部署包 Quickstart / API 一览 / 流程图映射 / 二次开发指引 |
+| [docs/方法论文档映射.md](docs/方法论文档映射.md) | 《AI 渗透测试全流程图》→ 模块映射 |
 | [CHANGELOG.md](CHANGELOG.md) | 完整版本历史（与 Web「更新记录」同源） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 开发环境 / 提交规范 / 安全边界 |
 | [SECURITY.md](SECURITY.md) | 漏洞私密披露通道 + 部署安全基线 |
-| [docs/case-study/](docs/case-study/) | 脱敏实战案例记录 |
 
 ## 🤝 贡献
 
