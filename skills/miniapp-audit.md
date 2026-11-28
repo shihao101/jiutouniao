@@ -12,6 +12,10 @@ tags: 小程序,wxapkg,云开发,specB2
 ```bash
 wxappUnpacker ./xxx.wxapkg    # 主实现：还原 wxml/wxss/js/json（供应链锁定 rtcatc fork，v6.6.0）
 gwxapkg scan -id=<wxid> -o ./out   # 备用实现：Gwxapkg（v6.6.0 SP-⑨ 内置 /opt/tools/gwxapkg，发布页 v2.8.1 锁版本+哈希见 /opt/tools/wxapkg-implementations.txt）
+# v7.8.0 新增工具：
+# AST 模块切分：python3 /opt/tools/specb2-ast-split.py --bundle <app-service.js> --out ./modules  # 逐模块独立 .js（Chaos VM 单 bundle 形态）
+# 沙箱原语标准件：python3 /opt/tools/specb2-sandbox.py --bundle <app-service.js> --out evidence/specb2-sandbox.json  # 8 类原语探针（加解密/toWebView/postMessage/存储键/登录态/金额/路由/URL 拼接）
+# WXML 第三实现：新版编译格式（CodeSpace）优先尝试 wuWxapkg 等活跃 fork（安装后加入交叉核对）——主/备实现均跳过的页面由此兜底
 ```
 - 优先读 app.js（全局逻辑）、app.json（页面树/隐藏页面）、project.config.json（appid）。
 - **v6.0.2 W1 口径（对齐 heads/specB2.md）**：wxappUnpacker/unveilr 上游均已停更——环境内置 wxappUnpacker 可用但**不作唯一判据**：解析失败或存疑时用 install_tool 取其他可维护实现（活跃 fork/Gwxapkg 等）交叉确认；产出记录包型、加密状态、主包/子包覆盖率与解析失败项，不以「成功解包」当完整源码恢复。

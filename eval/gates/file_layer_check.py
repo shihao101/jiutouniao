@@ -1403,6 +1403,24 @@ def checks_v771():
 
 
 
+
+
+def checks_v780():
+    sg = open(os.path.join(ROOT, "server/internal/engine/spec_gate.go"), encoding="utf-8").read()
+    eng = open(os.path.join(ROOT, "server/internal/engine/orchestrator.go"), encoding="utf-8").read()
+    brain = open(os.path.join(ROOT, "server/internal/engine/brain.go"), encoding="utf-8").read()
+    s4h = open(os.path.join(ROOT, "heads/s4.md"), encoding="utf-8").read()
+    maa = open(os.path.join(ROOT, "skills/miniapp-audit.md"), encoding="utf-8").read()
+    check("v7.8.0 ③ 子包完整性核验（提示级）", "subpackageDeliverableGaps" in sg)
+    check("v7.8.0 ④ 基线类引用提醒", "baselineTierRefHint" in eng)
+    check("v7.8.0 ⑤ C-23 条件式提醒", "C-23 条件式" in s4h)
+    check("v7.8.0 ⑥ 沙箱标准件引用", "specb2-sandbox.py" in maa)
+    check("v7.8.0 ① AST 切分引用", "specb2-ast-split.py" in maa)
+    check("v7.8.0 ② WXML 第三实现", "WXML 第三实现" in maa)
+    check("v7.8.0 参谋缺口证据指针（v7.7.3）", "gapEvidenceRefs" in brain)
+
+checks_v780()
+
 checks_v771()
 
 # 最终汇总（v7.5-v7.7.1 锁定义在首次汇总打印之后运行——此处按全量 CHECKS 出终版数字）

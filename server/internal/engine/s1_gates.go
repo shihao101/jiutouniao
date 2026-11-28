@@ -103,6 +103,14 @@ func (o *Orchestrator) assetTestBlockedAssets(p *store.Project, command string) 
 		}
 		check(m[1])
 	}
+	// v7.8.1（补强⑬）：ssh/scp/sftp 裸 user@host 与 scopeGate ⑩ 同口径——影子门与范围门对
+	// 同一命令形态必须同一判定（否则影子资产以 @ 形态访问时降级为范围门拦截，丢失
+	// scope_status 标注语义；实测影子资产 + `ssh admin@影子域名` 此前影子门漏检）。
+	if sshKeywordRe.MatchString(command) {
+		for _, m := range atHostRe.FindAllStringSubmatch(command, -1) {
+			check(m[2])
+		}
+	}
 	return blocked
 }
 
@@ -149,8 +157,18 @@ func normalizeS1Host(v string) string {
 	if i := strings.IndexAny(s, "/?#"); i >= 0 {
 		s = s[:i]
 	}
-	// 去端口（IPv6 字面量 [..] 内的冒号不动）
-	if i := strings.LastIndex(s, ":"); i >= 0 && !strings.Contains(s, "]") && isAllDigits(s[i+1:]) {
+	// v7.8.1（⑨配套）：括号 IPv6 归一——urlHostRe ⑨ 扩 scheme 后会向影子门/被动源门
+	// 传入 http://[fd00::5]/ 的括号 host，去括号取裸形与资产/目标键归一口径一致；
+	// 括号后端口舍弃（IPv6 授权为 host 级）。
+	if strings.HasPrefix(s, "[") {
+		if i := strings.Index(s, "]"); i > 0 {
+			s = s[1:i]
+		} else {
+			s = strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
+		}
+	} else if i := strings.LastIndex(s, ":"); i >= 0 && isAllDigits(s[i+1:]) && strings.Count(s, ":") < 2 {
+		// 去端口（无括号形态；≥2 冒号为裸 IPv6——此前 fd00::5 被误剥成 fd00:，v7.8.1
+		// ⑨配套修正使裸形与括号形 [fd00::5] 归一键一致）
 		s = s[:i]
 	}
 	s = strings.TrimSuffix(s, ".")

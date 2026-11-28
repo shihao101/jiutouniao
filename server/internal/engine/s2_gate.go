@@ -148,14 +148,41 @@ var batchToolTargetFileRe = regexp.MustCompile(batchScopeToolRe + `(?:-l|-iL|--f
 // singleTargetScopeViolations ②：单目标按「单独命令」口径过影子资产门与 strict_scope 范围门
 // ——与 run_command 逐目标语义完全对齐；返回违规描述（空=通过）。
 // 影子资产门自带「原始项目目标行」豁免；strict_scope 由 scopeGate 全量复刻（含 expansion 三态）。
+// v7.8.1（补强⑫）：清单行 user@host 形态收口——run_batch targets/`-l` 清单行的每行本身就是
+// 「声明的目标」，行内 admin@host 的 host 部分直接参与范围校验（scopeGate 的 ssh 上下文门对
+// 无命令上下文的裸清单行不生效；email 误拦顾虑在声明目标场景不成立）。实测清单行
+// admin@evil-lab.test 此前静默通过。
+// v7.8.1（补强⑬配套）：@-host 的影子资产门先行于范围门——与 t 形态同序（影子 → 范围），
+// 影子资产以 @ 形态出现在清单行时保持 scope_status 标注语义。
 func (o *Orchestrator) singleTargetScopeViolations(p *store.Project, target string) string {
 	// 前导空格：bareDomainRe 要求目标前有分隔字符（真实命令天然满足；逐目标伪命令是裸串）
 	t := " " + strings.TrimSpace(target)
+	// ⑫：清单行内 user@host 的 host 部分（声明目标场景，直接参与两门校验）
+	atHost := ""
+	if i := strings.LastIndex(t, "@"); i > 0 {
+		h := strings.ToLower(t[i+1:])
+		if j := strings.IndexAny(h, "/"); j >= 0 {
+			h = h[:j] // scp/rsync 路径形态 host:/path、host/path
+		}
+		h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+		h = strings.TrimSuffix(h, ":")
+		atHost = h
+	}
 	if blocked := o.assetTestBlockedAssets(p, t); len(blocked) > 0 {
 		return fmt.Sprintf("%s（影子资产门：%s）", truncateText(target, 60), strings.Join(blocked, "、"))
 	}
+	if atHost != "" {
+		if blocked := o.assetTestBlockedAssets(p, " "+atHost); len(blocked) > 0 {
+			return fmt.Sprintf("%s（影子资产门：user@host 行 → %s）", truncateText(target, 60), strings.Join(blocked, "、"))
+		}
+	}
 	if sblocked, smsg := o.scopeGate(p, t); sblocked {
 		return fmt.Sprintf("%s（范围门：%s）", truncateText(target, 60), truncateText(firstLine(smsg), 100))
+	}
+	if atHost != "" {
+		if hblocked, hmsg := o.scopeGate(p, " "+atHost); hblocked {
+			return fmt.Sprintf("%s（范围门：user@host 行 → %s）", truncateText(target, 60), truncateText(firstLine(hmsg), 100))
+		}
 	}
 	return ""
 }

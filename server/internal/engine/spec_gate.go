@@ -1,5 +1,11 @@
 package engine
 
+import (
+	"fmt"
+	"jiutouniao/internal/store"
+	"strings"
+)
+
 // spec_gate.go v6.6.0（SP-②，修复方案_三大专项补全_v6.6.0_20261123.md）：
 // 专项确定性收口门——specA/specB1/specB2 是流水线中此前唯一没有阶段专属机械校验的成员
 //（S1/S2/S3 各有 closureIssues、S4/S5 有分项门簇、S7 VT 清点、S8 报告契约；反思 PASS 无条件
@@ -13,13 +19,6 @@ package engine
 //  3. 拦截文案给出确切缺失项（与 S1 门「空工作区也返回确切缺失项」同款可验收形态）。
 //
 // guard：enforce_spec_closure（缺省 true，显式 false 回退——回滚是事故手段，须记录配置变更）。
-
-import (
-	"fmt"
-	"strings"
-
-	"jiutouniao/internal/store"
-)
 
 // isSpecStage 专项阶段判定（SP-①②③⑥ 多处复用同一名单，单一事实源）。
 func isSpecStage(stageID string) bool {
@@ -122,6 +121,7 @@ func (o *Orchestrator) specClosureIssues(p *store.Project, stageID string) []str
 	if !strings.Contains(nd, normCovText("专项条目清单")) && !strings.Contains(nd, normCovText("条目清单")) {
 		issues = append(issues, fmt.Sprintf("%s 收口交付物须含《专项条目清单》——本专项条目逐条三态：已测（update_coverage 引用）/ 不适用（依据）/ 未测（原因+移交去向）；引擎本门只查清单存在，三态完整性与逐条判据由反思门按清单抽查", stageID))
 	}
+	// v7.8.0 用户决策：子包完整性不强求——核验逻辑已撤销（交付完整性由客户自行决定）
 	return issues
 }
 

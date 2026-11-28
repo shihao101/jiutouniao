@@ -105,11 +105,12 @@ type Orchestrator struct {
 	healthStats map[string]map[string]int // project|stage -> 类别(timeout/refused/dns/waf403/tool_error) -> 次数
 
 	// v7.7.0 P1 收敛驱动收口（docs/优化方案_实战提速五项 §一.P1）
-	convMu    sync.Mutex
-	convIdle  map[string]int    // project|stage -> 连续无新增确证产出的轮数
-	convFired map[string]bool   // project|stage -> 本阶段收敛信号已注入（每阶段至多 1 次）
-	convMsgs  map[string]string // project|stage -> 待注入收敛信号文本
-	c27Tried  map[string]bool   // v7.7.0 P2：C27 引擎代填防重入（project|stage -> 已尝试；runStage 启动重置）
+	convMu     sync.Mutex
+	convIdle   map[string]int    // project|stage -> 连续无新增确证产出的轮数
+	convFired  map[string]bool   // project|stage -> 本阶段收敛信号已注入（每阶段至多 1 次）
+	convMsgs   map[string]string // project|stage -> 待注入收敛信号文本
+	c27Tried   map[string]bool   // v7.7.0 P2：C27 引擎代填防重入（project|stage -> 已尝试；runStage 启动重置）
+	blHintSeen map[string]bool   // v7.8.0 优化④：基线类引用提醒防抖（project|endpoint|class -> 已提醒）
 
 	auxZeroMu     sync.Mutex     // v7.6.0（A1）：辅助线零有效产出连续计数
 	auxZeroStreak map[string]int // project|stage|kind -> 连续零产出次数（≥2 触发时间线告警）
@@ -731,7 +732,22 @@ func (o *Orchestrator) registrationGate(command string) (bool, string) {
 
 // v5.2.0 P1-1b：范围确定性校验——strict_scope 项目中，命令出现的 URL/IP 目标必须落在
 // 主目标域（含子域）或已登记资产内；OSINT/工具源走良性外部白名单（可经 config 扩充）。
-var urlHostRe = regexp.MustCompile(`https?://([A-Za-z0-9_.:-]+)`)
+// urlHostRe v7.8.1（授权扩展识别修正⑨/补强⑪）：URL host 提取——
+// ① scheme 集扩展到网络对端 scheme 全族（http(s)/ftp(s)/sftp/ssh/scp/telnet/ws/wss/tcp/udp
+//    + ⑪补全 DB/同步协议 postgres(ql)/mysql/mariadb/mongodb(+srv)/redis(s)/mssql/ldap(s)/
+//    git/svn/rsync，(?i) 大小写不敏感）：原实现只认 https?://，实测 ftp://files…、
+//    telnet://backdoor…:4444、ssh://git@…、wss://c2… 对 strict_scope 全部静默放行（绕过面）；
+//    ⑪ 实测 postgres://admin:pw@files…/db、mongodb+srv://c2…、git://…、rsync://… 同样静默
+//    放行（IP 形态靠 ipLitRe 侥幸命中，域名形态完全不可见）。scheme 锚定无误报面。
+//    bareDomainRe 前导边界类不含 '/'，scheme 后 host 走裸域名路径亦不可见——绕过双路成立。
+// ② 可选 userinfo 组（非捕获，至首个 '@'）：原实现 host 类含 ':' 不含 '@'，实测
+//    http://admin:pw@9.9.9.9/ 把 userinfo 误提取为目标 [admin:pw 9.9.9.9]（凭据字样若曾
+//    出现于证据链会误开授权扩展工单；userinfo 恰在白名单时形成真绕过）。
+// ③ host 类含 '[]'：IPv6 括号 host 由本正则主循环捕获（配合 hostAllowed/修正⑦ 归一）。
+// 注意：无 scheme 的 ssh admin@host 形态由 ⑩ 上下文锚定提取（'@' 入裸域名边界会把命令中
+// email 一律误判为网络目标——v7.6.0 B4 误拦教训，不取此平衡）；IP 形态由 ipLitRe 兜底。
+// file:// 本地路径不属网络对端，不入 scheme 集。
+var urlHostRe = regexp.MustCompile(`(?i)\b(?:https?|ftps?|sftp|ssh|scp|telnet|ws|wss|tcp|udp|git|svn|rsync|mariadb|mysql|postgres(?:ql)?|mongodb(?:\+srv)?|redis(?:s)?|mssql|ldaps?)://(?:[A-Za-z0-9._%~:\-]{1,128}@)?([A-Za-z0-9_.:\[\]-]+)`)
 var ipLitRe = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
 
 // v5.9.0（方案 P0-1）：裸域名提取——命令中无 scheme 直接出现的域名字面量（如
@@ -746,6 +762,29 @@ var bareDomainRe = regexp.MustCompile(`[\s'"(;|&=,]([A-Za-z0-9][A-Za-z0-9-]*(?:\
 // `env http_proxy=$TOOL_PROXY <cmd>` 下载前缀同理，属既有潜伏误拦面。与 v5.3.9 OSINT 白名单
 // 同理：范围匹配器只应校验业务目标。
 var proxyAssignRe = regexp.MustCompile(`(?i)\b[a-z_]*(https?_proxy|all_proxy|no_proxy)=\S+`)
+
+// proxyFlagRe v7.8.1（授权扩展识别修正⑤）：内联代理旗标赋值剥离——curl -x/--proxy、
+// httpx -http-proxy 等旗标携带的代理 URL 与 proxyAssignRe 覆盖的 env 赋值形态同一性质：
+// 传输通道配置而非测试目标。实测形态 `-x http://proxy:3128` 的代理 host 会被 urlHostRe
+// 提取为「范围外目标」误拦；若代理地址曾出现于证据链还会走 expansion 通道误开授权扩展
+// 工单。仅剥离 scheme 锚定值（http/socks 前缀）——grep -x 等非代理旗标的无 scheme 参数
+// 不受影响，不新增漏拦面；无 scheme 的 host:port 代理值维持原状（残余观察项，宁误拦
+// 不漏拦）。
+var proxyFlagRe = regexp.MustCompile(`(?i)\s(?:-[a-z]{0,10}-proxy\b|--proxy[a-z-]*\b|-x\b)[=\s]+(?:https?|socks[45][ah]?)://\S+`)
+
+// ipv6LitRe v7.8.1（授权扩展识别补强⑥）：括号 IPv6 字面量捕获（含括号）——urlHostRe
+// 字符类不含 '['，http://[fd00::5]/ 括号 host 形态此前对范围门完全不可见。捕获体由
+// isIPv6Body 复核（≥2 冒号 + 纯十六进制），防止数组下标/切片/十六进制词等代码形态误报。
+var ipv6LitRe = regexp.MustCompile(`\[([0-9A-Fa-f:]+)\]`)
+
+// sshKeywordRe / atHostRe v7.8.1（授权扩展识别补强⑩）：ssh/scp/sftp 命令的裸 user@host
+// 形态提取——'@' 不入 bareDomainRe 边界类（会把命令中 email 一律误判为网络目标，
+// v7.6.0 B4 消灭 51 次误拦的教训），改为命令词上下文锚定：仅当命令含 ssh/scp/sftp
+// 关键词时，提取 user@host token 的 host 部分参与范围校验（ssh 类命令中出现 email
+// 形态参数可忽略）。实测 `ssh admin@evil-lab.test` 此前对 strict_scope 静默放行
+// （IP 形态已由 ipLitRe 兜底；scheme 形 ssh:// 已由 ⑨ 覆盖）。
+var sshKeywordRe = regexp.MustCompile(`(?i)\b(?:ssh|scp|sftp)\b`)
+var atHostRe = regexp.MustCompile(`\b([A-Za-z0-9._%\-]{1,64})@([A-Za-z0-9.\[\]:\-]+)`)
 
 var defaultScopeAllowlist = []string{
 	"crt.sh", "github.com", "raw.githubusercontent.com", "api.github.com", "objects.githubusercontent.com",
@@ -767,7 +806,8 @@ var defaultScopeAllowlist = []string{
 	"api.certspotter.com", "api.zoomeye.org",
 	"api.pwnedpasswords.com", "haveibeenpwned.com", "virustotal.com", "shodan.io", "censys.io",
 	"oast.pro", "oast.live", "oast.site", "dnslog.cn", "interact.sh", "oob.interactsh.com",
-	"searchsploit", "localhost", "127.0.0.1", "0.0.0.0", "example.com", "example.edu",
+	"searchsploit", "localhost", "127.0.0.1", "0.0.0.0", "::1", // v7.8.1（补强⑥）：IPv6 回环与 127.0.0.1 同信任级
+	"example.com", "example.edu",
 	"grep.app", "searchcode.com", "web.archive.org", "archive.org", "haveibeenpwned.com",
 }
 
@@ -776,9 +816,16 @@ var defaultScopeAllowlist = []string{
 // （原 HasSuffix(h, "."+t) 使影子资产"只登记不测试"承诺形同虚设）。allow 仅含 in_scope 资产
 // 与外部源白名单——子域测试须经 ② 的资产范围门以授权依据入账。
 func hostAllowed(host string, target string, allow map[string]bool) bool {
-	h := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(host, "."), ":443"))
-	h = strings.TrimPrefix(h, "www.")
-	if h == "" || allow[h] {
+	h0 := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(host, "."), ":443"))
+	h0 = strings.TrimSuffix(strings.TrimPrefix(h0, "["), "]") // v7.8.1（补强⑥）：括号 IPv6 归一（[fd00::5] ≡ fd00::5）
+	// v7.8.1（授权扩展识别修正④）：保留未剥 www. 的原始 host（h0）双形态精确校验——原实现
+	// 对查询 host 无条件剥 www. 前缀，授权目标/资产/工单登记为 www.* 域名时永远匹配不上：
+	// 实测主目标 www.example-lab.test 自身访问被判「范围外」硬拦（主目标天然大量出现于证据链，
+	// 次命中即对已授权目标误开授权扩展工单），且批准登记 allow["www.…"] 后仍查剥前缀形态
+	// → 批准不生效、目标持续被拦，「批准即登记资产放行」闭环在 www.* 形态断裂。双形态均
+	// 只做精确匹配/显式通配，仅放行已授权形态，无新增绕过面（host 裸域 x 对授权 www.x 仍拦）。
+	h := strings.TrimPrefix(h0, "www.")
+	if h == "" || allow[h] || allow[h0] {
 		return true
 	}
 	for _, line := range strings.Split(target, "\n") {
@@ -792,11 +839,12 @@ func hostAllowed(host string, target string, allow map[string]bool) bool {
 		if t == "" {
 			continue
 		}
-		if h == t {
+		tBare := strings.TrimSuffix(strings.TrimPrefix(t, "["), "]") // v7.8.1（补强⑥）：目标行括号 IPv6 归一
+		if h == t || h0 == t || h == tBare || h0 == tBare {
 			return true
 		}
 		// 显式通配授权条目：*.example.test 覆盖其子域（含自身域可选——通配只承诺子域，自身域须单独列出）
-		if strings.HasPrefix(t, "*.") && strings.HasSuffix(h, t[1:]) {
+		if strings.HasPrefix(t, "*.") && (strings.HasSuffix(h, t[1:]) || strings.HasSuffix(h0, t[1:])) {
 			return true
 		}
 	}
@@ -810,6 +858,8 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 	}
 	// v5.7.2：代理赋值是传输通道配置而非测试目标，剥离后再做目标提取（见 proxyAssignRe 注释）
 	command = proxyAssignRe.ReplaceAllString(command, "")
+	// v7.8.1（修正⑤）：内联代理旗标值同口径剥离（见 proxyFlagRe 注释）
+	command = proxyFlagRe.ReplaceAllString(command, " ")
 	// v6.3.2：被动 DNS/WHOIS 查询段豁免——dig/host/nslookup/whois 协议本身不接触目标服务
 	// （与 s1ActionGate 同一哲学；实战 S1 影子父域 dig 归属查询被拦 8 条），axfr 保留拦截。
 	command = stripDNSQuerySegments(command)
@@ -835,25 +885,56 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 		v := strings.ToLower(strings.TrimSpace(a.Value))
 		v = strings.TrimPrefix(strings.TrimPrefix(v, "https://"), "http://")
 		v = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(v, "/"), "."), ":443")
+		v = strings.TrimSuffix(strings.TrimPrefix(v, "["), "]") // v7.8.1（补强⑥）：括号 IPv6 归一
 		if v != "" {
 			allow[v] = true
 		}
 	}
 	bad := []string{}
 	for _, h := range urlHostRe.FindAllStringSubmatch(command, -1) {
-		if !hostAllowed(h[1], p.Target, allow) {
-			bad = append(bad, h[1])
+		tgt := h[1]
+		// v7.8.1（⑨）：IPv6 括号 host 去括号取裸形（[::1]:8080 → ::1）——括号后端口不并入：
+		// 与端口直接拼接会产生 ::1:8080 歧义串，且 IPv6 授权为 host 级（与 ⑥ 裸形工单/
+		// 资产登记口径一致，幂等）。域名/裸 IP 的 host:port 整串口径不变。
+		if strings.HasPrefix(tgt, "[") {
+			if i := strings.Index(tgt, "]"); i > 0 {
+				tgt = tgt[1:i]
+			} else {
+				tgt = strings.Replace(strings.Replace(tgt, "[", "", 1), "]", "", 1)
+			}
+		}
+		if !hostAllowed(tgt, p.Target, allow) {
+			bad = append(bad, tgt)
 		}
 	}
-	for _, ip := range ipLitRe.FindAllStringSubmatch(command, -1) {
+	// v7.8.1（授权扩展识别修正③）：IP 字面量在剥掉 URL host 段后的文本上提取——
+	// urlHostRe 与 ipLitRe 对 URL 内嵌 IP 双重命中，拦截/工单消息出现重复目标
+	// （实测 [9.9.9.9 9.9.9.9]）；URL 形态已由上方 urlHostRe 逐个校验不漏，host:port
+	// 整串校验与工单目标一致（批准登记后 hostAllowed 精确放行）。
+	urlStripped := urlHostRe.ReplaceAllString(command, " ")
+	for _, ip := range ipLitRe.FindAllStringSubmatch(urlStripped, -1) {
 		if !hostAllowed(ip[1], p.Target, allow) {
 			bad = append(bad, ip[1])
 		}
 	}
+	// v7.8.1（授权扩展识别补强⑥）：括号 IPv6 字面量提取——urlHostRe 字符类不含 '['，
+	// http://[fd00::5]/ 形态此前完全不可见（范围门漏拦面：范围外 IPv6 目标静默直连，不走
+	// expansion 通道不留痕）。IPv4 字面量先提取（::ffff:1.2.3.4 映射形的 v4 部分按 IPv4
+	// 目标校验，语义等价更严）；host 以去括号裸形入账，与资产/工单登记形态一致。
+	// isIPv6Body 要求 ≥2 冒号 + 纯十六进制——排除数组下标 [0]、切片 [1:2]、十六进制词
+	// [abc] 等代码形态误报。
+	for _, m := range ipv6LitRe.FindAllStringSubmatch(urlStripped, -1) {
+		host6 := strings.ToLower(m[1])
+		if !isIPv6Body(host6) {
+			continue
+		}
+		if !hostAllowed(host6, p.Target, allow) {
+			bad = append(bad, host6)
+		}
+	}
 	// v5.9.0（方案 P0-1）：裸域名检查（审计 P1：nmap example.com 漏网）——先剥 URL/IP
 	// 命中段避免重复误报，再按裸域名边界提取
-	stripped := urlHostRe.ReplaceAllString(command, " ")
-	stripped = ipLitRe.ReplaceAllString(stripped, " ")
+	stripped := ipv6LitRe.ReplaceAllString(ipLitRe.ReplaceAllString(urlStripped, " "), " ")
 	for _, d := range bareDomainRe.FindAllStringSubmatch(stripped, -1) {
 		if !isPlausibleDomainHost(d[1]) || isNonTargetBareToken(stripped, d[1]) {
 			continue // v6.3.2：TLD 纯数字（版本号 3.7/3.7.1 类）非域名候选；v7.6.0 B4：文件名/属性访问非网络目标
@@ -864,6 +945,36 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 			bad = append(bad, dom)
 		}
 	}
+	// v7.8.1（补强⑩）：ssh/scp/sftp 上下文锚定的裸 user@host 提取——见 sshKeywordRe 注释。
+	// host 部分去括号（[fd00::5] → fd00::5）与去 scp 路径尾冒号（host:/path → host）后，
+	// 走统一 hostAllowed 校验；与 URL/IP/裸域名命中经下方去重合流。
+	if sshKeywordRe.MatchString(command) {
+		for _, m := range atHostRe.FindAllStringSubmatch(command, -1) {
+			h := strings.ToLower(m[2])
+			if strings.HasPrefix(h, "[") {
+				if i := strings.Index(h, "]"); i > 0 {
+					h = h[1:i]
+				} else {
+					h = strings.Replace(strings.Replace(h, "[", "", 1), "]", "", 1)
+				}
+			}
+			h = strings.TrimSuffix(h, ":")
+			if h == "" || h == "localhost" || h == "127.0.0.1" {
+				continue
+			}
+			if !hostAllowed(h, p.Target, allow) {
+				bad = append(bad, h)
+			}
+		}
+	}
+	// v7.8.1（修正③）：三路提取（URL host/IP/IPv6/裸域名/ssh user@host）汇总后统一归一去重——
+	// ⑦ host 大小写不敏感，urlHostRe 捕获原始大小写会使工单幂等查重（精确比较）被
+	// 击穿：实测 EXAMPLE-LAB.test / example-lab.test 两次命中开出 2 张工单。归一后
+	// 拦截消息/工单目标/资产登记（allow 构建同口径小写）全链路一致。
+	for i := range bad {
+		bad[i] = strings.ToLower(bad[i])
+	}
+	bad = dedupeStrings(bad)
 	if len(bad) == 0 {
 		return false, ""
 	}
@@ -884,11 +995,25 @@ func (o *Orchestrator) scopeGate(p *store.Project, command string) (bool, string
 				}
 				return false, ""
 			}
-			ticketID := o.ensureScopeExtensionTickets(p, discovered)
-			if len(unknown) > 0 {
-				return true, fmt.Sprintf("strict_scope=true：范围外目标 %v 属立足点发现（expansion=auto-with-approval）——授权扩展工单 %s 已生成/在批，批准后自动登记资产并放行，请先继续其他动作；未发现目标 %v 维持拦截。", discovered, ticketID, unknown)
+			ticketed, firstID, rejectedT := o.ensureScopeExtensionTickets(p, discovered)
+			msgTail := ""
+			if len(ticketed) > 0 {
+				msgTail = fmt.Sprintf("范围外目标 %v 属立足点发现（expansion=auto-with-approval）——授权扩展工单 %s 已生成/在批，批准后自动登记资产并放行，请先继续其他动作", ticketed, firstID)
 			}
-			return true, fmt.Sprintf("strict_scope=true：范围外目标 %v 属立足点发现（expansion=auto-with-approval）——授权扩展工单 %s 已生成/在批，批准后自动登记资产并放行，请先继续其他动作。", discovered, ticketID)
+			if len(rejectedT) > 0 {
+				// v7.8.1（修正⑧）：拒绝粘滞提示——被拒目标不再进入「已生成/在批」话术
+				if msgTail != "" {
+					msgTail += "；"
+				}
+				msgTail += fmt.Sprintf("目标 %v 的授权扩展工单此前已被拒绝——按工单口径维持「只记录不访问」，请勿重试访问；如确需放行请走 record_asset 人工登记（须附授权依据）", rejectedT)
+			}
+			if len(unknown) > 0 {
+				if msgTail != "" {
+					msgTail += "；"
+				}
+				msgTail += fmt.Sprintf("未发现目标 %v 维持拦截", unknown)
+			}
+			return true, "strict_scope=true：" + msgTail + "。"
 		}
 	}
 	return true, fmt.Sprintf("strict_scope=true：命令引用范围外目标 %v——已确定性拦截。"+
@@ -939,6 +1064,7 @@ func (o *Orchestrator) expansionMode(p *store.Project) string {
 
 // filterDiscoveredTargets v6.0.0：判定范围外目标是否属「立足点发现」——在证据链/发现库/时间线
 // 文本中出现过的 host/IP 才可走 expansion 通道（授权跟着发现走；凭空目标不可申请扩展）。
+// v7.8.1（授权扩展识别修正①②）：治理/人工操作回执不并入发现语料 + 边界约束匹配。
 func (o *Orchestrator) filterDiscoveredTargets(p *store.Project, targets []string) []string {
 	if len(targets) == 0 {
 		return nil
@@ -948,6 +1074,9 @@ func (o *Orchestrator) filterDiscoveredTargets(p *store.Project, targets []strin
 		for i, e := range evs {
 			if i >= 400 {
 				break // 扫描上限：防超大证据链拖慢逐命令校验
+			}
+			if isGovernanceReceipt(e) {
+				continue // v7.8.1 修正①：回执 Input 含命令原文，并入即自反馈误识别（见函数注释）
 			}
 			sb.WriteString(e.Input + "\n" + e.Output + "\n")
 		}
@@ -968,11 +1097,55 @@ func (o *Orchestrator) filterDiscoveredTargets(p *store.Project, targets []strin
 	hay := strings.ToLower(sb.String())
 	out := []string{}
 	for _, t := range targets {
-		if t != "" && strings.Contains(hay, strings.ToLower(t)) {
+		if t != "" && discoveredHitBoundary(hay, strings.ToLower(t)) {
 			out = append(out, t)
 		}
 	}
 	return out
+}
+
+// isGovernanceReceipt v7.8.1（授权扩展识别修正①）：证据记录是否为治理/人工操作回执——
+// 各确定性门拦截留证（ApprovedBy=<name>-gate：scope/profile/registration/shadow/batch-scope/
+// roe-*/s1-*/authorization/engine-introspection）、人工拒绝（human-rejected）、人工一次性放行
+// （roe-ack）的 Input 都是命令原文，可能携带范围外目标，但本质是治理动作产物而非立足点发现。
+// 此前并入发现语料造成自反馈：目标首次被拦（留证含目标）→ 次命中即被误判「立足点发现」自动
+// 生成授权扩展工单（实测 9.9.9.9 从未被立足点发现，首拦留证后次命中即开单）——「未发现目标
+// 维持硬拦」仅首命中成立，人工拒绝过的目标也翻脸成扩展候选。回执一律排除；误排方向
+// fail-closed（目标维持硬拦，可经 record_asset/scope_allowlist 人工放行，不会误开工单）。
+func isGovernanceReceipt(e *store.EvidenceRecord) bool {
+	if strings.HasSuffix(e.ApprovedBy, "-gate") {
+		return true
+	}
+	return e.ApprovedBy == "human-rejected" || e.ApprovedBy == "roe-ack"
+}
+
+// discoveredHitBoundary v7.8.1（授权扩展识别修正②）：发现匹配的边界约束——语料（已小写化）
+// 中存在一处命中、且命中位置前后均非 host 连续字符（[a-z0-9._-]）才算该目标真实出现。
+// 纯 strings.Contains 子串误判：证据 172.33.0.40 会验证从未出现的 172.33.0.4（实测凭空目标
+// 误开工单）、sub.evil.com 会验证 evil.com。收紧方向：宁可不开工单维持硬拦（漏判可经
+// record_asset/scope_allowlist 人工放行），不可凭子串误判放行凭空目标。
+func discoveredHitBoundary(hay, needle string) bool {
+	if needle == "" {
+		return false // v7.8.1 防御性护栏：空 needle 语义未定义（调用方已过滤，双保险防误真）
+	}
+	isHostByte := func(c byte) bool {
+		return c == '.' || c == '-' || c == '_' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+	}
+	start := 0
+	for {
+		i := strings.Index(hay[start:], needle)
+		if i < 0 {
+			return false
+		}
+		idx := start + i
+		beforeOK := idx == 0 || !isHostByte(hay[idx-1])
+		end := idx + len(needle)
+		afterOK := end >= len(hay) || !isHostByte(hay[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = idx + 1
+	}
 }
 
 // subsetDiff 返回 targets 中不在 subset 里的项（保持原序）。
@@ -990,21 +1163,60 @@ func subsetDiff(targets, subset []string) []string {
 	return out
 }
 
+// dedupeStrings v7.8.1（授权扩展识别修正③）：保序去重——范围门 bad 列表同时供拦截/工单
+// 消息与工单目标遍历消费，重复项只制造噪音（实测 [9.9.9.9 9.9.9.9]）。
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// isIPv6Body v7.8.1（补强⑥）：括号内 IPv6 体复核——已小写的纯十六进制/冒号且 ≥2 冒号
+// （IPv6 最短形 "::" 亦含 2 冒号；数组下标 [0] 零冒号、切片 [1:2] 单冒号、十六进制词
+// [abc] 零冒号均被排除，不产生误报目标）。
+func isIPv6Body(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == ':') {
+			return false
+		}
+	}
+	return strings.Count(s, ":") >= 2
+}
+
 // ensureScopeExtensionTickets v6.0.0：为目标生成《授权扩展工单》（每目标一张，幂等——已有
 // pending 工单直接复用）。批准回调 ApplyScopeExtension 登记资产 → scopeGate 白名单自动纳入。
-func (o *Orchestrator) ensureScopeExtensionTickets(p *store.Project, targets []string) string {
-	first := ""
+// v7.8.1（授权扩展识别修正⑧）：拒绝粘滞——工单文案承诺「拒绝则该目标维持只记录不访问」，
+// 此前仅查重 pending，人工拒绝后次命中立即重开新单绕过拒绝（实测语义翻脸）。返回：
+// ticketed=本次应走「已生成/在批」话术的目标（新建或复用 pending）；rejected=已有被拒工单、
+// 按粘滞口径不再开单的目标；firstID=新建首张工单 ID（无新建时为占位提示）。
+func (o *Orchestrator) ensureScopeExtensionTickets(p *store.Project, targets []string) (ticketed []string, firstID string, rejected []string) {
 	for _, t := range targets {
-		dup := false
+		pendingDup, rejectedDup := false, false
 		if aps, err := o.store.ListApprovals(p.ID); err == nil {
 			for _, ap := range aps {
-				if ap.Kind == "scope_extension" && ap.Target == t && ap.Status == "pending" {
-					dup = true
-					break
+				if ap.Kind != "scope_extension" || ap.Target != t {
+					continue
+				}
+				if ap.Status == "pending" {
+					pendingDup = true
+				} else if ap.Status == "rejected" {
+					rejectedDup = true
 				}
 			}
 		}
-		if dup {
+		if pendingDup {
+			ticketed = append(ticketed, t)
+			continue
+		}
+		if rejectedDup {
+			rejected = append(rejected, t)
 			continue
 		}
 		ap := &store.Approval{
@@ -1013,17 +1225,22 @@ func (o *Orchestrator) ensureScopeExtensionTickets(p *store.Project, targets []s
 			Action: fmt.Sprintf("【授权扩展】允许访问范围外目标 %s（expansion=auto-with-approval；该目标已在立足点发现证据中出现）。批准即登记资产并放行后续访问；拒绝则该目标维持「只记录不访问」。", t),
 		}
 		if id, err := o.store.AddApproval(ap); err == nil {
-			o.bus.Publish(p.ID, "approval", ap)
+			// v7.8.1（⑮）：确定性门内 WS 广播 nil-bus 防护——同 v6.6.0 o.log 加固理由：
+			// 测试装配/部分构造场景 bus 缺失不得 SIGSEGV，落库与工单生成已先行完成。
+			if o.bus != nil {
+				o.bus.Publish(p.ID, "approval", ap)
+			}
 			o.log(p, "", fmt.Sprintf("🎫 已生成授权扩展工单 %s：目标 %s（批准后自动登记资产放行）", id, t))
-			if first == "" {
-				first = id
+			if firstID == "" {
+				firstID = id
 			}
 		}
+		ticketed = append(ticketed, t)
 	}
-	if first == "" {
-		first = "(已有在批工单)"
+	if firstID == "" {
+		firstID = "(已有在批工单)"
 	}
-	return first
+	return ticketed, firstID, rejected
 }
 
 // ApplyScopeExtension v6.0.0：授权扩展工单批准回调——目标登记资产台账（scopeGate 白名单
@@ -1048,7 +1265,10 @@ func (o *Orchestrator) ApplyScopeExtension(projectID, target string) error {
 		return err
 	}
 	o.log(p, "", fmt.Sprintf("🔓 授权扩展生效：目标 %s 已登记资产，后续访问不再被范围门拦截", target))
-	o.bus.Publish(p.ID, "project", p)
+	// v7.8.1（⑮）：批准回调同口径 nil-bus 防护（登记已落库，广播失败不回滚授权）
+	if o.bus != nil {
+		o.bus.Publish(p.ID, "project", p)
+	}
 	return nil
 }
 
@@ -3450,6 +3670,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, p *store.Project, stageID s
 			//（收敛 idle 累积→预算让渡认证/越权/注入/逻辑高价值族）；vulnerable 在任何类都是
 			// 产出（上行分支已计）。仅记账引导，不拦截——合规模式（probe_tiering=false）回旧口径。
 			o.log(p, stageID, fmt.Sprintf("🧭 基线类一轮口径（v7.7.1 红队模式）：%s 已达基线探针深度，深化不再计产出——预算让渡认证/越权/注入/逻辑高价值族（合规模式设 probe_tiering=false）", entry.VulnClass))
+		} else if o.baselineTierRefHint(entry) {
+			// v7.8.0 优化④：基线类语义但未引用 C-xx——回执附一行引用提醒（同单元只提醒一次，
+			// 防抖：不拦截不重复）。引用后基线降档机制对合规类普遍生效。
+			o.log(p, stageID, fmt.Sprintf("💡 该单元属基线类（%s）——请在 VulnClass 或 Endpoint 引用 C-24/C-25 编号以启用降档口径", entry.VulnClass))
 		}
 		return fmt.Sprintf("覆盖矩阵已更新（该单元累计测试 %d 次）: %s | %s | %s → %s%s", entry.Count, entry.Endpoint, entry.VulnClass, entry.Param, entry.Status, downgraded)
 	case "search_memory": // 记忆检索（pentagi/VulnBot 简化版：关键词扫描）
@@ -4341,7 +4565,7 @@ func (o *Orchestrator) toolRunCommand(ctx context.Context, p *store.Project, sta
 	risk := o.exec.ClassifyRisk(command)
 	if risk == tools.Forbidden {
 		o.log(p, stageID, "⛔ 拒绝破坏性命令（红线）: "+truncateText(command, 120))
-		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: command, Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk})
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: command, Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk, ApprovedBy: "forbidden-gate"})
 		return "拒绝执行：该命令命中破坏性操作禁令。请改用最小影响方式。"
 	}
 	approvedBy := "auto"
@@ -4452,7 +4676,7 @@ func (o *Orchestrator) toolRunAsync(ctx context.Context, p *store.Project, stage
 	risk := o.exec.ClassifyRisk(command)
 	if risk == tools.Forbidden {
 		o.log(p, stageID, "⛔ 拒绝破坏性命令（红线，后台通道同样适用）: "+truncateText(command, 120))
-		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + maskSensitiveText(command), Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk})
+		_, _ = o.store.AddEvidence(&store.EvidenceRecord{ProjectID: p.ID, Stage: stageID, Type: "command", Input: "[async] " + maskSensitiveText(command), Output: "被护栏拒绝（破坏性操作禁令）", Risk: risk, ApprovedBy: "forbidden-gate"})
 		return "拒绝执行：该命令命中破坏性操作禁令。请改用最小影响方式。"
 	}
 	approvedBy := "auto"
@@ -6828,6 +7052,42 @@ func (o *Orchestrator) baselineTierUnit(entry *store.CoverageEntry) bool {
 		}
 	}
 	return false
+}
+
+// baselineTierRefHint v7.8.0 优化④：基线类语义但未引用 C-xx 编号 → 提醒（防抖：同单元只一次）。
+// 通用性：关键词清单从 BaselineTierClasses 派生（可配置），对清单内任何类自动生效。
+func (o *Orchestrator) baselineTierRefHint(entry *store.CoverageEntry) bool {
+	if !config.FlagOrDefault(o.cfg.Engine.ProbeTiering, true) || entry == nil || entry.Count > 1 {
+		return false // 首轮才提醒（二轮起已是降档口径）
+	}
+	hay := entry.VulnClass + " " + entry.Endpoint + " " + entry.Param
+	hits := false
+	for _, cls := range o.cfg.Engine.BaselineTierClasses {
+		// 关键词语义匹配（TLS/安全头/邮件安全——从类编号派生的中文关键词 + 编号本身）
+		if cls != "" && strings.Contains(hay, cls) {
+			hits = true
+			break
+		}
+	}
+	if !hits {
+		return false
+	}
+	// 已引用 C 编号 → 不需要提醒
+	for _, cls := range o.cfg.Engine.BaselineTierClasses {
+		if strings.Contains(hay, cls) {
+			return false
+		}
+	}
+	// 防抖：同单元只提醒一次
+	key := entry.ProjectID + "|" + entry.Endpoint + "|" + entry.VulnClass
+	if o.blHintSeen == nil {
+		o.blHintSeen = map[string]bool{}
+	}
+	if o.blHintSeen[key] {
+		return false
+	}
+	o.blHintSeen[key] = true
+	return true
 }
 
 // convNote v7.7.0 P1：产出事件计数（收敛信号源）——五类产出清零 idle：record_finding

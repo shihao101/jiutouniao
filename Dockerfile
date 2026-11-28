@@ -128,6 +128,8 @@ RUN chmod +x /usr/local/bin/strip-fcaps && python3 /usr/local/bin/strip-fcaps
 COPY tools-extra/sqlmap /opt/tools/sqlmap
 COPY tools-extra/authz-diff.py /opt/tools/authz-diff.py
 COPY tools-extra/subdomain-takeover.py /opt/tools/subdomain-takeover.py
+COPY tools-extra/specb2-sandbox.py /opt/tools/specb2-sandbox.py
+COPY tools-extra/specb2-ast-split.py /opt/tools/specb2-ast-split.py
 COPY tools-extra/captcha-ocr.py /opt/tools/captcha-ocr.py
 COPY tools-extra/subdomain-dict-probe.py /opt/tools/subdomain-dict-probe.py
 COPY tools-extra/primitive-graph.py /opt/tools/primitive-graph.py
